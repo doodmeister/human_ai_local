@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_211741_371686",
+  "content": {
+    "interaction": {
+      "input": "What is the weather like today? I need to know for planning.",
+      "response": "I understand you said: 'What is the weather like today? I need to know for planning.'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 21:17:41.371686"
+    },
+    "cognitive_state": {
+      "attention_score": 0.5405865539624933,
+      "fatigue_level": 0.020000000000000004,
+      "relevance": 0.7288699180882879
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T21:17:41.371686",
+  "last_access": "2025-06-03T21:17:41.371686",
+  "access_count": 0,
+  "importance": 0.7288699180882879,
+  "emotional_valence": 0.8,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 0
+}
