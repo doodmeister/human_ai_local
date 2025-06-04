@@ -91,7 +91,7 @@ class AttentionMechanism:
         novelty: float = 0.0,
         priority: float = 0.5,
         effort_required: float = 0.5
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
         Allocate attention to a stimulus
         
@@ -163,7 +163,7 @@ class AttentionMechanism:
             "items_in_focus": len(self.focused_items)
         }
     
-    def update_attention_state(self, time_delta_seconds: float = None) -> Dict[str, Any]:
+    def update_attention_state(self, time_delta_seconds: Optional[float] = None) -> Dict[str, Any]:
         """
         Update attention state over time
         
