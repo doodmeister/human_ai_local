@@ -258,6 +258,15 @@ class ShortTermMemory:
             "newest_memory": max(times)
         }
     
+    def get_all_items(self) -> Dict[str, MemoryItem]:
+        """
+        Get all memory items in STM
+        
+        Returns:
+            Dictionary of memory_id -> MemoryItem
+        """
+        return self.items.copy()
+    
     def _evict_least_important(self) -> bool:
         """
         Evict the least important memory item
@@ -293,6 +302,26 @@ class ShortTermMemory:
             self.access_order.remove(memory_id)
         self.access_order.append(memory_id)
     
+    def remove_item(self, memory_id: str) -> bool:
+        """
+        Remove a specific memory item from STM
+        
+        Args:
+            memory_id: ID of the memory to remove
+            
+        Returns:
+            True if item was removed, False if not found
+        """
+        if memory_id not in self.items:
+            return False
+        
+        del self.items[memory_id]
+        if memory_id in self.access_order:
+            self.access_order.remove(memory_id)
+        
+        logger.debug(f"Removed memory {memory_id} from STM")
+        return True
+
     def clear(self):
         """Clear all memories from STM"""
         self.items.clear()

@@ -193,12 +193,11 @@ class MemorySystem:
             )
             for record, relevance in ltm_results:
                 results.append((record, relevance, "ltm"))
-        
-        # Sort by relevance
+          # Sort by relevance
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:max_results]
     
-    def consolidate_memories(self, force: bool = False) -> Dict[str, int]:
+    def consolidate_memories(self, force: bool = False) -> Dict[str, Any]:
         """
         Consolidate memories from STM to LTM
         
@@ -241,7 +240,10 @@ class MemorySystem:
     
     def enter_dream_state(self, duration_minutes: int = 5) -> Dict[str, Any]:
         """
-        Enter dream-state consolidation mode
+        Legacy dream-state consolidation mode (basic version)
+        
+        Note: This is kept for backward compatibility. 
+        For advanced dream processing, use the DreamProcessor class.
         
         Args:
             duration_minutes: Duration of dream processing
@@ -249,7 +251,8 @@ class MemorySystem:
         Returns:
             Dream state processing results
         """
-        logger.info(f"Entering dream state for {duration_minutes} minutes")
+        logger.info(f"Entering basic dream state for {duration_minutes} minutes")
+        logger.warning("Using legacy dream state - consider using DreamProcessor for advanced features")
         
         # Perform intensive consolidation
         consolidation_results = self.consolidate_memories(force=True)

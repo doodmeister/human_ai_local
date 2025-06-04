@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_221220_321974",
+  "content": {
+    "interaction": {
+      "input": "The weather is really nice today, perfect for a walk.",
+      "response": "I understand you said: 'The weather is really nice today, perfect for a walk.'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 22:12:20.321974"
+    },
+    "cognitive_state": {
+      "attention_score": 0.5373715481893578,
+      "fatigue_level": 0.015000000000000003,
+      "relevance": 0.8073315059511539
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T22:12:20.321974",
+  "last_access": "2025-06-03T22:12:20.881939",
+  "access_count": 1,
+  "importance": 0.9073315059511539,
+  "emotional_valence": 0.5,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 1
+}

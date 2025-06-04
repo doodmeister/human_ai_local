@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_220800_422438",
+  "content": {
+    "interaction": {
+      "input": "This is a crucial breakthrough in our AI research project.",
+      "response": "I understand you said: 'This is a crucial breakthrough in our AI research project.'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 22:08:00.422438"
+    },
+    "cognitive_state": {
+      "attention_score": 0.28156777515118775,
+      "fatigue_level": 0.03997486000000001,
+      "relevance": 0.6507860553902407
+    }
+  },
+  "memory_type": "consolidated_episodic",
+  "encoding_time": "2025-06-03T22:08:00.433397",
+  "last_access": "2025-06-03T22:08:00.433397",
+  "access_count": 0,
+  "importance": 0.5103143990033185,
+  "emotional_valence": 0.5,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "dream_consolidated",
+    "rem"
+  ],
+  "associations": [],
+  "consolidation_count": 0
+}

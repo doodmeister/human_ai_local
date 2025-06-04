@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_221220_759033",
+  "content": {
+    "interaction": {
+      "input": "The coffee at the new cafe downtown is excellent.",
+      "response": "I understand you said: 'The coffee at the new cafe downtown is excellent.'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 22:12:20.759033"
+    },
+    "cognitive_state": {
+      "attention_score": 0.3188552076424393,
+      "fatigue_level": 0.035,
+      "relevance": 0.7117567752755228
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T22:12:20.759033",
+  "last_access": "2025-06-03T22:12:20.886866",
+  "access_count": 1,
+  "importance": 0.8117567752755228,
+  "emotional_valence": 0.5,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 1
+}

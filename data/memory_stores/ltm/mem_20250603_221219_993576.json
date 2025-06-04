@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_221219_993576",
+  "content": {
+    "interaction": {
+      "input": "My name is Alice and I work as a data scientist.",
+      "response": "I understand you said: 'My name is Alice and I work as a data scientist.'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 22:12:19.993576"
+    },
+    "cognitive_state": {
+      "attention_score": 0.7199096774574929,
+      "fatigue_level": 0.0,
+      "relevance": 0.7497491040485915
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T22:12:19.994570",
+  "last_access": "2025-06-03T22:12:20.884872",
+  "access_count": 1,
+  "importance": 0.8497491040485915,
+  "emotional_valence": 0.5,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 1
+}

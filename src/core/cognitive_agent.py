@@ -9,6 +9,7 @@ from .config import CognitiveConfig
 from ..memory.memory_system import MemorySystem
 from ..attention.attention_mechanism import AttentionMechanism
 from ..processing.sensory import SensoryInterface, SensoryProcessor
+from ..processing.dream import DreamProcessor
 
 class CognitiveAgent:
     """
@@ -56,11 +57,16 @@ class CognitiveAgent:
             max_attention_items=self.config.attention.max_attention_items,
             salience_threshold=self.config.attention.salience_threshold,
             fatigue_decay_rate=self.config.attention.fatigue_decay_rate,
-            attention_recovery_rate=self.config.attention.attention_recovery_rate        )
-
-        # Sensory processing interface
+            attention_recovery_rate=self.config.attention.attention_recovery_rate        )        # Sensory processing interface
         self.sensory_processor = SensoryProcessor()
         self.sensory_interface = SensoryInterface(self.sensory_processor)
+
+        # Dream processor (initialized after memory system)
+        self.dream_processor = DreamProcessor(
+            memory_system=self.memory,
+            enable_scheduling=True,
+            consolidation_threshold=0.6
+        )
 
         print("Cognitive components initialized")
     
@@ -326,20 +332,20 @@ class CognitiveAgent:
             "sensory_processing": sensory_stats,
             "cognitive_integration": {
                 "attention_memory_sync": len(self.attention_focus) > 0 and memory_status["stm"]["size"] > 0,
-                "processing_capacity": attention_status.get("available_capacity", 0.0),
-                "overall_efficiency": 1.0 - self.current_fatigue,
+                "processing_capacity": attention_status.get("available_capacity", 0.0),                "overall_efficiency": 1.0 - self.current_fatigue,
                 "sensory_efficiency": 1.0 - (sensory_stats.get("filtered_count", 0) / max(1, sensory_stats.get("total_processed", 1)))
             }
         }
     
-    async def enter_dream_state(self):
+    async def enter_dream_state(self, cycle_type: str = "deep"):
         """Enter dream-state processing for memory consolidation"""
-        print("Entering dream state for memory consolidation...")
-          # Use memory system's dream state processing
-        dream_results = self.memory.enter_dream_state(duration_minutes=5)
+        print(f"Entering {cycle_type} dream state for memory consolidation...")
+        
+        # Use the advanced dream processor
+        dream_results = await self.dream_processor.enter_dream_cycle(cycle_type)
         
         # Also allow attention to rest during dream state
-        attention_rest = self.attention.rest_attention(duration_minutes=5)
+        attention_rest = self.attention.rest_attention(duration_minutes=dream_results.get("actual_duration", 5))
         
         print(f"Dream state results: {dream_results}")
         print(f"Attention rest results: {attention_rest}")
@@ -347,7 +353,8 @@ class CognitiveAgent:
         # Synchronize fatigue state
         self.current_fatigue = self.attention.current_fatigue
         
-        print("Dream state processing completed")
+        print("Advanced dream state processing completed")
+        return dream_results
     
     def take_cognitive_break(self, duration_minutes: float = 1.0) -> Dict[str, Any]:
         """
@@ -378,9 +385,24 @@ class CognitiveAgent:
             "recovery_effective": rest_results["fatigue_reduction"] > 0.05
         }
     
+    def force_dream_cycle(self, cycle_type: str = "deep"):
+        """Force an immediate dream cycle"""
+        self.dream_processor.force_dream_cycle(cycle_type)
+    
+    def get_dream_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive dream processing statistics"""
+        return self.dream_processor.get_dream_statistics()
+    
+    def is_dreaming(self) -> bool:
+        """Check if the agent is currently in a dream state"""
+        return self.dream_processor.is_dreaming
+    
     async def shutdown(self):
         """Gracefully shutdown the cognitive agent"""
         print("Shutting down cognitive agent...")
+        
+        # Shutdown dream processor
+        self.dream_processor.shutdown()
         
         # Save any pending memories
         # Close connections

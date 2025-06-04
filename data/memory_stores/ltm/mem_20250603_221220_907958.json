@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_221220_907958",
+  "content": {
+    "interaction": {
+      "input": "This is a crucial breakthrough in our AI research project.",
+      "response": "I understand you said: 'This is a crucial breakthrough in our AI research project.'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 22:12:20.907958"
+    },
+    "cognitive_state": {
+      "attention_score": 0.2971504723544157,
+      "fatigue_level": 0.039953180000000005,
+      "relevance": 0.7349787477147856
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T22:12:20.907958",
+  "last_access": "2025-06-03T22:12:20.934443",
+  "access_count": 1,
+  "importance": 0.8349787477147855,
+  "emotional_valence": 0.5,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 1
+}

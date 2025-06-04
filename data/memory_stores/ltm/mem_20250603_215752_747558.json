@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_215752_747558",
+  "content": {
+    "interaction": {
+      "input": "This is a very long message with lots of words that should have higher cognitive load requirements",
+      "response": "I understand you said: 'This is a very long message with lots of words that should have higher cognitive load requirements'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 21:57:52.747558"
+    },
+    "cognitive_state": {
+      "attention_score": 0.7195141663574873,
+      "fatigue_level": 0.005000000000000001,
+      "relevance": 1.0
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T21:57:52.747558",
+  "last_access": "2025-06-03T21:57:52.747558",
+  "access_count": 0,
+  "importance": 1.0,
+  "emotional_valence": 0.5,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 0
+}
