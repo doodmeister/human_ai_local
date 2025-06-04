@@ -357,11 +357,19 @@ class DreamProcessor:
                 X_dense = X.toarray()  # type: ignore
             else:
                 X_dense = X
-            
-            # Apply HDBSCAN clustering if available
+              # Apply HDBSCAN clustering if available
             if HDBSCAN_AVAILABLE and HDBSCAN is not None:
-                clusterer = HDBSCAN(min_cluster_size=self.cluster_min_size, metric='cosine')
-                cluster_labels = clusterer.fit_predict(X_dense)
+                try:
+                    clusterer = HDBSCAN(min_cluster_size=self.cluster_min_size, metric='cosine')
+                    cluster_labels = clusterer.fit_predict(X_dense)
+                except ValueError as e:
+                    if "Unrecognized metric" in str(e):
+                        # Fallback to euclidean metric (always supported)
+                        logger.debug("Cosine metric not supported, falling back to euclidean")
+                        clusterer = HDBSCAN(min_cluster_size=self.cluster_min_size, metric='euclidean')
+                        cluster_labels = clusterer.fit_predict(X_dense)
+                    else:
+                        raise e
             else:
                 # fallback: all in one cluster (or implement another strategy)
                 cluster_labels = [0] * len(candidates)
