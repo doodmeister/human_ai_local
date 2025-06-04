@@ -528,19 +528,36 @@ class DreamProcessor:
             # Create temporal associations based on REM intensity
             if cycle_config.cycle_type == 'rem':
                 for i, candidate1 in enumerate(candidates):
-                    for candidate2 in candidates[i+1:]:
-                        # Check temporal proximity
+                    for candidate2 in candidates[i+1:]:                        # Check temporal proximity
                         stm_item1 = self.memory_system.stm.items.get(candidate1.memory_id)
                         stm_item2 = self.memory_system.stm.items.get(candidate2.memory_id)
                         
                         if stm_item1 and stm_item2:
                             time_diff = abs((stm_item1.encoding_time - stm_item2.encoding_time).total_seconds())
                             
-                            # Create association if within 1 hour and high emotional salience
-                            if (time_diff < 3600 and 
-                                candidate1.emotional_salience > 0.5 and 
-                                candidate2.emotional_salience > 0.5):
-                                
+                            # Enhanced association criteria with multiple fallback conditions
+                            should_associate = False
+                            
+                            # Criteria 1: Temporal proximity (within 2 hours)
+                            if time_diff < 7200:  # 2 hours
+                                should_associate = True
+                            
+                            # Criteria 2: High emotional salience (lowered threshold)
+                            if (candidate1.emotional_salience >= 0.3 and 
+                                candidate2.emotional_salience >= 0.3):
+                                should_associate = True
+                            
+                            # Criteria 3: Similar importance scores
+                            importance_diff = abs(candidate1.importance_score - candidate2.importance_score)
+                            if importance_diff < 0.3:  # Similar importance
+                                should_associate = True
+                            
+                            # Criteria 4: Both have high importance
+                            if (candidate1.importance_score > 0.6 and 
+                                candidate2.importance_score > 0.6):
+                                should_associate = True
+                            
+                            if should_associate:
                                 if candidate2.memory_id not in stm_item1.associations:
                                     stm_item1.associations.append(candidate2.memory_id)
                                     associations_created += 1
