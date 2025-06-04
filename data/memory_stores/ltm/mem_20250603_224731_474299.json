@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_224731_474299",
+  "content": {
+    "interaction": {
+      "input": "URGENT! Critical system alert requiring immediate attention!",
+      "response": "I understand you said: 'URGENT! Critical system alert requiring immediate attention!'. This is a placeholder response (I found 3 related memories).",
+      "timestamp": "2025-06-03 22:47:31.474299"
+    },
+    "cognitive_state": {
+      "attention_score": 0.8998904825724161,
+      "fatigue_level": 0.004986665000000001,
+      "relevance": 0.666930539379597
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T22:47:31.474299",
+  "last_access": "2025-06-03T22:47:31.474299",
+  "access_count": 0,
+  "importance": 0.666930539379597,
+  "emotional_valence": 0.8,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 0
+}
