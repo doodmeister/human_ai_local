@@ -4,6 +4,8 @@ Core Cognitive Agent - Central orchestrator for the cognitive architecture
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import asyncio
+import torch
+import numpy as np
 
 from .config import CognitiveConfig
 from ..memory.memory_system import MemorySystem
@@ -61,11 +63,24 @@ class CognitiveAgent:
         self.sensory_processor = SensoryProcessor()
         self.sensory_interface = SensoryInterface(self.sensory_processor)
 
-        # Dream processor (initialized after memory system)
+        # Neural integration manager (DPAD)
+        try:
+            from ..processing.neural import NeuralIntegrationManager
+            self.neural_integration = NeuralIntegrationManager(
+                cognitive_config=self.config,
+                model_save_path="./data/models/dpad"
+            )
+            print("✓ Neural integration (DPAD) initialized")
+        except ImportError as e:
+            print(f"⚠ Neural integration disabled: {e}")
+            self.neural_integration = None
+
+        # Dream processor (initialized after memory system and neural integration)
         self.dream_processor = DreamProcessor(
             memory_system=self.memory,
             enable_scheduling=True,
-            consolidation_threshold=0.6
+            consolidation_threshold=0.6,
+            neural_integration_manager=self.neural_integration
         )
 
         print("Cognitive components initialized")
@@ -95,9 +110,8 @@ class CognitiveAgent:
             
             # Step 2: Memory retrieval and context building
             memory_context = await self._retrieve_memory_context(processed_input)
-            
-            # Step 3: Attention allocation
-            attention_scores = self._calculate_attention_allocation(processed_input, memory_context)
+              # Step 3: Attention allocation
+            attention_scores = await self._calculate_attention_allocation(processed_input, memory_context)
             
             # Step 4: Response generation (placeholder for LLM integration)
             response = await self._generate_response(processed_input, memory_context, attention_scores)
@@ -172,21 +186,19 @@ class CognitiveAgent:
                         "content": memory_obj.content,
                         "source": "LTM",
                         "relevance": relevance,
-                        "timestamp": memory_obj.encoding_time
-                    })
+                        "timestamp": memory_obj.encoding_time                    })
             
             return context_memories
         except Exception as e:
             print(f"Error retrieving memory context: {e}")
             return []
     
-    def _calculate_attention_allocation(
+    async def _calculate_attention_allocation(
         self, 
         processed_input: Dict[str, Any], 
-        memory_context: List[Dict[str, Any]]
-    ) -> Dict[str, float]:
+        memory_context: List[Dict[str, Any]]    ) -> Dict[str, float]:
         """Calculate attention scores using AttentionMechanism"""
-          # Calculate base salience factors using sensory processing results
+        # Calculate base salience factors using sensory processing results
         relevance = processed_input.get("relevance_score", 0.5)  # From sensory processing
         novelty = processed_input.get("entropy_score", 0.6)  # Use entropy as novelty proxy
         emotional_salience = processed_input.get("salience_score", 0.0)  # From sensory processing
@@ -206,8 +218,7 @@ class CognitiveAgent:
         
         # Estimate cognitive effort required
         effort_required = 0.5  # Default effort
-        if len(processed_input.get("raw_input", "")) > 100:
-            effort_required = 0.7  # Longer inputs require more effort
+        if len(processed_input.get("raw_input", "")) > 100:            effort_required = 0.7  # Longer inputs require more effort
         
         # Allocate attention using the attention mechanism
         attention_result = self.attention.allocate_attention(
@@ -216,22 +227,27 @@ class CognitiveAgent:
             salience=base_salience,
             novelty=novelty,
             priority=priority,
-            effort_required=effort_required
+            effort_required=effort_required        )
+        
+        # Neural attention enhancement via DPAD
+        enhanced_attention = await self._enhance_attention_with_neural(
+            processed_input, attention_result, base_salience, novelty
         )
         
         # Update attention state
         self.attention.update_attention_state()
         
-        # Return comprehensive attention scores
+        # Return comprehensive attention scores (using enhanced attention)
         return {
-            "overall_attention": attention_result.get("attention_score", 0.5),
+            "overall_attention": enhanced_attention.get("attention_score", 0.5),
             "relevance": relevance,
-            "novelty": novelty,
+            "novelty": enhanced_attention.get("neural_novelty", novelty),
             "emotional_salience": emotional_salience,
-            "allocated": attention_result.get("allocated", False),
-            "cognitive_load": attention_result.get("current_load", 0.0),
-            "fatigue_level": attention_result.get("fatigue_level", 0.0),
-            "items_in_focus": attention_result.get("items_in_focus", 0)
+            "allocated": enhanced_attention.get("allocated", False),
+            "cognitive_load": enhanced_attention.get("current_load", 0.0),
+            "fatigue_level": enhanced_attention.get("fatigue_level", 0.0),
+            "items_in_focus": enhanced_attention.get("items_in_focus", 0),            "neural_enhanced": enhanced_attention.get("neural_enhanced", False),
+            "neural_enhancement": enhanced_attention.get("neural_enhancement", 0.0)
         }
     
     async def _generate_response(
@@ -409,3 +425,83 @@ class CognitiveAgent:
         # Clean up resources
         
         print("Cognitive agent shutdown complete")
+    
+    async def _enhance_attention_with_neural(
+        self,
+        processed_input: Dict[str, Any],
+        attention_result: Dict[str, Any],
+        base_salience: float,
+        novelty: float
+    ) -> Dict[str, Any]:
+        """
+        Enhance attention allocation using DPAD neural network predictions
+        
+        Args:
+            processed_input: Processed sensory input
+            attention_result: Base attention allocation result
+            base_salience: Base salience score
+            novelty: Novelty score
+        
+        Returns:
+            Enhanced attention result
+        """
+        if not self.neural_integration:
+            return attention_result  # Return original if neural integration unavailable
+        
+        try:
+            # Get embedding from processed input
+            if 'embedding' not in processed_input:
+                return attention_result
+            
+            embedding = processed_input['embedding']
+            
+            # Convert to torch tensor if needed
+            if isinstance(embedding, np.ndarray):
+                embedding_tensor = torch.from_numpy(embedding).float().unsqueeze(0)  # Add batch dim
+            else:
+                embedding_tensor = torch.tensor(embedding, dtype=torch.float32).unsqueeze(0)
+            
+            # Create attention scores tensor
+            attention_scores = torch.tensor([base_salience], dtype=torch.float32)
+            
+            # Process through neural network
+            neural_result = await self.neural_integration.process_attention_update(
+                embedding_tensor,
+                attention_scores,
+                salience_scores=torch.tensor([novelty], dtype=torch.float32)
+            )
+            
+            if 'error' not in neural_result:
+                # Extract neural predictions
+                novelty_scores = neural_result.get('novelty_scores', torch.tensor([novelty]))
+                processing_quality = neural_result.get('processing_quality', 1.0)
+                
+                # Enhance attention scores with neural predictions
+                if len(novelty_scores) > 0:
+                    enhanced_novelty = float(novelty_scores[0])
+                    
+                    # Calculate enhancement factor
+                    neural_enhancement = min(0.2, enhanced_novelty * 0.1)  # Cap at 20% boost
+                    
+                    # Apply enhancement to attention result
+                    enhanced_attention_score = min(1.0, 
+                        attention_result.get("attention_score", 0.5) + neural_enhancement
+                    )
+                    
+                    # Update attention result
+                    attention_result.update({
+                        "attention_score": enhanced_attention_score,
+                        "neural_enhancement": neural_enhancement,
+                        "neural_novelty": enhanced_novelty,
+                        "neural_processing_quality": processing_quality,
+                        "neural_enhanced": True
+                    })
+                    
+                    print(f"🧠 Neural attention enhancement: +{neural_enhancement:.3f} "
+                          f"(novelty: {enhanced_novelty:.3f})")
+                
+            return attention_result
+            
+        except Exception as e:
+            print(f"⚠ Neural attention enhancement error: {e}")
+            return attention_result  # Return original on error

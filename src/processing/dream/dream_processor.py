@@ -8,7 +8,7 @@ Features:
 - Scheduled consolidation cycles
 - Meta-cognitive memory analysis
 - Cluster-based memory organization
-- Neural network replay during dreams
+- DPAD neural network replay during dreams
 - Adaptive consolidation timing
 """
 
@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 import numpy as np
 from scipy.cluster.hierarchy import linkage, fcluster
+import torch
 
 # Try to import HDBSCAN from hdbscan library, fall back if not available
 try:
@@ -64,8 +65,8 @@ class DreamProcessor:
     
     Implements multiple types of sleep cycles with different consolidation strategies:
     - Light Sleep: Basic STM decay and maintenance
-    - Deep Sleep: Intensive memory consolidation and clustering
-    - REM Sleep: Creative associations and neural replay    """
+    - Deep Sleep: Intensive memory consolidation and clustering    - REM Sleep: Creative associations and neural replay
+    """
     
     def __init__(
         self,
@@ -73,7 +74,8 @@ class DreamProcessor:
         meta_cognition_engine=None,
         enable_scheduling: bool = True,
         consolidation_threshold: float = 0.6,
-        cluster_min_size: int = 2
+        cluster_min_size: int = 2,
+        neural_integration_manager=None
     ):
         """
         Initialize dream processor
@@ -84,9 +86,11 @@ class DreamProcessor:
             enable_scheduling: Enable automatic scheduling
             consolidation_threshold: Minimum score for consolidation
             cluster_min_size: Minimum cluster size for grouping
+            neural_integration_manager: Neural integration manager for DPAD replay
         """
         self.memory_system = memory_system
         self.meta_cognition = meta_cognition_engine
+        self.neural_integration = neural_integration_manager
         self.enable_scheduling = enable_scheduling
         self.consolidation_threshold = consolidation_threshold
         self.cluster_min_size = cluster_min_size
@@ -579,10 +583,8 @@ class DreamProcessor:
                     
                     replay_results["memories_replayed"] += 1
                     replay_results["strength_increased"] += strength_boost
-            
-            # TODO: Integrate with DPAD neural network for actual replay
-            # This would involve feeding memory patterns back through the network
-            # during the dream cycle for reinforcement learning
+              # Integrate with DPAD neural network for actual replay
+            await self._dpad_neural_replay(candidates, cycle_config, replay_results)
             
             logger.debug(f"Neural replay completed: {replay_results}")
         
@@ -590,6 +592,86 @@ class DreamProcessor:
             logger.error(f"Error in neural replay: {e}")
         
         return replay_results
+    
+    async def _dpad_neural_replay(
+        self,
+        candidates: List[ConsolidationCandidate],
+        cycle_config: DreamCycle,
+        replay_results: Dict[str, Any]
+    ) -> None:
+        """
+        Perform DPAD neural network replay during dream cycles
+        
+        Args:
+            candidates: Consolidation candidates
+            cycle_config: Dream cycle configuration
+            replay_results: Results dict to update
+        """
+        if not self.neural_integration:
+            logger.debug("Neural integration not available for DPAD replay")
+            return
+        
+        try:
+            # Extract memory embeddings and importance scores
+            memory_embeddings = []
+            importance_scores = []
+            
+            for candidate in candidates:
+                stm_item = self.memory_system.stm.items.get(candidate.memory_id)
+                if stm_item and hasattr(stm_item, 'embedding') and stm_item.embedding is not None:
+                    # Convert embedding to torch tensor
+                    if isinstance(stm_item.embedding, np.ndarray):
+                        embedding_tensor = torch.from_numpy(stm_item.embedding).float()
+                    else:
+                        # Assume it's already a tensor or convertible
+                        embedding_tensor = torch.tensor(stm_item.embedding, dtype=torch.float32)
+                    
+                    memory_embeddings.append(embedding_tensor)
+                    importance_scores.append(candidate.importance_score)
+            
+            if not memory_embeddings:
+                logger.debug("No embeddings available for DPAD neural replay")
+                return
+            
+            # Perform neural replay through DPAD network
+            neural_replay_results = await self.neural_integration.neural_memory_replay(
+                memory_embeddings,
+                importance_scores,
+                attention_context={
+                    'cycle_type': cycle_config.cycle_type,
+                    'replay_intensity': cycle_config.replay_intensity
+                }
+            )
+            
+            # Update replay results with neural network information
+            if 'error' not in neural_replay_results:
+                replay_results.update({
+                    'neural_replay_enabled': True,
+                    'neural_consolidation_strength': neural_replay_results.get('consolidation_strength', 0.0),
+                    'neural_reconstruction_quality': neural_replay_results.get('reconstruction_quality', 0.0),
+                    'neural_replayed_memories': neural_replay_results.get('replayed_memories', 0)
+                })
+                
+                # Apply consolidation effects back to memories
+                consolidation_strength = neural_replay_results.get('consolidation_strength', 0.0)
+                if consolidation_strength > 0.1:  # Threshold for meaningful consolidation
+                    for candidate in candidates:
+                        stm_item = self.memory_system.stm.items.get(candidate.memory_id)
+                        if stm_item:
+                            # Boost importance based on neural consolidation
+                            neural_boost = consolidation_strength * 0.1
+                            stm_item.importance = min(1.0, stm_item.importance + neural_boost)
+                            replay_results["strength_increased"] += neural_boost
+                
+                logger.debug(f"DPAD neural replay: {neural_replay_results.get('replayed_memories', 0)} memories, "
+                           f"quality: {neural_replay_results.get('reconstruction_quality', 0.0):.3f}")
+            else:
+                logger.warning(f"DPAD neural replay error: {neural_replay_results['error']}")
+                replay_results['neural_replay_error'] = neural_replay_results['error']
+                
+        except Exception as e:
+            logger.error(f"Error in DPAD neural replay: {e}")
+            replay_results['neural_replay_error'] = str(e)
     
     async def _dream_cleanup(self, cycle_config: DreamCycle) -> Dict[str, Any]:
         """

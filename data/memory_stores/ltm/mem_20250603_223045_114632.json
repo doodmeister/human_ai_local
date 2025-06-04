@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_223045_114632",
+  "content": {
+    "interaction": {
+      "input": "Machine learning is a subset of artificial intelligence",
+      "response": "I understand you said: 'Machine learning is a subset of artificial intelligence'. This is a placeholder response (I found 5 related memories).",
+      "timestamp": "2025-06-03 22:30:45.114632"
+    },
+    "cognitive_state": {
+      "attention_score": 0.8092376747237253,
+      "fatigue_level": 0.0,
+      "relevance": 0.47818546009115626
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T22:30:45.114632",
+  "last_access": "2025-06-03T22:30:45.114632",
+  "access_count": 0,
+  "importance": 0.47818546009115626,
+  "emotional_valence": 0.5,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 0
+}
