@@ -1,0 +1,189 @@
+# Human-AI Cognition Project Dependencies
+# Python 3.12+ Compatible
+
+# ========================================
+# CORE COGNITIVE ARCHITECTURE DEPENDENCIES
+# ========================================
+
+# LLM and AI Processing
+openai>=1.83.0
+transformers>=4.30.0
+
+# Vector Database and Memory Systems
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+
+# Neural Networks and Deep Learning
+torch>=2.7.0
+torchvision>=0.22.0
+torchaudio>=2.7.0
+
+# Mathematical and Scientific Computing
+numpy>=2.2.6
+scipy>=1.10.0
+pandas>=2.2.3
+
+# ========================================
+# MEMORY AND CLUSTERING SYSTEMS
+# ========================================
+
+# Advanced Clustering for Memory Consolidation
+hdbscan>=0.8.29
+scikit-learn>=1.6.1
+
+# Graph-based Semantic Processing
+networkx>=3.0
+
+# ========================================
+# SCHEDULING AND ASYNC PROCESSING
+# ========================================
+
+# Job Scheduling for Dream-State Processing
+schedule>=1.2.0
+apscheduler>=3.10.0
+
+# File System Monitoring
+watchdog>=3.0.0
+
+# Async Processing
+aiofiles>=23.0.0
+
+# ========================================
+# SPECIALIZED NEURAL ARCHITECTURES
+# ========================================
+
+# Hopfield Networks for LSHN Implementation
+hopfield-layers>=1.0.0  # Installed from GitHub: git+https://github.com/ml-jku/hopfield-layers.git
+
+# ========================================
+# MULTIMODAL INPUT PROCESSING
+# ========================================
+
+# Audio Processing (Whisper)
+openai-whisper>=20230314
+
+# Computer Vision
+opencv-python>=4.8.0
+
+# OCR Capabilities
+pytesseract>=0.3.10
+
+# ========================================
+# RAG AND LANGUAGE PROCESSING
+# ========================================
+
+# Retrieval-Augmented Generation
+langchain>=0.3.0
+langchain-community>=0.3.24
+
+# ========================================
+# VISUALIZATION AND DASHBOARD
+# ========================================
+
+# Dashboard and Cognitive Process Visualization
+streamlit>=1.45.0
+plotly>=5.15.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# ========================================
+# CONFIGURATION AND ENVIRONMENT
+# ========================================
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# Data Validation
+pydantic>=2.0.0
+
+# HTTP Requests
+requests>=2.31.0
+
+# ========================================
+# AWS INTEGRATION (Optional)
+# ========================================
+
+# AWS Services (optional for cloud deployment)
+boto3>=1.28.0
+botocore>=1.31.0
+
+# ========================================
+# DEVELOPMENT AND TESTING
+# ========================================
+
+# Testing Framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Code Quality
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Type Hints
+typing-extensions>=4.7.0
+
+# ========================================
+# UTILITY AND CLI TOOLS
+# ========================================
+
+# Progress Bars for Long Operations
+tqdm>=4.65.0
+
+# Colored Terminal Output
+colorama>=0.4.6
+
+# CLI Interface Framework
+click>=8.1.0
+
+# Image Processing (PIL/Pillow)
+pillow>=10.0.0
+
+# ========================================
+# RESEARCH AND ANALYSIS
+# ========================================
+
+# Advanced Data Analysis
+jupyter>=1.0.0
+ipykernel>=6.25.0
+
+# Statistical Analysis
+statsmodels>=0.14.0
+
+# ========================================
+# OPTIONAL COGNITIVE SCIENCE TOOLS
+# ========================================
+
+# Bias Research and Cognitive Modeling
+# psychopy>=2023.2.0  # Heavy dependency, install separately if needed
+
+# Time Series Analysis for Memory Decay
+# tslearn>=0.6.0  # Install separately if needed for advanced time series analysis
+
+# ========================================
+# OPTIONAL API AND WEB SERVICES (Future Enhancement)
+# ========================================
+
+# Fast API Framework (for future API endpoints)
+# fastapi>=0.104.0  # Uncomment if building REST API
+
+# ASGI Server for FastAPI
+# uvicorn>=0.24.0  # Uncomment if building REST API
+
+# WebSocket Support
+# websockets>=12.0  # Uncomment if adding real-time features
+
+# ========================================
+# NOTES
+# ========================================
+
+# Some packages are commented out to keep the installation lightweight.
+# Uncomment specific packages based on your use case:
+# - psychopy: For advanced cognitive bias research and psychophysics
+# - tslearn: For sophisticated time series analysis of memory patterns  
+# - fastapi/uvicorn: For building REST APIs around the cognitive system
+# - websockets: For real-time cognitive monitoring dashboards
+
+# Installation Notes:
+# - hopfield-layers: Successfully installed from GitHub repository using PYTHONUTF8=1
+#   for the LSHN (Latent Structured Hopfield Networks) episodic memory system.

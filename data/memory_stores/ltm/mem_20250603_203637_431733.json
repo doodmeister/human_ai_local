@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_203637_431733",
+  "content": {
+    "interaction": {
+      "input": "Tell me about artificial intelligence",
+      "response": "I understand you said: 'Tell me about artificial intelligence'. This is a placeholder response (I found 1 related memories).",
+      "timestamp": "2025-06-03 20:36:37.431733"
+    },
+    "cognitive_state": {
+      "attention_score": 0.6247693671148666,
+      "fatigue_level": 0.005000000000000001,
+      "relevance": 0.9317199933422222
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T20:36:37.431733",
+  "last_access": "2025-06-03T20:36:37.431733",
+  "access_count": 0,
+  "importance": 0.9317199933422222,
+  "emotional_valence": 0.0,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 0
+}

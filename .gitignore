@@ -1,0 +1,52 @@
+# Ignore local AWS credentials (best practice is to keep them outside the project)
+.env
+*.pem
+*.key
+*.crt
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environments
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# VSCode and JetBrains IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Jupyter notebook checkpoints (if used later)
+.ipynb_checkpoints/
+
+# Terraform or infra artifacts
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Docker
+*.dockerfile
+docker-compose.override.yml
+
+# Cache
+.cache/
+*.egg-info/
+dist/
+build/
+
+# Coverage / testing
+htmlcov/
+.coverage
+.pytest_cache/
+*.hcl

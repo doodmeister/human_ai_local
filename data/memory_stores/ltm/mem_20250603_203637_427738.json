@@ -1,0 +1,29 @@
+{
+  "id": "mem_20250603_203637_427738",
+  "content": {
+    "interaction": {
+      "input": "Hello, how are you?",
+      "response": "I understand you said: 'Hello, how are you?'. This is a placeholder response (I found 2 related memories).",
+      "timestamp": "2025-06-03 20:36:37.427738"
+    },
+    "cognitive_state": {
+      "attention_score": 0.724,
+      "fatigue_level": 0.0,
+      "relevance": 1.0
+    }
+  },
+  "memory_type": "episodic",
+  "encoding_time": "2025-06-03T20:36:37.427738",
+  "last_access": "2025-06-03T20:36:37.427738",
+  "access_count": 0,
+  "importance": 1.0,
+  "emotional_valence": 0.0,
+  "confidence": 1.0,
+  "source": "unknown",
+  "tags": [
+    "conversation",
+    "interaction"
+  ],
+  "associations": [],
+  "consolidation_count": 0
+}
