@@ -17,9 +17,36 @@ from dataclasses import dataclass
 import logging
 
 # Define dummy classes for fallback
-class _DummyHopfield: pass
-class _DummyHopfieldLayer: pass  
-class _DummyHopfieldPooling: pass
+class _DummyHopfield(nn.Module):
+    """Dummy Hopfield class for fallback when hopfield-layers is not available"""
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        
+    def forward(self, x):
+        return x
+
+class _DummyHopfieldLayer(nn.Module):
+    """Dummy HopfieldLayer class for fallback when hopfield-layers is not available"""
+    def __init__(self, input_size=None, hidden_size=None, output_size=None, 
+                 num_heads=None, scaling=None, update_steps_max=None, **kwargs):
+        super().__init__()
+        self.output_size = output_size or input_size or 512
+        # Simple linear layer as fallback
+        self.linear = nn.Linear(input_size or 512, self.output_size)
+        
+    def forward(self, input=None, stored_pattern_padding_mask=None, **kwargs):
+        if input is None:
+            raise ValueError("Input is required for DummyHopfieldLayer")
+        # Simple pass-through with linear transformation
+        return self.linear(input)
+
+class _DummyHopfieldPooling(nn.Module):
+    """Dummy HopfieldPooling class for fallback when hopfield-layers is not available"""
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        
+    def forward(self, x):
+        return x
 
 try:
     from hflayers import Hopfield, HopfieldLayer, HopfieldPooling
