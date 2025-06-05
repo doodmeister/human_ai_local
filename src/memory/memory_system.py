@@ -3,10 +3,10 @@ Integrated Memory System
 Coordinates between STM, LTM, and other memory components
 """
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
-from .stm import ShortTermMemory, MemoryItem
-from .ltm import LongTermMemory, LTMRecord
+from .stm import ShortTermMemory
+from .ltm import LongTermMemory
 
 logger = logging.getLogger(__name__)
 

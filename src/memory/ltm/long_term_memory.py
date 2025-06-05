@@ -3,7 +3,7 @@ Long-Term Memory (LTM) System
 Implements persistent memory storage with semantic organization
 """
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime
 from dataclasses import dataclass, field
 import json
 import logging

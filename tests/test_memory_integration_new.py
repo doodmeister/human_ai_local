@@ -55,7 +55,7 @@ async def test_memory_integration():
                 break
         
         # Test dream state processing
-        print(f"\n--- Dream State Processing ---")
+        print("\n--- Dream State Processing ---")
         try:
             dream_results = await agent.enter_dream_state()
             print(f"Dream results: {dream_results}")

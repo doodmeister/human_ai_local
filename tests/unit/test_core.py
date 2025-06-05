@@ -2,7 +2,6 @@
 Basic tests for the cognitive framework core functionality
 """
 import pytest
-import asyncio
 from datetime import datetime
 
 from src.core import CognitiveAgent, CognitiveConfig

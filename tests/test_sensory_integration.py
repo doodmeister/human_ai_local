@@ -16,7 +16,6 @@ async def test_sensory_integration():
         print("1. Testing imports...")
         from src.core.cognitive_agent import CognitiveAgent
         from src.core.config import CognitiveConfig
-        from src.processing.sensory import SensoryInterface
         print("All components imported successfully")
         
         # Create configuration
@@ -85,7 +84,7 @@ async def test_sensory_integration():
         
         # Sensory processing status
         sensory_final = final_status.get("sensory_processing", {})
-        print(f"  Sensory Processing:")
+        print("  Sensory Processing:")
         print(f"    Total Processed: {sensory_final.get('total_processed', 0)}")
         print(f"    Filtered: {sensory_final.get('filtered_count', 0)}")
         if "avg_scores" in sensory_final:
@@ -96,7 +95,7 @@ async def test_sensory_integration():
         
         # Integration metrics
         integration_final = final_status.get("cognitive_integration", {})
-        print(f"  Integration Efficiency:")
+        print("  Integration Efficiency:")
         print(f"    Overall: {integration_final.get('overall_efficiency', 0):.3f}")
         print(f"    Sensory: {integration_final.get('sensory_efficiency', 0):.3f}")
         print(f"    Processing Capacity: {integration_final.get('processing_capacity', 0):.3f}")

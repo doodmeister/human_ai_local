@@ -55,7 +55,7 @@ async def test_complete_pipeline():
         # Get cognitive status after processing
         status = agent.get_cognitive_status()
         
-        print(f"📊 Cognitive State:")
+        print("📊 Cognitive State:")
         print(f"   Fatigue: {status['fatigue_level']:.3f}")
         print(f"   Memory: STM({status['memory_status']['stm']['size']}) "
               f"LTM({status['memory_status']['ltm']['total_memories']})")
@@ -79,7 +79,7 @@ async def test_complete_pipeline():
         await asyncio.sleep(0.1)
     
     # Final analysis
-    print(f"\n📈 CONVERSATION ANALYSIS")
+    print("\n📈 CONVERSATION ANALYSIS")
     print("-" * 60)
     
     total_processing_time = sum(turn['processing_time'] for turn in conversation_history)
@@ -91,7 +91,7 @@ async def test_complete_pipeline():
     # Final cognitive status
     final_status = agent.get_cognitive_status()
     
-    print(f"\n🧠 FINAL COGNITIVE STATE")
+    print("\n🧠 FINAL COGNITIVE STATE")
     print("-" * 60)
     print(f"Session ID: {final_status['session_id']}")
     print(f"Conversation length: {final_status['conversation_length']} turns")
@@ -99,7 +99,7 @@ async def test_complete_pipeline():
     
     # Memory analysis
     memory = final_status['memory_status']
-    print(f"\n💾 MEMORY ANALYSIS")
+    print("\n💾 MEMORY ANALYSIS")
     print(f"STM utilization: {memory['stm']['size']}/{memory['stm']['capacity']} "
           f"({(memory['stm']['size']/memory['stm']['capacity']*100):.1f}%)")
     print(f"LTM memories created: {memory['ltm']['total_memories']}")
@@ -107,14 +107,14 @@ async def test_complete_pipeline():
     
     # Attention analysis  
     attention = final_status['attention_status']
-    print(f"\n🎯 ATTENTION ANALYSIS")
+    print("\n🎯 ATTENTION ANALYSIS")
     print(f"Focus switches: {attention['focus_switches']}")
     print(f"Current cognitive load: {attention['cognitive_load']:.3f}")
     print(f"Available capacity: {attention['available_capacity']:.3f}")
     
     # Sensory processing analysis
     sensory = final_status['sensory_processing']
-    print(f"\n👁️ SENSORY PROCESSING ANALYSIS")
+    print("\n👁️ SENSORY PROCESSING ANALYSIS")
     print(f"Total inputs processed: {sensory['total_processed']}")
     print(f"Inputs filtered: {sensory['filtered_count']}")
     if sensory['total_processed'] > 0:
@@ -123,13 +123,13 @@ async def test_complete_pipeline():
     
     # Integration efficiency
     integration = final_status['cognitive_integration']
-    print(f"\n🔗 INTEGRATION EFFICIENCY")
+    print("\n🔗 INTEGRATION EFFICIENCY")
     print(f"Overall efficiency: {integration['overall_efficiency']:.3f}")
     print(f"Sensory efficiency: {integration['sensory_efficiency']:.3f}")
     print(f"Processing capacity: {integration['processing_capacity']:.3f}")
     
     # Test cognitive break functionality
-    print(f"\n🛌 TESTING COGNITIVE BREAK")
+    print("\n🛌 TESTING COGNITIVE BREAK")
     print("-" * 60)
     
     fatigue_before = agent.current_fatigue
@@ -140,7 +140,7 @@ async def test_complete_pipeline():
     print(f"Fatigue after break: {fatigue_after:.3f}")
     print(f"Recovery effective: {break_results['recovery_effective']}")
     
-    print(f"\n✅ COMPLETE PIPELINE TEST SUCCESSFUL")
+    print("\n✅ COMPLETE PIPELINE TEST SUCCESSFUL")
     print("The sensory-cognitive integration is working perfectly!")
     
     return True

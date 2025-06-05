@@ -44,7 +44,7 @@ async def test_memory_integration():
             print(f"Session memories: {memory_status['session_memories']}")
         
         # Test dream state processing
-        print(f"\n--- Dream State Processing ---")
+        print("\n--- Dream State Processing ---")
         dream_results = await agent.enter_dream_state()
         
         final_status = agent.get_cognitive_status()

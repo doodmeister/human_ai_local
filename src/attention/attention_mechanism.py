@@ -1,11 +1,10 @@
 """
 Attention Mechanism - Manages cognitive focus and resource allocation
 """
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from dataclasses import dataclass
 import logging
-import math
 
 logger = logging.getLogger(__name__)
 

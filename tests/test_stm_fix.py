@@ -55,7 +55,6 @@ def test_dream_consolidation_basic():
     
     try:
         from core.cognitive_agent import CognitiveAgent
-        from processing.dream.dream_processor import DreamProcessor
         
         # Create minimal test
         agent = CognitiveAgent()

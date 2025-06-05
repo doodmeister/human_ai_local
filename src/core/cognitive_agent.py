@@ -3,7 +3,6 @@ Core Cognitive Agent - Central orchestrator for the cognitive architecture
 """
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import asyncio
 import torch
 import numpy as np
 

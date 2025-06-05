@@ -33,7 +33,7 @@ def test_sync_operations():
         
         print("\n--- Testing _update_cognitive_state ---")
         agent._update_cognitive_state(attention)
-        print(f"✅ Cognitive state updated")
+        print("✅ Cognitive state updated")
         
         print("\n🎉 All sync operations work!")
         

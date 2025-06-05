@@ -20,7 +20,7 @@ async def test_attention_features():
     response1 = await agent.process_input("Tell me about machine learning")
     status1 = agent.get_cognitive_status()
     
-    print(f"   Input: 'Tell me about machine learning'")
+    print("   Input: 'Tell me about machine learning'")
     print(f"   Response: {response1[:60]}...")
     print(f"   Attention items: {status1['attention_status']['focused_items']}")
     print(f"   Cognitive load: {status1['attention_status']['cognitive_load']:.3f}")

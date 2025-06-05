@@ -40,11 +40,11 @@ async def test_process_input_step_by_step():
         
         print("\n--- Testing _consolidate_memory ---")
         await agent._consolidate_memory(input_text, response, attention_scores)
-        print(f"✅ Memory consolidation complete")
+        print("✅ Memory consolidation complete")
         
         print("\n--- Testing _update_cognitive_state ---")
         agent._update_cognitive_state(attention_scores)
-        print(f"✅ Cognitive state update complete")
+        print("✅ Cognitive state update complete")
         
         print("\n🎉 All individual steps work!")
         

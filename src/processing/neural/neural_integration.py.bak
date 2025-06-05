@@ -10,7 +10,7 @@ This module manages the integration of DPAD neural networks with the cognitive a
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import torch
 import numpy as np
 from dataclasses import dataclass, asdict
@@ -62,7 +62,8 @@ class NeuralIntegrationManager:
         
         # Initialize DPAD configuration from cognitive config
         self.dpad_config = self._create_dpad_config()
-          # Initialize network and trainer
+        
+        # Initialize network and trainer
         self.network = DPADNetwork(self.dpad_config)
         self.trainer = DPADTrainer(self.network, self.dpad_config)
         
@@ -98,11 +99,11 @@ class NeuralIntegrationManager:
             behavior_weight=getattr(self.cognitive_config.processing, 'dpad_behavior_weight', 1.0),
             residual_weight=getattr(self.cognitive_config.processing, 'dpad_residual_weight', 0.5),
             salience_threshold=getattr(self.cognitive_config.attention, 'salience_threshold', 0.8),
-                        auto_nonlinearity=getattr(self.cognitive_config.processing, 'dpad_auto_nonlinearity', True),
+            auto_nonlinearity=getattr(self.cognitive_config.processing, 'dpad_auto_nonlinearity', True),
             learning_rate=getattr(self.cognitive_config.processing, 'dpad_learning_rate', 0.001),
             dropout_rate=getattr(self.cognitive_config.processing, 'dpad_dropout_rate', 0.1),
             replay_strength=getattr(self.cognitive_config.processing, 'dpad_replay_strength', 0.1),
-            consolidation_rate=getattr(self.cognitive_config.processing, 'dpad_consolidation_rate', 0.05)
+                        consolidation_rate=getattr(self.cognitive_config.processing, 'dpad_consolidation_rate', 0.05)
         )
     
     def _create_lshn_config(self) -> LSHNConfig:
@@ -115,11 +116,14 @@ class NeuralIntegrationManager:
             convergence_threshold=getattr(self.cognitive_config.processing, 'lshn_convergence_threshold', 0.95),
             max_iterations=getattr(self.cognitive_config.processing, 'lshn_max_iterations', 50),
             episodic_trace_decay=getattr(self.cognitive_config.processing, 'lshn_episodic_trace_decay', 0.05),
-            association_threshold=getattr(self.cognitive_config.processing, 'lshn_association_threshold', 0.3),
+            association_threshold=getattr(self.cognitive_config.processing, 'lshn_association_threshold', 0.7),
             consolidation_strength=getattr(self.cognitive_config.processing, 'lshn_consolidation_strength', 0.3),
             learning_rate=getattr(self.cognitive_config.processing, 'lshn_learning_rate', 0.001),
             dropout_rate=getattr(self.cognitive_config.processing, 'lshn_dropout_rate', 0.1),
-            temperature=getattr(self.cognitive_config.processing, 'lshn_temperature', 1.0)
+            temperature=getattr(self.cognitive_config.processing, 'lshn_temperature', 1.0),
+            num_heads=getattr(self.cognitive_config.processing, 'lshn_num_heads', 8),
+            num_layers=getattr(self.cognitive_config.processing, 'lshn_num_layers', 2),
+            use_layernorm=getattr(self.cognitive_config.processing, 'lshn_use_layernorm', True)
         )
     
     async def process_attention_update(
@@ -188,13 +192,13 @@ class NeuralIntegrationManager:
         
         if len(memory_embeddings) < self.neural_config.replay_memory_threshold:
             return {
-                'status': 'insufficient_memories',                'replayed_memories': len(memory_embeddings),
+                'status': 'insufficient_memories',
+                'replayed_memories': len(memory_embeddings),
                 'threshold': self.neural_config.replay_memory_threshold
             }
-        
-        try:
+          try:
             # Perform DPAD memory replay
-            dpad_results = self.network.memory_replay(
+            replay_results = self.network.memory_replay(
                 memory_embeddings,
                 importance_scores,
                 replay_strength=self.dpad_config.replay_strength
@@ -207,22 +211,17 @@ class NeuralIntegrationManager:
                 association_threshold=self.lshn_config.association_threshold
             )
             
-            # Combine results from both networks
+            # Combine results
             combined_results = {
-                'dpad_replay': dpad_results,
+                'dpad_replay': replay_results,
                 'lshn_consolidation': lshn_results,
-                'total_replayed_memories': dpad_results['replayed_memories'],
-                'total_associations_created': lshn_results.get('associations_created', 0),
-                'reconstruction_quality': dpad_results['reconstruction_quality'],
-                'consolidation_strength': max(
-                    dpad_results['consolidation_strength'],
-                    lshn_results.get('consolidation_strength', 0)
-                ),
-                'episodic_patterns': lshn_results.get('episodic_patterns', 0),
-                'memory_associations': lshn_results.get('memory_associations', [])
+                'total_replayed_memories': replay_results['replayed_memories'],
+                'total_associations_created': lshn_results['associations_created'],
+                'reconstruction_quality': replay_results['reconstruction_quality'],
+                'consolidation_strength': max(replay_results['consolidation_strength'], 
+                                            lshn_results['consolidation_strength'])
             }
-            
-            # Update performance metrics
+              # Update performance metrics
             self.performance_metrics['total_replays'] += 1
             self.performance_metrics['avg_reconstruction_quality'] = (
                 self.performance_metrics['avg_reconstruction_quality'] * 0.9 +
@@ -234,8 +233,7 @@ class NeuralIntegrationManager:
                 self.performance_metrics['consolidation_events'] += 1
                 
                 # Trigger background training if enabled
-                if self.neural_config.enable_background_training:
-                    training_results = await self._background_training_step(
+                if self.neural_config.enable_background_training:                    training_results = await self._background_training_step(
                         memory_embeddings, importance_scores
                     )
                     combined_results.update(training_results)

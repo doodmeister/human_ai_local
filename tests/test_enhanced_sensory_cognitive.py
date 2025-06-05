@@ -7,8 +7,6 @@ import os
 import asyncio
 import time
 import numpy as np
-from typing import List, Dict, Any
-import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.abspath('.'))
 
@@ -107,21 +105,21 @@ async def benchmark_sensory_cognitive_performance():
     total_time = time.time() - start_time
     
     # Performance analysis
-    print(f"\n📈 PERFORMANCE ANALYSIS")
+    print("\n📈 PERFORMANCE ANALYSIS")
     print(f"Total Processing Time: {total_time:.3f}s")
     print(f"Average Time per Input: {np.mean(processing_times):.3f}s")
     print(f"Fastest Processing: {np.min(processing_times):.3f}s")
     print(f"Slowest Processing: {np.max(processing_times):.3f}s")
     print(f"Throughput: {len(test_inputs)/total_time:.1f} inputs/second")
     
-    print(f"\n🧠 COGNITIVE ANALYSIS")
+    print("\n🧠 COGNITIVE ANALYSIS")
     print(f"Average Sensory Score: {np.mean(sensory_scores):.3f}")
     print(f"Average Cognitive Load: {np.mean(cognitive_loads):.3f}")
     print(f"Peak Cognitive Load: {np.max(cognitive_loads):.3f}")
     
     # Final cognitive status
     final_status = agent.get_cognitive_status()
-    print(f"\n🔍 FINAL SYSTEM STATE")
+    print("\n🔍 FINAL SYSTEM STATE")
     print(f"Total Fatigue: {final_status['fatigue_level']:.3f}")
     print(f"Conversations Processed: {final_status['conversation_length']}")
     
@@ -200,7 +198,7 @@ async def test_enhanced_attention_integration():
         print(f"Response: {response[:80]}...")
         
         # Display attention metrics with correct field names
-        print(f"Attention Metrics:")
+        print("Attention Metrics:")
         print(f"  Focused Items: {attention_status.get('focused_items', 0)}")
         print(f"  Cognitive Load: {attention_status.get('cognitive_load', 0):.3f}")
         print(f"  Fatigue Level: {attention_status.get('fatigue_level', 0):.3f}")
@@ -210,13 +208,13 @@ async def test_enhanced_attention_integration():
         # Display sensory metrics
         if "avg_scores" in sensory_stats:
             avg_scores = sensory_stats["avg_scores"]
-            print(f"Sensory Metrics:")
+            print("Sensory Metrics:")
             print(f"  Entropy: {avg_scores.get('entropy', 0):.3f}")
             print(f"  Salience: {avg_scores.get('salience', 0):.3f}")
             print(f"  Relevance: {avg_scores.get('relevance', 0):.3f}")
         
         # Display integration metrics
-        print(f"Integration Metrics:")
+        print("Integration Metrics:")
         print(f"  Overall Efficiency: {integration.get('overall_efficiency', 0):.3f}")
         print(f"  Sensory Efficiency: {integration.get('sensory_efficiency', 0):.3f}")
         print(f"  Processing Capacity: {integration.get('processing_capacity', 0):.3f}")
@@ -260,7 +258,7 @@ async def test_multimodal_extension():
             # Process the input
             processed = processor.process_input(sensory_input)
             
-            print(f"Processing Results:")
+            print("Processing Results:")
             print(f"  Entropy Score: {processed.entropy_score:.3f}")
             print(f"  Salience Score: {processed.salience_score:.3f}")
             print(f"  Relevance Score: {processed.relevance_score:.3f}")
@@ -292,13 +290,13 @@ async def main():
         print("=" * 70)
         
         # Summary
-        print(f"\n📊 PERFORMANCE SUMMARY")
+        print("\n📊 PERFORMANCE SUMMARY")
         print(f"Average Processing Time: {np.mean(benchmark_results['processing_times']):.3f}s")
         print(f"System Throughput: {benchmark_results['throughput']:.1f} inputs/second")
-        print(f"Sensory Processing: ✅ Fully Integrated")
-        print(f"Attention Mechanism: ✅ Working with Sensory Data")
-        print(f"Memory System: ✅ Storing Cognitive States")
-        print(f"Multimodal Support: ✅ Basic Implementation")
+        print("Sensory Processing: ✅ Fully Integrated")
+        print("Attention Mechanism: ✅ Working with Sensory Data")
+        print("Memory System: ✅ Storing Cognitive States")
+        print("Multimodal Support: ✅ Basic Implementation")
         
         return True
         

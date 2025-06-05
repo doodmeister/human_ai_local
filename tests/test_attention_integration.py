@@ -3,7 +3,6 @@
 Comprehensive test for attention mechanism integration with cognitive agent
 """
 import asyncio
-import json
 from datetime import datetime
 from src.core.cognitive_agent import CognitiveAgent
 

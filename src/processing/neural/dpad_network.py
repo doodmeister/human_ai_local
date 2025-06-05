@@ -18,7 +18,6 @@ import numpy as np
 from dataclasses import dataclass
 import logging
 from enum import Enum
-import math
 
 logger = logging.getLogger(__name__)
 
@@ -304,13 +303,13 @@ class DPADNetwork(nn.Module):
         output, path_details = self.forward(input_embeddings, return_paths=True)
         
         # Reconstruction loss
-        reconstruction_loss = F.mse_loss(output, target_embeddings)
+        reconstruction_loss = F.mse_loss(output, target_embeddings)        # Path-specific losses
+        # Project path outputs to embedding space for comparison
+        behavior_target_emb = self.output_head(path_details['behavior_output'])
+        residual_target_emb = self.output_head(path_details['residual_output'])
         
-        # Path-specific losses
-        behavior_target = target_embeddings @ self.output_head.weight.T  # Project to latent space
-        behavior_loss = F.mse_loss(path_details['behavior_output'], behavior_target)
-        
-        residual_loss = F.mse_loss(path_details['residual_output'], behavior_target)
+        behavior_loss = F.mse_loss(behavior_target_emb, target_embeddings)
+        residual_loss = F.mse_loss(residual_target_emb, target_embeddings)
         
         # Attention-weighted loss if provided
         if attention_scores is not None:
@@ -490,10 +489,13 @@ class DPADTrainer:
         
         # Update training step
         self.network.training_step += 1
-        
-        # Convert to float dict for logging
-        float_losses = {k: v.item() if isinstance(v, torch.Tensor) else v 
-                       for k, v in loss_dict.items()}
+          # Convert to float dict for logging
+        float_losses = {}
+        for k, v in loss_dict.items():
+            if k == 'path_weights':
+                float_losses[k] = v.detach().cpu().numpy().tolist() if isinstance(v, torch.Tensor) else v
+            else:
+                float_losses[k] = v.item() if isinstance(v, torch.Tensor) else v
         
         self.training_history.append(float_losses)
         
@@ -571,17 +573,20 @@ class DPADTrainer:
             'scheduler_state': self.scheduler.state_dict(),
             'training_history': self.training_history,
             'config': self.config,
-            'training_step': self.network.training_step
-        }
+            'training_step': self.network.training_step        }
         torch.save(checkpoint, path)
         logger.info(f"DPAD checkpoint saved to {path}")
     
     def load_checkpoint(self, path: str):
         """Load training checkpoint"""
-        checkpoint = torch.load(path, map_location='cpu')
-        self.network.load_state_dict(checkpoint['network_state'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state'])
-        self.training_history = checkpoint['training_history']
-        self.network.training_step = checkpoint['training_step']
-        logger.info(f"DPAD checkpoint loaded from {path}")
+        try:
+            checkpoint = torch.load(path, map_location='cpu', weights_only=False)
+            self.network.load_state_dict(checkpoint['network_state'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+            self.scheduler.load_state_dict(checkpoint['scheduler_state'])
+            self.training_history = checkpoint['training_history']
+            self.network.training_step = checkpoint['training_step']
+            logger.info(f"DPAD checkpoint loaded from {path}")
+        except Exception as e:
+            logger.warning(f"Failed to load checkpoint {path}: {e}")
+            logger.info("Continuing with fresh network initialization")

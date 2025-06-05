@@ -8,7 +8,6 @@ import sys
 import os
 import asyncio
 import torch
-import numpy as np
 sys.path.insert(0, os.path.abspath('.'))
 
 from src.core.cognitive_agent import CognitiveAgent
@@ -37,7 +36,7 @@ async def test_dpad_network_standalone():
         attention_scores = torch.rand(batch_size)
         salience_scores = torch.rand(batch_size)
         
-        print(f"✓ Network initialized")
+        print("✓ Network initialized")
         print(f"  Input shape: {embeddings.shape}")
         print(f"  Attention scores: {attention_scores.shape}")
         print(f"  Salience scores: {salience_scores.shape}")
@@ -47,7 +46,7 @@ async def test_dpad_network_standalone():
         with torch.no_grad():
             outputs = network(embeddings, attention_scores, salience_scores)
         
-        print(f"✓ Forward pass successful")
+        print("✓ Forward pass successful")
         print(f"  Behavior prediction shape: {outputs['behavior_prediction'].shape}")
         print(f"  Residual prediction shape: {outputs['residual_prediction'].shape}")
         print(f"  Enhanced features shape: {outputs['enhanced_features'].shape}")
@@ -180,7 +179,7 @@ async def test_cognitive_agent_dpad_integration():
                 print(f"Enhancement factor: +{neural_enhancement:.3f}")
         
         # Summary of neural enhancements
-        print(f"\n📊 NEURAL ENHANCEMENT SUMMARY:")
+        print("\n📊 NEURAL ENHANCEMENT SUMMARY:")
         print("Input | Enhanced | Factor")
         print("-" * 35)
         for i, enh in enumerate(neural_enhancements, 1):
@@ -234,10 +233,10 @@ async def test_dream_neural_replay():
         print("✓ Entering dream state...")
         dream_results = await agent.enter_dream_state()
         
-        print(f"✓ Dream cycle completed")
+        print("✓ Dream cycle completed")
         
         if dream_results:
-            print(f"✓ Dream results received")
+            print("✓ Dream results received")
             
         # Check LTM for consolidated memories
         post_dream_status = agent.get_cognitive_status()['memory_status']

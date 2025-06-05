@@ -8,8 +8,7 @@ including scheduled cycles, memory clustering, and neural replay.
 import asyncio
 import sys
 import os
-import time
-from datetime import datetime, timedelta
+import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath('.'))
@@ -18,6 +17,7 @@ from src.core.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 from src.processing.dream import DreamProcessor
 
+@pytest.mark.asyncio
 async def test_dream_consolidation_pipeline():
     """Test the complete dream consolidation pipeline"""
     print("🌙 TESTING DREAM CONSOLIDATION PIPELINE")
@@ -56,7 +56,7 @@ async def test_dream_consolidation_pipeline():
         initial_stm_size = initial_status['memory_status']['stm']['size']
         initial_ltm_size = initial_status['memory_status']['ltm']['total_memories']
         
-        print(f"\n📊 Initial Memory Status:")
+        print("\n📊 Initial Memory Status:")
         print(f"   STM: {initial_stm_size} items")
         print(f"   LTM: {initial_ltm_size} items")
         
@@ -132,7 +132,7 @@ async def test_dream_consolidation_pipeline():
         stm_reduced = final_stm_size < initial_stm_size
         ltm_increased = final_ltm_size > initial_ltm_size
         
-        print(f"\n✅ CONSOLIDATION ANALYSIS:")
+        print("\n✅ CONSOLIDATION ANALYSIS:")
         print(f"   STM reduced: {stm_reduced}")
         print(f"   LTM increased: {ltm_increased}")
         print(f"   Net memory transfer: {stm_reduced and ltm_increased}")
@@ -167,7 +167,7 @@ async def test_dream_consolidation_pipeline():
             print(f"   Stored in: {recent_memory['stored_in']}")
             print(f"   Importance: {recent_memory['importance']:.3f}")
         
-        print(f"\n🎉 DREAM CONSOLIDATION PIPELINE TEST COMPLETED SUCCESSFULLY!")
+        print("\n🎉 DREAM CONSOLIDATION PIPELINE TEST COMPLETED SUCCESSFULLY!")
         print("=" * 70)
         
         # Summary
@@ -175,12 +175,12 @@ async def test_dream_consolidation_pipeline():
         total_consolidated = dream_stats['statistics']['memories_consolidated']
         total_associations = dream_stats['statistics']['associations_created']
         
-        print(f"SUMMARY:")
+        print("SUMMARY:")
         print(f"• Executed {total_cycles} dream cycles (light, deep, REM)")
         print(f"• Consolidated {total_consolidated} memories from STM to LTM")
         print(f"• Created {total_associations} memory associations")
         print(f"• Memory transfer efficiency: {(total_consolidated / max(1, len(test_inputs) + len(important_inputs))) * 100:.1f}%")
-        print(f"• Dream processing pipeline: FULLY OPERATIONAL ✅")
+        print("• Dream processing pipeline: FULLY OPERATIONAL ✅")
         
         return True
         
@@ -194,6 +194,7 @@ async def test_dream_consolidation_pipeline():
         # Shutdown
         await agent.shutdown()
 
+@pytest.mark.asyncio
 async def test_dream_scheduling():
     """Test automatic dream cycle scheduling (brief test)"""
     print("\n🕐 TESTING DREAM SCHEDULING")

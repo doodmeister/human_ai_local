@@ -5,10 +5,9 @@ Isolated test for STM component
 def test_stm_direct():
     """Test STM by copying the code directly"""
     
-    from typing import Dict, List, Optional, Any, Tuple
-    from datetime import datetime, timedelta
+    from typing import Dict, List, Optional, Any
+    from datetime import datetime
     from dataclasses import dataclass, field
-    import heapq
     import logging
 
     logger = logging.getLogger(__name__)

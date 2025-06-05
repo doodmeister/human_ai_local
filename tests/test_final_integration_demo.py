@@ -71,7 +71,7 @@ def demonstrate_sensory_cognitive_integration():
         try:
             sensory_result = agent.sensory_interface.process_user_input(test_case['input'])
             
-            print(f"📊 SENSORY PROCESSING RESULTS:")
+            print("📊 SENSORY PROCESSING RESULTS:")
             print(f"   Entropy Score: {sensory_result.entropy_score:.3f}")
             print(f"   Salience Score: {sensory_result.salience_score:.3f}")
             print(f"   Relevance Score: {sensory_result.relevance_score:.3f}")
@@ -80,7 +80,7 @@ def demonstrate_sensory_cognitive_integration():
             
             # Get updated sensory stats
             sensory_stats = agent.sensory_processor.get_processing_stats()
-            print(f"📈 CUMULATIVE STATS:")
+            print("📈 CUMULATIVE STATS:")
             print(f"   Total Processed: {sensory_stats['total_processed']}")
             print(f"   Filtered Count: {sensory_stats['filtered_count']}")
             if 'avg_scores' in sensory_stats:
@@ -93,13 +93,13 @@ def demonstrate_sensory_cognitive_integration():
             print(f"❌ Error in sensory processing: {e}")
     
     # Final system status
-    print(f"\n🔍 FINAL SYSTEM STATUS")
+    print("\n🔍 FINAL SYSTEM STATUS")
     print("-" * 70)
     final_status = agent.get_cognitive_status()
     
     # Attention mechanism status
     attention = final_status['attention_status']
-    print(f"🧠 ATTENTION MECHANISM:")
+    print("🧠 ATTENTION MECHANISM:")
     print(f"   Focused Items: {attention['focused_items']}/{attention['max_capacity']}")
     print(f"   Cognitive Load: {attention['cognitive_load']:.3f}")
     print(f"   Fatigue Level: {attention['fatigue_level']:.3f}")
@@ -108,14 +108,14 @@ def demonstrate_sensory_cognitive_integration():
     
     # Memory system status
     memory = final_status['memory_status']
-    print(f"💾 MEMORY SYSTEM:")
+    print("💾 MEMORY SYSTEM:")
     print(f"   STM: {memory['stm']['size']}/{memory['stm']['capacity']} items")
     print(f"   LTM: {memory['ltm']['total_memories']} memories")
     print(f"   Session Memories: {memory['session_memories']}")
     
     # Sensory processing summary
     sensory = final_status['sensory_processing']
-    print(f"👁️ SENSORY PROCESSING:")
+    print("👁️ SENSORY PROCESSING:")
     print(f"   Total Processed: {sensory['total_processed']}")
     print(f"   Filtered Count: {sensory['filtered_count']}")
     if sensory['total_processed'] > 0:
@@ -124,13 +124,13 @@ def demonstrate_sensory_cognitive_integration():
     
     # Integration metrics
     integration = final_status['cognitive_integration']
-    print(f"🔗 INTEGRATION METRICS:")
+    print("🔗 INTEGRATION METRICS:")
     print(f"   Overall Efficiency: {integration['overall_efficiency']:.3f}")
     print(f"   Sensory Efficiency: {integration['sensory_efficiency']:.3f}")
     print(f"   Processing Capacity: {integration['processing_capacity']:.3f}")
     print(f"   Attention-Memory Sync: {'Yes' if integration['attention_memory_sync'] else 'No'}")
     
-    print(f"\n🎯 INTEGRATION STATUS")
+    print("\n🎯 INTEGRATION STATUS")
     print("=" * 70)
     print("✅ Sensory Processing: FULLY INTEGRATED")
     print("   - Real sentence transformer embeddings")
@@ -156,7 +156,7 @@ def demonstrate_sensory_cognitive_integration():
     print("   - Performance monitoring and efficiency metrics")
     print("   - Error handling and graceful degradation")
     
-    print(f"\n🚀 READY FOR NEXT PHASE")
+    print("\n🚀 READY FOR NEXT PHASE")
     print("=" * 70)
     print("The sensory processing module is now fully integrated!")
     print("Suggested next developments:")

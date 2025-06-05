@@ -4,7 +4,7 @@ Minimal Sensory Interface for testing
 
 from .sensory_processor import SensoryInput, SensoryProcessor, ProcessedSensoryData
 import time
-from typing import List, Dict, Optional, Union, Any
+from typing import List, Dict, Optional, Union
 
 class SensoryInterface:
     """High-level interface for sensory processing"""

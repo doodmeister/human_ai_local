@@ -8,7 +8,6 @@ import sys
 import os
 import asyncio
 import torch
-import numpy as np
 sys.path.insert(0, os.path.abspath('.'))
 
 from src.core.cognitive_agent import CognitiveAgent
@@ -35,7 +34,7 @@ async def test_dpad_network_standalone():
         attention_scores = torch.rand(batch_size)
         salience_scores = torch.rand(batch_size)
         
-        print(f"✓ Network initialized")
+        print("✓ Network initialized")
         print(f"  Input shape: {embeddings.shape}")
         print(f"  Attention scores: {attention_scores.shape}")
         print(f"  Salience scores: {salience_scores.shape}")
@@ -45,7 +44,7 @@ async def test_dpad_network_standalone():
         with torch.no_grad():
             outputs = network(embeddings, return_paths=True)
         
-        print(f"✓ Forward pass successful")
+        print("✓ Forward pass successful")
         # outputs is a tuple (tensor, dict) when return_paths=True
         enhanced_output, path_details = outputs
         print(f"  Enhanced output shape: {enhanced_output.shape}")
@@ -182,7 +181,7 @@ async def test_cognitive_agent_dpad_integration():
                 print(f"Enhancement factor: +{neural_enhancement:.3f}")
         
         # Summary of neural enhancements
-        print(f"\n📊 NEURAL ENHANCEMENT SUMMARY:")
+        print("\n📊 NEURAL ENHANCEMENT SUMMARY:")
         print("Input | Enhanced | Factor")
         print("-" * 35)
         for i, enh in enumerate(neural_enhancements, 1):
@@ -238,7 +237,7 @@ async def test_dream_neural_replay():
         print("✓ Entering dream state...")
         dream_results = await agent.enter_dream_state()
         
-        print(f"✓ Dream cycle completed")
+        print("✓ Dream cycle completed")
         
         if dream_results and 'consolidated_memories' in dream_results:
             consolidated = dream_results['consolidated_memories']
@@ -294,12 +293,12 @@ async def test_network_performance():
         total_params = sum(p.numel() for p in manager.network.parameters())
         trainable_params = sum(p.numel() for p in manager.network.parameters() if p.requires_grad)
         
-        print(f"✓ Network parameters:")
+        print("✓ Network parameters:")
         print(f"  Total parameters: {total_params:,}")
         print(f"  Trainable parameters: {trainable_params:,}")
           # Test performance metrics access
         performance = manager.performance_metrics
-        print(f"✓ Performance metrics available:")
+        print("✓ Performance metrics available:")
         for key, value in performance.items():
             print(f"  {key}: {value}")
         

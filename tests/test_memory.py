@@ -14,7 +14,7 @@ def test_memory_components():
         print("Testing STM import...")
         
         # Test STM directly
-        from memory.stm.short_term_memory import ShortTermMemory, MemoryItem
+        from memory.stm.short_term_memory import ShortTermMemory
         print("✓ Successfully imported ShortTermMemory and MemoryItem")
         
         # Test creating STM
@@ -33,7 +33,7 @@ def test_memory_components():
         
         # Test LTM
         print("\nTesting LTM import...")
-        from memory.ltm.long_term_memory import LongTermMemory, LTMRecord
+        from memory.ltm.long_term_memory import LongTermMemory
         print("✓ Successfully imported LongTermMemory and LTMRecord")
         
         # Test creating LTM

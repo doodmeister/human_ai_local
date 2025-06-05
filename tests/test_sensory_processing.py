@@ -4,8 +4,6 @@ Comprehensive test for the Sensory Processing module
 """
 import sys
 import os
-import numpy as np
-import time
 
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.abspath('.'))
@@ -22,7 +20,6 @@ def test_sensory_processing():
             SensoryInput,
             ProcessedSensoryData,
             SensoryInterface,
-            SensoryInputBuilder,
             quick_text_input,
             quick_process_text
         )

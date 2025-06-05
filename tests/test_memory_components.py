@@ -9,11 +9,11 @@ print("Testing individual memory component imports...")
 
 try:
     print("1. Testing STM import...")
-    from src.memory.stm.short_term_memory import ShortTermMemory, MemoryItem
+    from src.memory.stm.short_term_memory import ShortTermMemory
     print("✅ STM components imported")
     
     print("2. Testing LTM import...")
-    from src.memory.ltm.long_term_memory import LongTermMemory, LTMRecord
+    from src.memory.ltm.long_term_memory import LongTermMemory
     print("✅ LTM components imported")
     
     print("3. Creating STM...")

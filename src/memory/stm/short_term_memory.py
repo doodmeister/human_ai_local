@@ -3,9 +3,8 @@ Short-Term Memory (STM) System
 Implements working memory with capacity limits and decay mechanisms
 """
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime
 from dataclasses import dataclass, field
-import heapq
 import logging
 
 logger = logging.getLogger(__name__)

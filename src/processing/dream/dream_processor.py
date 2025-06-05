@@ -14,11 +14,10 @@ Features:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import numpy as np
-from scipy.cluster.hierarchy import linkage, fcluster
 import torch
 
 # Try to import HDBSCAN from hdbscan library, fall back if not available
@@ -31,7 +30,6 @@ except ImportError:
     HDBSCAN = None
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import PCA
 from scipy.sparse import csr_matrix
 import schedule
 import time
@@ -222,16 +220,15 @@ class DreamProcessor:
             evaluated_candidates = await self._meta_cognitive_evaluation(candidates)
         else:
             evaluated_candidates = candidates
-        
-        # Phase 4: Consolidate memories
-        consolidated = await self._consolidate_memories(evaluated_candidates, cycle_config)
-        results["memories_consolidated"] = consolidated
-        self.dream_statistics['memories_consolidated'] += consolidated
-        
-        # Phase 5: Create associations
+          # Phase 4: Create associations (before consolidation, while memories are still in STM)
         associations = await self._create_dream_associations(candidates, clusters, cycle_config)
         results["associations_created"] = associations
         self.dream_statistics['associations_created'] += associations
+        
+        # Phase 5: Consolidate memories (after associations are created)
+        consolidated = await self._consolidate_memories(evaluated_candidates, cycle_config)
+        results["memories_consolidated"] = consolidated
+        self.dream_statistics['memories_consolidated'] += consolidated
         
         # Phase 6: Neural replay (if applicable)
         if cycle_config.cycle_type == 'rem':
@@ -503,12 +500,13 @@ class DreamProcessor:
             cycle_config: Dream cycle configuration
         
         Returns:
-            Number of associations created
-        """
+            Number of associations created        """
         associations_created = 0
         
-        try:
-            # Create intra-cluster associations
+        logger.debug(f"Creating associations for {len(candidates)} candidates and {len(clusters)} clusters")
+        
+        try:            # Create intra-cluster associations
+            logger.debug(f"Processing {len(clusters)} clusters for intra-cluster associations")
             for cluster in clusters:
                 for i, candidate1 in enumerate(cluster):
                     for candidate2 in cluster[i+1:]:
@@ -523,48 +521,69 @@ class DreamProcessor:
                             
                             if candidate1.memory_id not in stm_item2.associations:
                                 stm_item2.associations.append(candidate1.memory_id)
-                                associations_created += 1
+                                associations_created += 1            # Create temporal associations (enhanced for all cycle types)
+            logger.debug(f"Processing temporal associations for {cycle_config.cycle_type} cycle with {len(candidates)} candidates")
             
-            # Create temporal associations based on REM intensity
+            # Adjust association criteria based on cycle type
             if cycle_config.cycle_type == 'rem':
-                for i, candidate1 in enumerate(candidates):
-                    for candidate2 in candidates[i+1:]:                        # Check temporal proximity
-                        stm_item1 = self.memory_system.stm.items.get(candidate1.memory_id)
-                        stm_item2 = self.memory_system.stm.items.get(candidate2.memory_id)
+                time_window = 7200  # 2 hours for REM (creative associations)
+                emotional_threshold = 0.3
+                importance_threshold = 0.3
+            elif cycle_config.cycle_type == 'light':
+                time_window = 3600  # 1 hour for light sleep (recent memories)
+                emotional_threshold = 0.4  
+                importance_threshold = 0.2
+            else:  # deep sleep
+                time_window = 1800  # 30 minutes for deep sleep (very recent)
+                emotional_threshold = 0.5
+                importance_threshold = 0.4
+            
+            for i, candidate1 in enumerate(candidates):
+                for candidate2 in candidates[i+1:]:
+                    # Check temporal proximity
+                    stm_item1 = self.memory_system.stm.items.get(candidate1.memory_id)
+                    stm_item2 = self.memory_system.stm.items.get(candidate2.memory_id)
+                    
+                    if stm_item1 and stm_item2:
+                        time_diff = abs((stm_item1.encoding_time - stm_item2.encoding_time).total_seconds())
                         
-                        if stm_item1 and stm_item2:
-                            time_diff = abs((stm_item1.encoding_time - stm_item2.encoding_time).total_seconds())
+                        # Enhanced association criteria with cycle-specific thresholds
+                        should_associate = False
+                        association_reasons = []
+                        
+                        # Criteria 1: Temporal proximity (cycle-specific window)
+                        if time_diff < time_window:
+                            should_associate = True
+                            association_reasons.append(f"temporal_{time_diff}s")
+                        
+                        # Criteria 2: High emotional salience 
+                        if (candidate1.emotional_salience >= emotional_threshold and 
+                            candidate2.emotional_salience >= emotional_threshold):
+                            should_associate = True
+                            association_reasons.append("emotional")
+                        
+                        # Criteria 3: Similar importance scores
+                        importance_diff = abs(candidate1.importance_score - candidate2.importance_score)
+                        if importance_diff < importance_threshold:
+                            should_associate = True
+                            association_reasons.append("importance_similarity")
+                        
+                        # Criteria 4: Both have high importance
+                        if (candidate1.importance_score > 0.6 and 
+                            candidate2.importance_score > 0.6):
+                            should_associate = True
+                            association_reasons.append("high_importance")
+                        
+                        if should_associate:
+                            logger.debug(f"Creating association between {candidate1.memory_id} and {candidate2.memory_id}: {', '.join(association_reasons)}")
                             
-                            # Enhanced association criteria with multiple fallback conditions
-                            should_associate = False
+                            if candidate2.memory_id not in stm_item1.associations:
+                                stm_item1.associations.append(candidate2.memory_id)
+                                associations_created += 1
                             
-                            # Criteria 1: Temporal proximity (within 2 hours)
-                            if time_diff < 7200:  # 2 hours
-                                should_associate = True
-                            
-                            # Criteria 2: High emotional salience (lowered threshold)
-                            if (candidate1.emotional_salience >= 0.3 and 
-                                candidate2.emotional_salience >= 0.3):
-                                should_associate = True
-                            
-                            # Criteria 3: Similar importance scores
-                            importance_diff = abs(candidate1.importance_score - candidate2.importance_score)
-                            if importance_diff < 0.3:  # Similar importance
-                                should_associate = True
-                            
-                            # Criteria 4: Both have high importance
-                            if (candidate1.importance_score > 0.6 and 
-                                candidate2.importance_score > 0.6):
-                                should_associate = True
-                            
-                            if should_associate:
-                                if candidate2.memory_id not in stm_item1.associations:
-                                    stm_item1.associations.append(candidate2.memory_id)
-                                    associations_created += 1
-                                
-                                if candidate1.memory_id not in stm_item2.associations:
-                                    stm_item2.associations.append(candidate1.memory_id)
-                                    associations_created += 1
+                            if candidate1.memory_id not in stm_item2.associations:
+                                stm_item2.associations.append(candidate1.memory_id)
+                                associations_created += 1
         
         except Exception as e:
             logger.error(f"Error creating dream associations: {e}")
