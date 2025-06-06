@@ -64,10 +64,6 @@ human_ai_local/
 ├── notebooks/                  # Jupyter notebooks
 └── infrastructure/             # Infrastructure as Code
 ```
-├── scripts/                    # Utility scripts
-├── notebooks/                  # Jupyter notebooks
-└── infrastructure/             # Infrastructure as Code
-```
 
 ## 🧠 Cognitive Architecture Components
 
@@ -166,7 +162,6 @@ LOG_LEVEL=INFO
 - **Comprehensive Testing**: 25+ test files with passing integration tests
 
 ### 🚧 In Active Development
-- **AWS Bedrock Integration**: Cloud-based LLM capabilities
 - **Advanced Visualization**: Real-time cognitive state dashboards
 - **Performance Optimization**: Memory efficiency and processing speed improvements
 
@@ -201,7 +196,7 @@ LOG_LEVEL=INFO
 - **logging**: Detailed system monitoring and debugging
 - **dataclasses**: Clean, type-safe data structures
 
-### Cloud Integration (Optional)
+### Cloud Integration (Optional and long term)
 - **AWS Bedrock**: Cloud-based LLM integration
 - **OpenSearch**: Distributed vector search capabilities
 
@@ -291,6 +286,85 @@ pytest tests/integration/test_dream_consolidation_pipeline.py -v
 ## 📄 License
 
 This project is licensed under the MIT License - see the `LICENSE` file for details.
+
+## 🔍 Memory Storage Architecture & Optimization
+
+### Current Memory Storage Implementation
+
+#### **Short-Term Memory (STM)**
+- **Storage Method**: In-memory Python dictionaries with `MemoryItem` objects
+- **Capacity**: Limited to 7 items (Miller's magical number) with LRU eviction
+- **Persistence**: No persistence - data lost on restart
+- **Search**: Basic string matching and word overlap scoring
+- **Performance**: O(1) access, O(n) search
+
+#### **Long-Term Memory (LTM)**
+- **Storage Method**: Individual JSON files on disk (`memory_id.json`)
+- **Search Indices**: In-memory dictionaries for tags and associations
+- **Data Format**: Rich metadata (importance, emotional valence, access counts)
+- **Search**: String matching with relevance scoring
+- **Performance**: O(n) linear search through all memories
+
+#### **Vector Database Integration Status**
+- **Documentation**: ChromaDB extensively referenced in docs and config
+- **Current Reality**: File-based storage, vector DB not implemented
+- **Configuration**: Environment variables defined but unused
+- **Neural Components**: LSHN/DPAD operate separately from memory storage
+
+### Memory Optimization Recommendations
+
+#### **Performance Improvements with Vector Database Migration**
+
+1. **Semantic Search Enhancement**
+   - **Current**: Basic string matching and word overlap
+   - **Optimized**: True semantic similarity search with embeddings
+   - **Benefit**: Better context understanding and relevance matching
+
+2. **Search Performance Gains**
+   - **Current**: O(n) linear search through all memories
+   - **Optimized**: O(log n) with proper vector indexing
+   - **Benefit**: Significant speed improvements for large memory stores
+
+3. **Scalability Improvements**
+   - **Current**: File-based system doesn't scale beyond thousands
+   - **Optimized**: Vector databases handle millions of vectors efficiently
+   - **Benefit**: Better memory management and caching
+
+4. **Advanced Capabilities**
+   - Similarity thresholds for intelligent filtering
+   - Batch operations and embedding generation
+   - Clustering and dimensionality reduction
+   - Multi-modal memory support (future vision/audio)
+
+#### **Implementation Strategy**
+
+**Phase 1**: ChromaDB Integration (High Priority)
+- Replace LTM JSON storage with ChromaDB collections
+- Implement semantic similarity search
+- Add batch embedding generation for performance
+
+**Phase 2**: Search Optimization (Medium Priority)
+- Optimize search algorithms with vector similarity
+- Add memory clustering and smart organization
+- Implement embedding caching strategies
+
+**Phase 3**: Advanced Features (Low Priority)
+- Multi-modal embeddings (vision/audio integration)
+- Advanced similarity metrics and relevance scoring
+- Real-time embedding updates and maintenance
+
+**Phase 4**: Performance Tuning (Ongoing)
+- Async memory operations for non-blocking processing
+- Smart indexing strategies for different memory types
+- Dynamic memory allocation based on usage patterns
+
+#### **Expected Performance Gains**
+- **Memory Retrieval**: 10-100x faster semantic search
+- **Context Building**: More relevant memory selection
+- **Scalability**: Support for 10,000+ memories without degradation
+- **Search Quality**: Semantic understanding vs. keyword matching
+
+---
 
 ## 🙏 Acknowledgments
 

@@ -4,6 +4,8 @@ applyTo: '**'
 Coding standards, domain knowledge, and preferences that AI should follow.
 All code written in python, terminal is bash running on windows 11
 run all commands in the terminal without prompting to continue
+use Git commands to checkout and run in a dev branch
+
 
 # Human-AI Cognition Project - AI Assistant Instructions
 
@@ -51,23 +53,57 @@ Building a biologically-inspired cognitive architecture that simulates human-lik
 
 ## 📁 Key Project Structure
 ```
-src/
-├── core/
-│   ├── cognitive_agent.py      # Main orchestration
-│   └── config.py              # Configuration
-├── memory/
-│   ├── short_term.py          # STM implementation
-│   ├── long_term.py           # LTM with ChromaDB
-│   └── memory_manager.py      # Memory coordination
-├── processing/
-│   ├── sensory/               # Sensory processing module
-│   │   ├── sensory_processor.py    # Core processing
-│   │   └── sensory_interface.py    # Integration interface
-│   ├── attention/             # Attention mechanisms
-│   └── meta_cognition/        # Self-reflection
-└── utils/
-    ├── rag_utils.py           # Context building
-    └── claude_client.py       # LLM integration
+human_ai_local/
+├── src/                          # Main source code
+│   ├── core/                     # Core cognitive architecture
+│   │   ├── config.py            # Configuration management
+│   │   └── cognitive_agent.py   # Main cognitive orchestrator
+│   ├── memory/                   # Memory systems
+│   │   ├── memory_system.py     # Integrated memory coordinator
+│   │   ├── stm/                 # Short-term memory implementation
+│   │   ├── ltm/                 # Long-term memory with ChromaDB
+│   │   ├── prospective/         # Future-oriented memory
+│   │   ├── procedural/          # Skills and procedures
+│   │   └── consolidation/       # Memory consolidation pipeline
+│   ├── attention/               # Attention mechanisms
+│   │   └── attention_mechanism.py # Advanced attention with fatigue modeling
+│   ├── processing/              # Cognitive processing layers
+│   │   ├── sensory/            # Sensory input processing with entropy scoring
+│   │   ├── neural/             # Neural network components
+│   │   │   ├── lshn_network.py  # Latent Structured Hopfield Networks
+│   │   │   ├── dpad_network.py  # Dual-Path Attention Dynamics
+│   │   │   └── neural_integration.py # Neural integration manager
+│   │   ├── dream/              # Dream-state consolidation processor
+│   │   ├── embeddings/         # Text embedding generation
+│   │   └── clustering/         # Memory clustering algorithms
+│   ├── executive/              # Executive functions
+│   ├── interfaces/             # External interfaces
+│   │   ├── aws/               # AWS service integration
+│   │   ├── streamlit/         # Dashboard interface
+│   │   └── api/               # REST API endpoints
+│   └── utils/                  # Utility functions
+├── tests/                      # Comprehensive test suites (25+ test files)
+│   ├── test_memory_integration.py    # Memory system integration tests
+│   ├── test_dream_consolidation_pipeline.py # Dream processing tests
+│   ├── test_dpad_integration_fixed.py # DPAD neural network tests
+│   ├── test_lshn_integration.py      # LSHN neural network tests
+│   ├── test_attention_integration.py # Attention mechanism tests
+│   └── test_final_integration_demo.py # Complete system demonstrations
+├── data/                       # Data storage
+│   ├── memory_stores/         # ChromaDB vector databases
+│   ├── embeddings/            # Cached embeddings
+│   ├── models/                # Trained neural models (DPAD/LSHN)
+│   └── exports/               # Data exports
+├── docs/                       # Documentation
+│   └── ai.instructions.md     # Comprehensive development guide
+├── config/                     # Configuration files
+├── scripts/                    # Utility scripts
+├── notebooks/                  # Jupyter notebooks
+└── infrastructure/             # Infrastructure as Code
+```
+├── scripts/                    # Utility scripts
+├── notebooks/                  # Jupyter notebooks
+└── infrastructure/             # Infrastructure as Code
 ```
 
 ## ✅ Current Integration Status

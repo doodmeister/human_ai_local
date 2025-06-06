@@ -248,10 +248,9 @@ async def test_lshn_integration_with_cognitive_agent():
             print(f"   Input {i+1}: {input_text[:50]}...")
             response = await agent.process_input(input_text)
             print(f"   Response: {response[:50]}...")
-        
-        # Check memory state
-        stm_count = len(agent.memory_system.stm.get_recent_memories())
-        ltm_count = len(agent.memory_system.ltm.search_memories("", limit=1000))
+          # Check memory state
+        stm_count = len(agent.memory.stm.get_recent_memories())
+        ltm_count = len(agent.memory.ltm.search_memories("", limit=1000))
         
         print("\n📊 Memory state after processing:")
         print(f"   STM: {stm_count} memories")

@@ -6,13 +6,13 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import logging
 from .stm import ShortTermMemory
-from .ltm import LongTermMemory
+from .ltm import LongTermMemory, VectorLongTermMemory
 
 logger = logging.getLogger(__name__)
 
 class MemorySystem:
     """
-    Integrated memory system coordinating STM, LTM, and consolidation processes
+    Central memory management system integrating STM and LTM.
     
     Features:
     - Automatic STM to LTM consolidation
@@ -26,7 +26,10 @@ class MemorySystem:
         stm_capacity: int = 7,
         stm_decay_threshold: float = 0.1,
         ltm_storage_path: Optional[str] = None,
-        consolidation_interval: int = 300  # 5 minutes
+        consolidation_interval: int = 300,  # 5 minutes
+        use_vector_ltm: bool = True,
+        chroma_persist_dir: Optional[str] = None,
+        embedding_model: str = "all-MiniLM-L6-v2"
     ):
         """
         Initialize integrated memory system
@@ -36,15 +39,30 @@ class MemorySystem:
             stm_decay_threshold: STM decay threshold
             ltm_storage_path: LTM storage path
             consolidation_interval: Auto-consolidation interval in seconds
+            use_vector_ltm: Whether to use vector-based LTM with ChromaDB
+            chroma_persist_dir: ChromaDB persistence directory
+            embedding_model: SentenceTransformer model name
         """
         self.stm = ShortTermMemory(capacity=stm_capacity, decay_threshold=stm_decay_threshold)
-        self.ltm = LongTermMemory(storage_path=ltm_storage_path)
+        
+        # Initialize LTM with vector database support
+        self.use_vector_ltm = use_vector_ltm
+        if use_vector_ltm:
+            self.ltm = VectorLongTermMemory(
+                storage_path=ltm_storage_path,
+                chroma_persist_dir=chroma_persist_dir,
+                embedding_model=embedding_model,
+                use_vector_db=True,
+                enable_json_backup=True
+            )
+        else:
+            self.ltm = LongTermMemory(storage_path=ltm_storage_path)
         
         self.consolidation_interval = consolidation_interval
         self.last_consolidation = datetime.now()
         self.session_memories = []  # Track memories for this session
         
-        logger.info("Integrated memory system initialized")
+        logger.info(f"Integrated memory system initialized (Vector LTM: {use_vector_ltm})")
     
     def store_memory(
         self,
@@ -77,47 +95,48 @@ class MemorySystem:
         """
         # Track for session
         session_entry = {
-            "id": memory_id,
-            "content": content,
-            "timestamp": datetime.now(),
-            "importance": importance,
-            "stored_in": []
+            'memory_id': memory_id,
+            'timestamp': datetime.now(),
+            'importance': importance,
+            'storage_location': None
         }
         
-        success = True
-        
-        # Always try STM first (working memory)
-        if self.stm.store(
-            memory_id=memory_id,
-            content=content,
-            importance=importance,
-            attention_score=attention_score,
-            emotional_valence=emotional_valence,
-            associations=associations
-        ):
-            session_entry["stored_in"].append("stm")
-            logger.debug(f"Stored {memory_id} in STM")
-        
-        # Store in LTM if important enough or forced
-        if force_ltm or importance > 0.7 or attention_score > 0.8:
-            if self.ltm.store(
-                memory_id=memory_id,
-                content=content,
-                memory_type=memory_type,
-                importance=importance,
-                emotional_valence=emotional_valence,
-                tags=tags,
-                associations=associations
-            ):
-                session_entry["stored_in"].append("ltm")
-                logger.debug(f"Stored {memory_id} in LTM")
-        
-        self.session_memories.append(session_entry)
-        
-        # Check for auto-consolidation
-        self._check_auto_consolidation()
-        
-        return success
+        try:
+            # Determine storage location
+            if force_ltm or importance >= 0.7 or abs(emotional_valence) >= 0.6:
+                # Store in LTM
+                success = self.ltm.store(
+                    memory_id=memory_id,
+                    content=content,
+                    memory_type=memory_type,
+                    importance=importance,
+                    tags=tags or [],
+                    associations=associations or []
+                )
+                session_entry['storage_location'] = 'LTM'
+            else:
+                # Store in STM
+                success = self.stm.store(
+                    memory_id=memory_id,
+                    content=content,
+                    importance=importance,
+                    attention_score=attention_score,
+                    emotional_valence=emotional_valence
+                )
+                session_entry['storage_location'] = 'STM'
+            
+            if success:
+                self.session_memories.append(session_entry)
+                
+                # Check for automatic consolidation
+                if self._should_consolidate():
+                    self.consolidate_memories()
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error storing memory {memory_id}: {e}")
+            return False
     
     def retrieve_memory(self, memory_id: str) -> Optional[Any]:
         """
@@ -129,31 +148,17 @@ class MemorySystem:
         Returns:
             Memory content if found, None otherwise
         """
-        # Try STM first (faster access)
-        stm_item = self.stm.retrieve(memory_id)
-        if stm_item:
-            logger.debug(f"Retrieved {memory_id} from STM")
-            return stm_item
-        
-        # Try LTM
-        ltm_record = self.ltm.retrieve(memory_id)
-        if ltm_record:
-            logger.debug(f"Retrieved {memory_id} from LTM")
+        try:
+            # Check STM first (faster)
+            memory = self.stm.retrieve(memory_id)
+            if memory:
+                return memory
             
-            # Optionally promote frequently accessed LTM items back to STM
-            if ltm_record.access_count > 3:
-                self.stm.store(
-                    memory_id=ltm_record.id,
-                    content=ltm_record.content,
-                    importance=ltm_record.importance,
-                    emotional_valence=ltm_record.emotional_valence
-                )
-                logger.debug(f"Promoted {memory_id} from LTM to STM")
-            
-            return ltm_record
-        
-        logger.debug(f"Memory {memory_id} not found in any system")
-        return None
+            # Check LTM
+            return self.ltm.retrieve(memory_id)
+        except Exception as e:
+            logger.error(f"Error retrieving memory {memory_id}: {e}")
+            return None
     
     def search_memories(
         self,
@@ -178,24 +183,28 @@ class MemorySystem:
         """
         results = []
         
-        # Search STM
-        if search_stm:
-            stm_results = self.stm.search(query=query, max_results=max_results)
-            for item, relevance in stm_results:
-                results.append((item, relevance, "stm"))
-        
-        # Search LTM
-        if search_ltm:
-            ltm_results = self.ltm.search_by_content(
-                query=query,
-                memory_types=memory_types,
-                max_results=max_results
-            )
-            for record, relevance in ltm_results:
-                results.append((record, relevance, "ltm"))
-          # Sort by relevance
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results[:max_results]
+        try:
+            if search_stm:
+                stm_results = self.stm.search(query, max_results=max_results//2)
+                for memory, score in stm_results:
+                    results.append((memory, score, 'STM'))
+            
+            if search_ltm:
+                ltm_results = self.ltm.search_by_content(
+                    query=query,
+                    memory_types=memory_types,
+                    max_results=max_results//2
+                )
+                for memory, score in ltm_results:
+                    results.append((memory, score, 'LTM'))
+            
+            # Sort by relevance
+            results.sort(key=lambda x: x[1], reverse=True)
+            return results[:max_results]
+            
+        except Exception as e:
+            logger.error(f"Error searching memories with query '{query}': {e}")
+            return []
     
     def consolidate_memories(self, force: bool = False) -> Dict[str, Any]:
         """
@@ -207,38 +216,69 @@ class MemorySystem:
         Returns:
             Dict with consolidation statistics
         """
-        if not force:
-            time_since_last = (datetime.now() - self.last_consolidation).total_seconds()
-            if time_since_last < self.consolidation_interval:
-                return {"consolidated": 0, "forgotten": 0, "reason": "too_soon"}
+        if not force and not self._should_consolidate():
+            return {'status': 'skipped', 'reason': 'not due'}
         
-        # Apply decay to STM
-        forgotten_ids = self.stm.decay_memories()
-        
-        # Get items for potential consolidation
-        consolidation_candidates = []
-        for item in self.stm.items.values():
-            # Criteria for consolidation: high importance, multiple accesses, or emotional salience
-            if (item.importance > 0.6 or 
-                item.access_count > 2 or 
-                abs(item.emotional_valence) > 0.5):
-                consolidation_candidates.append(item)
-        
-        # Consolidate to LTM
-        consolidated = self.ltm.consolidate_from_stm(consolidation_candidates)
-        
-        self.last_consolidation = datetime.now()
-        
-        logger.info(f"Memory consolidation: {consolidated} items to LTM, {len(forgotten_ids)} forgotten")
-        
-        return {
-            "consolidated": consolidated,
-            "forgotten": len(forgotten_ids),
-            "forgotten_ids": forgotten_ids,
-            "timestamp": self.last_consolidation
+        stats = {
+            'start_time': datetime.now(),
+            'consolidated_count': 0,
+            'failed_count': 0,
+            'errors': []
         }
+        
+        try:
+            # Get memories ready for consolidation
+            stm_memories = self.stm.get_all_items()
+            
+            for memory_id, memory_item in stm_memories.items():
+                try:
+                    # Determine if memory should be consolidated
+                    importance = getattr(memory_item, 'importance', 0.0)
+                    emotional_valence = getattr(memory_item, 'emotional_valence', 0.0)
+                    age_minutes = (datetime.now() - memory_item.encoding_time).total_seconds() / 60
+                    
+                    # Consolidation criteria
+                    should_consolidate = (
+                        importance >= 0.6 or
+                        abs(emotional_valence) >= 0.5 or
+                        age_minutes >= 30  # 30 minutes
+                    )
+                    
+                    if should_consolidate:
+                        # Move to LTM
+                        success = self.ltm.store(
+                            memory_id=memory_id,
+                            content=memory_item.content,
+                            memory_type='episodic',
+                            importance=importance,
+                            tags=[],
+                            associations=getattr(memory_item, 'associations', [])
+                        )
+                        
+                        if success:
+                            self.stm.remove_item(memory_id)
+                            stats['consolidated_count'] += 1
+                        else:
+                            stats['failed_count'] += 1
+                            
+                except Exception as e:
+                    stats['errors'].append(f"Error consolidating {memory_id}: {e}")
+                    stats['failed_count'] += 1
+                    logger.error(f"Consolidation error for {memory_id}: {e}")
+            
+            self.last_consolidation = datetime.now()
+            stats['end_time'] = datetime.now()
+            stats['duration_seconds'] = (stats['end_time'] - stats['start_time']).total_seconds()
+            
+            logger.info(f"Consolidation completed: {stats['consolidated_count']} memories moved to LTM")
+            
+        except Exception as e:
+            stats['errors'].append(f"Consolidation process error: {e}")
+            logger.error(f"Consolidation process error: {e}")
+        
+        return stats
     
-    def enter_dream_state(self, duration_minutes: int = 5) -> Dict[str, Any]:
+    def dream_state_consolidation(self, duration_minutes: int = 10) -> Dict[str, Any]:
         """
         Legacy dream-state consolidation mode (basic version)
         
@@ -251,83 +291,35 @@ class MemorySystem:
         Returns:
             Dream state processing results
         """
-        logger.info(f"Entering basic dream state for {duration_minutes} minutes")
-        logger.warning("Using legacy dream state - consider using DreamProcessor for advanced features")
+        logger.info(f"Starting basic dream-state consolidation for {duration_minutes} minutes")
         
-        # Perform intensive consolidation
-        consolidation_results = self.consolidate_memories(force=True)
+        # Basic consolidation with enhanced criteria
+        stats = self.consolidate_memories(force=True)
         
-        # Strengthen important memories through replay
-        important_memories = []
-        for item in self.stm.items.values():
-            if item.importance > 0.7:
-                important_memories.append(item)
+        # Note: Memory reinforcement would require additional methods in LTM classes
+        stats['reinforced_memories'] = 0
+        stats['dream_duration_minutes'] = duration_minutes
         
-        # Simulate memory replay and strengthening
-        replayed = 0
-        for item in important_memories:
-            item.importance = min(1.0, item.importance + 0.1)
-            replayed += 1
-          # Create associative links between related memories
-        associations_created = self._create_dream_associations()
-        
-        results = {
-            "duration_minutes": duration_minutes,
-            "consolidation": consolidation_results,
-            "memories_replayed": replayed,
-            "associations_created": associations_created,
-            "dream_timestamp": datetime.now()
-        }
-        
-        logger.info(f"Dream state completed: {results}")
-        return results
+        return stats
     
-    def get_memory_status(self) -> Dict[str, Any]:
+    def get_status(self) -> Dict[str, Any]:
         """Get comprehensive memory system status"""
-        stm_status = self.stm.get_status()
-        ltm_status = self.ltm.get_status()
-        
         return {
-            "stm": stm_status,
-            "ltm": ltm_status,
-            "session_memories": len(self.session_memories),
-            "last_consolidation": self.last_consolidation,
-            "consolidation_interval": self.consolidation_interval,
-            "total_capacity": stm_status["capacity"] + ltm_status["total_memories"]
+            'stm': self.stm.get_status(),
+            'ltm': self.ltm.get_status(),
+            'last_consolidation': self.last_consolidation,
+            'session_memories_count': len(self.session_memories),
+            'consolidation_interval': self.consolidation_interval,
+            'use_vector_ltm': self.use_vector_ltm,
+            'system_active': True
         }
     
-    def reset_session(self):
+    def reset_session(self) -> None:
         """Reset session-specific memory tracking"""
-        self.session_memories.clear()
-        logger.info("Memory session reset")
+        self.session_memories = []
+        logger.info("Memory system session reset")
     
-    def _check_auto_consolidation(self):
+    def _should_consolidate(self) -> bool:
         """Check if automatic consolidation should occur"""
-        time_since_last = (datetime.now() - self.last_consolidation).total_seconds()
-        
-        if time_since_last >= self.consolidation_interval:
-            self.consolidate_memories()
-    
-    def _create_dream_associations(self) -> int:
-        """Create associative links between memories during dream state"""
-        associations_created = 0
-        
-        # Simple implementation: link memories with similar content or timing
-        stm_items = list(self.stm.items.values())
-        
-        for i, item1 in enumerate(stm_items):
-            for item2 in stm_items[i+1:]:
-                # Check for temporal proximity
-                time_diff = abs((item1.encoding_time - item2.encoding_time).total_seconds())
-                
-                if time_diff < 3600:  # Within 1 hour
-                    # Add mutual associations
-                    if item2.id not in item1.associations:
-                        item1.associations.append(item2.id)
-                        associations_created += 1
-                    
-                    if item1.id not in item2.associations:
-                        item2.associations.append(item1.id)
-                        associations_created += 1
-        
-        return associations_created
+        time_elapsed = (datetime.now() - self.last_consolidation).total_seconds()
+        return time_elapsed >= self.consolidation_interval

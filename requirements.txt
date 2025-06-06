@@ -142,6 +142,8 @@ click>=8.1.0
 # Image Processing (PIL/Pillow)
 pillow>=10.0.0
 
+psutil>=7.0.0
+
 # ========================================
 # RESEARCH AND ANALYSIS
 # ========================================
