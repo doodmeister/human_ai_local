@@ -5,6 +5,7 @@ Coding standards, domain knowledge, and preferences that AI should follow.
 All code written in python, terminal is bash running on windows 11
 run all commands in the terminal without prompting to continue
 use Git commands to checkout and run in a dev branch
+emojis in bash commands cause encoding issues. avoid emojis in bash commands.
 
 
 # Human-AI Cognition Project - AI Assistant Instructions
