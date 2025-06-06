@@ -2,10 +2,10 @@
 Integrated Memory System
 Coordinates between STM, LTM, and other memory components
 """
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Union
 from datetime import datetime
 import logging
-from .stm import ShortTermMemory
+from .stm import ShortTermMemory, VectorShortTermMemory
 from .ltm import LongTermMemory, VectorLongTermMemory
 
 logger = logging.getLogger(__name__)
@@ -18,16 +18,16 @@ class MemorySystem:
     - Automatic STM to LTM consolidation
     - Cross-system memory retrieval
     - Memory reinforcement and forgetting
-    - Dream-state consolidation
-    """
+    - Dream-state consolidation    """
     
     def __init__(
         self,
-        stm_capacity: int = 7,
+        stm_capacity: int = 100,  # Increased for cognitive system
         stm_decay_threshold: float = 0.1,
         ltm_storage_path: Optional[str] = None,
         consolidation_interval: int = 300,  # 5 minutes
         use_vector_ltm: bool = True,
+        use_vector_stm: bool = True,  # New parameter for vector STM
         chroma_persist_dir: Optional[str] = None,
         embedding_model: str = "all-MiniLM-L6-v2"
     ):
@@ -35,15 +35,27 @@ class MemorySystem:
         Initialize integrated memory system
         
         Args:
-            stm_capacity: STM capacity limit
+            stm_capacity: STM capacity limit (100 for cognitive system)
             stm_decay_threshold: STM decay threshold
             ltm_storage_path: LTM storage path
             consolidation_interval: Auto-consolidation interval in seconds
             use_vector_ltm: Whether to use vector-based LTM with ChromaDB
+            use_vector_stm: Whether to use vector-based STM with ChromaDB
             chroma_persist_dir: ChromaDB persistence directory
             embedding_model: SentenceTransformer model name
         """
-        self.stm = ShortTermMemory(capacity=stm_capacity, decay_threshold=stm_decay_threshold)
+        # Initialize STM with vector database support
+        self.use_vector_stm = use_vector_stm
+        if use_vector_stm:
+            self.stm = VectorShortTermMemory(
+                capacity=stm_capacity,
+                decay_threshold=stm_decay_threshold,
+                chroma_persist_dir=chroma_persist_dir,
+                embedding_model=embedding_model,
+                use_vector_db=True
+            )
+        else:
+            self.stm = ShortTermMemory(capacity=stm_capacity, decay_threshold=stm_decay_threshold)
         
         # Initialize LTM with vector database support
         self.use_vector_ltm = use_vector_ltm
@@ -62,7 +74,7 @@ class MemorySystem:
         self.last_consolidation = datetime.now()
         self.session_memories = []  # Track memories for this session
         
-        logger.info(f"Integrated memory system initialized (Vector LTM: {use_vector_ltm})")
+        logger.info(f"Integrated memory system initialized (Vector STM: {use_vector_stm}, Vector LTM: {use_vector_ltm})")
     
     def store_memory(
         self,
@@ -295,8 +307,7 @@ class MemorySystem:
         
         # Basic consolidation with enhanced criteria
         stats = self.consolidate_memories(force=True)
-        
-        # Note: Memory reinforcement would require additional methods in LTM classes
+          # Note: Memory reinforcement would require additional methods in LTM classes
         stats['reinforced_memories'] = 0
         stats['dream_duration_minutes'] = duration_minutes
         
@@ -310,6 +321,7 @@ class MemorySystem:
             'last_consolidation': self.last_consolidation,
             'session_memories_count': len(self.session_memories),
             'consolidation_interval': self.consolidation_interval,
+            'use_vector_stm': self.use_vector_stm,
             'use_vector_ltm': self.use_vector_ltm,
             'system_active': True
         }
@@ -323,3 +335,93 @@ class MemorySystem:
         """Check if automatic consolidation should occur"""
         time_elapsed = (datetime.now() - self.last_consolidation).total_seconds()
         return time_elapsed >= self.consolidation_interval
+    
+    def search_stm_semantic(
+        self,
+        query: str,
+        max_results: int = 5,
+        min_similarity: float = 0.5,
+        min_activation: float = 0.0
+    ) -> List[Tuple[Any, float]]:
+        """
+        Semantic search in STM using vector similarity
+        
+        Args:
+            query: Search query
+            max_results: Maximum number of results
+            min_similarity: Minimum similarity threshold
+            min_activation: Minimum activation threshold
+        
+        Returns:
+            List of (memory_item, relevance_score) tuples
+        """
+        if self.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
+            # Use vector STM semantic search
+            vector_results = self.stm.search_semantic(
+                query=query,
+                max_results=max_results,
+                min_similarity=min_similarity,
+                min_activation=min_activation            )
+            return [(result.item, result.relevance_score) for result in vector_results]
+        else:
+            # Fallback to regular STM search
+            return self.stm.search(query=query, max_results=max_results, min_activation=min_activation)
+    
+    def get_context_for_query(
+        self,
+        query: str,
+        max_stm_context: int = 5,
+        max_ltm_context: int = 5,
+        min_relevance: float = 0.3
+    ) -> Dict[str, List[Any]]:
+        """
+        Get relevant context from both STM and LTM for cognitive processing
+        
+        Args:
+            query: Query to find context for
+            max_stm_context: Maximum STM context items
+            max_ltm_context: Maximum LTM context items  
+            min_relevance: Minimum relevance threshold
+        
+        Returns:
+            Dictionary with 'stm' and 'ltm' context lists
+        """
+        context = {"stm": [], "ltm": []}
+        
+        try:
+            # Get STM context
+            if self.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
+                stm_results = self.stm.get_context_for_query(
+                    query=query,
+                    max_context_items=max_stm_context,
+                    min_relevance=min_relevance
+                )
+                context["stm"] = [result.item for result in stm_results]
+            else:
+                # Fallback for regular STM
+                stm_results = self.stm.search(query=query, max_results=max_stm_context)
+                context["stm"] = [item for item, score in stm_results if score >= min_relevance]
+            
+            # Get LTM context
+            if self.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
+                ltm_results = self.ltm.search_semantic(
+                    query=query,
+                    max_results=max_ltm_context,
+                    min_similarity=min_relevance
+                )
+                context["ltm"] = [result.record for result in ltm_results]
+            else:
+                # Fallback for regular LTM
+                ltm_results = self.ltm.search_by_content(query=query, max_results=max_ltm_context)
+                context["ltm"] = [record for record, score in ltm_results if score >= min_relevance]
+            
+            logger.debug(f"Retrieved context: {len(context['stm'])} STM + {len(context['ltm'])} LTM items")
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error getting context for query: {e}")
+            return {"stm": [], "ltm": []}
+    
+    # Type annotations for memory components
+    stm: Union[ShortTermMemory, VectorShortTermMemory]
+    ltm: Union[LongTermMemory, VectorLongTermMemory]
