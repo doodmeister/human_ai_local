@@ -1,0 +1,38 @@
+{
+  "id": "8c7ec33b-f707-427e-b9ca-39dc80fbe8f3",
+  "summary": "Development session on episodic memory",
+  "detailed_content": "Implemented and tested the episodic memory system with rich contextual metadata and cross-references to other memory systems.",
+  "timestamp": "2025-06-07T15:36:23.336724",
+  "duration": 60.0,
+  "context": {
+    "location": "test_lab",
+    "emotional_state": 0.6,
+    "cognitive_load": 0.4,
+    "attention_focus": [],
+    "interaction_type": "development_session",
+    "participants": [
+      "developer",
+      "ai_system"
+    ],
+    "environmental_factors": {}
+  },
+  "associated_stm_ids": [
+    "stm_dev_1",
+    "stm_dev_2"
+  ],
+  "associated_ltm_ids": [
+    "ltm_memory_systems"
+  ],
+  "source_memory_ids": [],
+  "importance": 0.9,
+  "emotional_valence": 0.7,
+  "vividness": 0.5,
+  "confidence": 0.8,
+  "life_period": "system_development",
+  "episode_sequence": 0,
+  "related_episodes": [],
+  "access_count": 1,
+  "last_access": "2025-06-07T15:36:23.336724",
+  "consolidation_strength": 0.0,
+  "rehearsal_count": 0
+}

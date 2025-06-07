@@ -1,0 +1,30 @@
+{
+  "id": "8d8432d2-cc3b-496b-9e0d-4995063e9ed8",
+  "summary": "Test memory 5",
+  "detailed_content": "Content for test memory 5",
+  "timestamp": "2025-06-07T15:36:27.684620",
+  "duration": 60.0,
+  "context": {
+    "location": null,
+    "emotional_state": 0.0,
+    "cognitive_load": 0.0,
+    "attention_focus": [],
+    "interaction_type": "conversation",
+    "participants": [],
+    "environmental_factors": {}
+  },
+  "associated_stm_ids": [],
+  "associated_ltm_ids": [],
+  "source_memory_ids": [],
+  "importance": 0.8999999999999999,
+  "emotional_valence": 0.4,
+  "vividness": 0.5,
+  "confidence": 0.8,
+  "life_period": "phase_2",
+  "episode_sequence": 0,
+  "related_episodes": [],
+  "access_count": 0,
+  "last_access": "2025-06-07T15:36:27.684620",
+  "consolidation_strength": 0.0,
+  "rehearsal_count": 0
+}

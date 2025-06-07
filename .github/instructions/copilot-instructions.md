@@ -1,11 +1,14 @@
 ---
 applyTo: '**'
 ---
-Coding standards, domain knowledge, and preferences that AI should follow.
-All code written in python, terminal is bash running on windows 11
+All code should be written in python
+The terminal is bash running on windows 11
 run all commands in the terminal without prompting to continue
-use Git commands to checkout and run in a dev branch
-emojis in bash commands cause encoding issues. avoid emojis in bash commands.
+use Git commands when necessary
+emojis in bash commands cause encoding issues
+avoid emojis in bash commands.
+All test scripts should be saved in the tests/ directory
+ruff is our linter
 
 
 # Human-AI Cognition Project - AI Assistant Instructions
@@ -107,13 +110,6 @@ human_ai_local/
 └── infrastructure/             # Infrastructure as Code
 ```
 
-## ✅ Current Integration Status
-- **Sensory Processing**: ✅ Fully integrated with cognitive agent
-- **Attention Mechanism**: ✅ Using real sensory scores
-- **Memory Systems**: ✅ STM/LTM with ChromaDB
-- **Meta-Cognition**: ✅ Basic self-reflection
-- **Dream Consolidation**: 🚧 In progress
-
 ## 🎯 Development Guidelines
 
 ### Code Standards
@@ -168,11 +164,12 @@ LTM_COLLECTION=long_term_memory
 - **LSHN Episodic Memory**: Hopfield-based associative memory
 
 ## 🎯 Current Development Focus
-1. **Performance Optimization**: Batch processing and memory usage
-2. **Enhanced Multimodal**: Audio, visual input support
-3. **Advanced Filtering**: Sophisticated adaptive algorithms
-4. **Dream Consolidation**: Complete automated pipeline
-5. **Neural Integration**: DPAD/LSHN implementation
+- **Episodic Memory Integration**: Episodic Memory Integration
+- **Procedural Memory Integration**: Procedural Memory Integration
+- **OpenAI LLM Integration**: OpenAI LLM Integration for meta-cognitive processing
+- **Advanced Visualization**: Real-time cognitive state dashboards and monitoring
+- **Multi-modal Processing**: Vision, audio, and sensory integration
+- **Human interface**: dashboard and API for cognitive agent interaction
 
 ## 💡 AI Assistant Notes
 - Follow cognitive principles in all development decisions
@@ -180,4 +177,4 @@ LTM_COLLECTION=long_term_memory
 - Prioritize explainability - all decisions should be traceable
 - Test for human-likeness, not just functionality
 - Use terminal commands without prompting to continue
-- All code in Python, terminal is bash on Windows 11
+

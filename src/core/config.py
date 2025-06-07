@@ -45,6 +45,41 @@ class AWSConfig:
     region: str = "us-east-1"
     bedrock_model: str = "anthropic.claude-3-sonnet-20240229-v1:0"
     opensearch_endpoint: Optional[str] = None
+
+@dataclass
+class PerformanceConfig:
+    """Configuration for performance optimization"""
+    enabled: bool = field(default_factory=lambda: os.getenv("PERFORMANCE_OPTIMIZATION", "true").lower() == "true")
+    
+    # Batch processing
+    enable_batch_optimization: bool = True
+    dynamic_batch_sizing: bool = True
+    max_batch_size: int = 64
+    min_batch_size: int = 4
+    target_memory_usage: float = 0.8
+    
+    # Memory efficiency
+    enable_memory_pooling: bool = True
+    enable_gradient_checkpointing: bool = True
+    memory_cleanup_interval: int = 100
+    tensor_cache_size: int = 1000
+    
+    # Neural training optimization
+    enable_mixed_precision: bool = True
+    enable_adaptive_learning_rate: bool = True
+    enable_early_stopping: bool = True
+    performance_monitoring_window: int = 50
+    
+    # Throughput optimization
+    enable_parallel_processing: bool = True
+    max_worker_threads: int = 4
+    enable_embedding_cache: bool = True
+    cache_ttl: int = 300
+    
+    # GPU optimization
+    enable_gpu_acceleration: bool = True
+    gpu_memory_fraction: float = 0.9
+    enable_tensor_cores: bool = True
     
 @dataclass
 class CognitiveConfig:
@@ -59,6 +94,7 @@ class CognitiveConfig:
     attention: AttentionConfig = field(default_factory=AttentionConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     aws: AWSConfig = field(default_factory=AWSConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     
     # Runtime settings
     debug_mode: bool = field(default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true")

@@ -461,15 +461,15 @@ class MemorySystem:
             importance: Episode importance (0.0-1.0)
             emotional_valence: Emotional valence (-1.0 to 1.0)
             life_period: Life period categorization
-          Returns:
+        
+        Returns:
             Episode ID if created successfully, None otherwise
         """
         if not hasattr(self, 'episodic') or self.episodic is None:
             logger.warning("Episodic memory system not initialized")
             return None
         
-        try:            
-            # Create context from provided information
+        try:            # Create context from provided information
             from .episodic.episodic_memory import EpisodicContext
             context = EpisodicContext(
                 participants=participants or [],
@@ -478,7 +478,7 @@ class MemorySystem:
                 cognitive_load=cognitive_load
             )
             
-            episode_id = self.episodic.store_memory(
+            episode_id = self.episodic.create_episode(
                 summary=summary,
                 detailed_content=detailed_content,
                 context=context,
@@ -512,7 +512,8 @@ class MemorySystem:
             date_range: Optional date range filter (start, end)
             life_periods: Optional life period filter
             min_importance: Minimum importance threshold
-          Returns:
+        
+        Returns:
             List of episodic search results
         """
         if not hasattr(self, 'episodic') or self.episodic is None:
@@ -520,25 +521,24 @@ class MemorySystem:
             return []
         
         try:
-            results = self.episodic.search_memories(
+            results = self.episodic.search_semantic(
                 query=query,
-                limit=max_results,
-                min_relevance=min_similarity,
-                time_range=date_range,
-                life_period=life_periods[0] if life_periods and len(life_periods) > 0 else None,
-                importance_threshold=min_importance
+                max_results=max_results,
+                min_similarity=min_similarity,
+                date_range=date_range,
+                life_periods=life_periods,
+                min_importance=min_importance
             )
             return [result.memory for result in results]
         except Exception as e:
             logger.error(f"Error searching episodic memories: {e}")
             return []
-
+    
     def get_cross_referenced_episodes(
         self,
         memory_id: str,
         memory_system: str = "both"  # "stm", "ltm", or "both"
-    ) -> List[Any]:
-        """
+    ) -> List[Any]:        """
         Get episodic memories cross-referenced to STM/LTM memories
         
         Args:
@@ -551,24 +551,22 @@ class MemorySystem:
         if not hasattr(self, 'episodic') or self.episodic is None:
             logger.warning("Episodic memory system not initialized")
             return []
-            
+        
         try:
-            # Search for memories with cross-references to the given memory ID
-            all_memories = []
-            for memory in self.episodic._memory_cache.values():
-                found = False
-                
-                if memory_system in ["stm", "both"] and memory_id in memory.associated_stm_ids:
-                    found = True
-                elif memory_system in ["ltm", "both"] and memory_id in memory.associated_ltm_ids:
-                    found = True
-                elif memory_system == "both" and memory_id in memory.source_memory_ids:
-                    found = True
-                
-                if found:
-                    all_memories.append(memory)
+            # Map memory_system parameter to memory_type for the new method
+            if memory_system == "both":
+                memory_type = "any"
+            elif memory_system == "stm":
+                memory_type = "stm"
+            elif memory_system == "ltm":
+                memory_type = "ltm"
+            else:
+                memory_type = "any"
             
-            return all_memories
+            return self.episodic.find_episodes_by_memory_reference(
+                memory_id=memory_id,
+                memory_type=memory_type
+            )
         except Exception as e:
             logger.error(f"Error getting cross-referenced episodes: {e}")
             return []

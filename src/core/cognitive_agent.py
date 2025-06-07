@@ -11,6 +11,7 @@ from ..memory.memory_system import MemorySystem
 from ..attention.attention_mechanism import AttentionMechanism
 from ..processing.sensory import SensoryInterface, SensoryProcessor
 from ..processing.dream import DreamProcessor
+from ..optimization.performance_optimizer import PerformanceOptimizer, PerformanceConfig
 
 class CognitiveAgent:
     """
@@ -82,6 +83,15 @@ class CognitiveAgent:
             neural_integration_manager=self.neural_integration
         )
 
+        # Performance optimizer (if enabled in config)
+        self.performance_optimizer = None
+        if self.config.performance.enabled:
+            self.performance_optimizer = PerformanceOptimizer(
+                config=PerformanceConfig.from_env(),
+                cognitive_agent=self
+            )
+            print("✓ Performance optimizer initialized")
+        
         print("Cognitive components initialized")
     
     async def process_input(
@@ -298,7 +308,7 @@ class CognitiveAgent:
             tags=["conversation", "interaction"]
         )
         
-        # Also keep in temporary conversation context for immediate access
+                # Also keep in temporary conversation context for immediate access
         memory_entry = {
             "id": memory_id,
             "input": input_data,
@@ -313,6 +323,7 @@ class CognitiveAgent:
         # Keep only recent context (temporary until proper memory system)
         if len(self.conversation_context) > 10:
             self.conversation_context = self.conversation_context[-10:]
+    
     def _update_cognitive_state(self, attention_scores: Dict[str, float]):
         """Update cognitive state based on processing"""
         # The attention mechanism handles its own fatigue and state updates
@@ -324,12 +335,13 @@ class CognitiveAgent:
         
         print(f"DEBUG: Updated cognitive state - "
               f"Fatigue: {self.current_fatigue:.3f}, "
-              f"Cognitive Load: {attention_scores.get('cognitive_load', 0.0):.3f}, "              f"Items in Focus: {attention_scores.get('items_in_focus', 0)}")
+              f"Cognitive Load: {attention_scores.get('cognitive_load', 0.0):.3f}, "
+              f"Items in Focus: {attention_scores.get('items_in_focus', 0)}")
     
     def get_cognitive_status(self) -> Dict[str, Any]:
         """Get current cognitive state information"""
         # Get memory system status
-        memory_status = self.memory.get_memory_status()
+        memory_status = self.memory.get_status()
           # Get attention mechanism status
         attention_status = self.attention.get_attention_status()
         

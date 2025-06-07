@@ -10,8 +10,8 @@ from datetime import datetime
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from memory.memory_system import MemorySystem
-from memory.stm import VectorShortTermMemory
+from src.memory.memory_system import MemorySystem
+from src.memory.stm import VectorShortTermMemory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

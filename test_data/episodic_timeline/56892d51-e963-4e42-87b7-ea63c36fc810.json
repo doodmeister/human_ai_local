@@ -1,0 +1,30 @@
+{
+  "id": "56892d51-e963-4e42-87b7-ea63c36fc810",
+  "summary": "Testing phase",
+  "detailed_content": "Created comprehensive test suite",
+  "timestamp": "2025-06-07T15:36:25.818019",
+  "duration": 60.0,
+  "context": {
+    "location": null,
+    "emotional_state": 0.0,
+    "cognitive_load": 0.0,
+    "attention_focus": [],
+    "interaction_type": "conversation",
+    "participants": [],
+    "environmental_factors": {}
+  },
+  "associated_stm_ids": [],
+  "associated_ltm_ids": [],
+  "source_memory_ids": [],
+  "importance": 1.0,
+  "emotional_valence": 0.0,
+  "vividness": 0.5,
+  "confidence": 0.8,
+  "life_period": "project_development",
+  "episode_sequence": 0,
+  "related_episodes": [],
+  "access_count": 0,
+  "last_access": "2025-06-07T15:36:25.818019",
+  "consolidation_strength": 0.0,
+  "rehearsal_count": 0
+}
