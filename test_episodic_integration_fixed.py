@@ -11,6 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 from datetime import datetime, timedelta
 import tempfile
 import shutil
+import time
 from src.memory.memory_system import MemorySystem
 from src.memory.episodic.episodic_memory import EpisodicContext
 
@@ -38,8 +39,7 @@ def test_episodic_memory_integration():
         if not hasattr(memory_system, 'episodic') or memory_system.episodic is None:
             print("   ❌ ERROR: Episodic memory not initialized!")
             return
-        
-        # Test 1: Create episodic memory
+          # Test 1: Create episodic memory
         print("\n2. Creating Episodic Memory...")
         episode_id = memory_system.create_episodic_memory(
             summary="Python programming discussion",
@@ -51,9 +51,20 @@ def test_episodic_memory_integration():
             emotional_valence=0.3,
             life_period="learning_session"
         )
-        
         print(f"   Created Episode ID: {episode_id}")
         print(f"   Episode Created: {episode_id is not None}")
+        
+        # Wait for ChromaDB initialization and indexing
+        time.sleep(2)
+        
+        # Check ChromaDB status
+        if hasattr(memory_system.episodic, 'collection') and memory_system.episodic.collection:
+            print(f"   ChromaDB Collection: {memory_system.episodic.collection.name}")
+            try:
+                count_result = memory_system.episodic.collection.count()
+                print(f"   ChromaDB Records: {count_result}")
+            except Exception as e:
+                print(f"   ChromaDB Count Error: {e}")
         
         # Test 2: Search episodic memories
         print("\n3. Searching Episodic Memories...")
@@ -68,6 +79,16 @@ def test_episodic_memory_integration():
             print(f"   {i+1}. {memory.summary[:50]}...")
             print(f"       Importance: {memory.importance:.2f}")
             print(f"       Emotional Valence: {memory.emotional_valence:.2f}")
+        
+        # Also try with lower similarity threshold
+        if len(results) == 0:
+            print("   Retrying search with lower similarity threshold...")
+            results = memory_system.search_episodic_memories(
+                query="programming",
+                max_results=5,
+                min_similarity=0.1
+            )
+            print(f"   Search Results Found (low threshold): {len(results)}")
         
         # Test 3: Create another episodic memory with cross-references
         print("\n4. Creating Second Episode with Cross-References...")
@@ -97,11 +118,12 @@ def test_episodic_memory_integration():
             stm_ids=[stm_id1, stm_id2],
             importance=0.7,
             emotional_valence=0.4,
-            life_period="learning_session"
-        )
-        
+            life_period="learning_session"        )
         print(f"   Second Episode ID: {episode_id2}")
         print(f"   With STM Cross-References: {[stm_id1, stm_id2]}")
+        
+        # Wait for ChromaDB to update
+        time.sleep(2)
         
         # Test 4: Search for cross-referenced episodes
         print("\n5. Testing Cross-Reference Search...")

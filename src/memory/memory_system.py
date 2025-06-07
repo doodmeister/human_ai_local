@@ -57,10 +57,10 @@ class MemorySystem:
             )
         else:
             self.stm = ShortTermMemory(capacity=stm_capacity, decay_threshold=stm_decay_threshold)
-        
-        # Initialize LTM with vector database support
+          # Initialize LTM with vector database support
         self.use_vector_ltm = use_vector_ltm
-        if use_vector_ltm:            self.ltm = VectorLongTermMemory(
+        if use_vector_ltm:
+            self.ltm = VectorLongTermMemory(
                 storage_path=ltm_storage_path,
                 chroma_persist_dir=chroma_persist_dir,
                 embedding_model=embedding_model,
