@@ -1,13 +1,10 @@
 """
 Test suite for Vector Long-Term Memory implementation
 """
-import pytest
 import tempfile
 import shutil
 from pathlib import Path
-from datetime import datetime
 import sys
-import os
 
 # Add src to Python path
 current_dir = Path(__file__).parent

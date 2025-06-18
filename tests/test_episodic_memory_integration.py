@@ -5,11 +5,9 @@ Comprehensive tests for the newly implemented episodic memory system,
 including all major functionality and integration with the cognitive architecture.
 """
 
-import pytest
 import sys
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -17,8 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from memory.episodic.episodic_memory import (
     EpisodicMemorySystem,
     EpisodicMemory,
-    EpisodicContext,
-    EpisodicSearchResult
+    EpisodicContext
 )
 
 def test_episodic_context():

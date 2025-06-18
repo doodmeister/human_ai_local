@@ -13,12 +13,11 @@ import time
 import logging
 import sys
 import os
-from typing import List, Dict, Any
 
 # Add the src directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.optimization import PerformanceOptimizer, PerformanceConfig, create_performance_optimizer
+from src.optimization import PerformanceConfig, create_performance_optimizer
 from src.processing.neural.dpad_network import DPADNetwork, DPADConfig
 from src.processing.neural.lshn_network import LSHNNetwork, LSHNConfig
 from src.core.config import CognitiveConfig
@@ -60,7 +59,7 @@ async def test_performance_optimization_framework():
         # Test memory monitoring
         print("\n🧠 TESTING MEMORY MONITORING")
         memory_stats = optimizer.memory_monitor.get_memory_usage()
-        print(f"✓ Memory monitoring active:")
+        print("✓ Memory monitoring active:")
         print(f"  CPU usage: {memory_stats['cpu_percent']:.1%}")
         print(f"  GPU usage: {memory_stats['gpu_percent']:.1%}")
         
@@ -142,7 +141,7 @@ async def test_performance_optimization_framework():
             targets=train_targets
         )
         
-        print(f"✓ Training optimization completed")
+        print("✓ Training optimization completed")
         print(f"  Loss: {training_result['loss']:.4f}")
         print(f"  Step time: {training_result['step_time']:.3f}s")
         
@@ -178,14 +177,14 @@ async def test_performance_optimization_framework():
         
         # Memory efficiency metrics
         memory_stats = opt_stats['memory_stats']
-        print(f"  Memory efficiency:")
+        print("  Memory efficiency:")
         print(f"    CPU usage: {memory_stats['cpu_percent']:.1%}")
         print(f"    GPU usage: {memory_stats['gpu_percent']:.1%}")
         
         # Training performance metrics
         training_stats = opt_stats['training_stats']
         if training_stats:
-            print(f"  Training performance:")
+            print("  Training performance:")
             print(f"    Total steps: {training_stats.get('total_steps', 0)}")
             print(f"    Average loss: {training_stats.get('avg_loss', 0):.4f}")
             print(f"    Average throughput: {training_stats.get('avg_throughput', 0):.1f} samples/sec")
@@ -242,7 +241,7 @@ async def test_performance_optimization_integration():
         from src.optimization import optimize_tensor_operations
         optimized_tensors = optimize_tensor_operations(test_tensors)
         
-        print(f"✓ Tensor optimization completed:")
+        print("✓ Tensor optimization completed:")
         for i, (orig, opt) in enumerate(zip(test_tensors, optimized_tensors)):
             print(f"  Tensor {i}: {orig.shape} -> contiguous: {opt.is_contiguous()}, device: {opt.device}")
         

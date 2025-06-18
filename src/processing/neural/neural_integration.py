@@ -22,7 +22,7 @@ from threading import Lock
 from .dpad_network import DPADNetwork, DPADTrainer, DPADConfig
 from .lshn_network import LSHNNetwork, LSHNTrainer, LSHNConfig
 from ...core.config import CognitiveConfig
-from ...optimization import PerformanceOptimizer, PerformanceConfig, create_performance_optimizer
+from ...optimization import PerformanceConfig, create_performance_optimizer
 
 logger = logging.getLogger(__name__)
 

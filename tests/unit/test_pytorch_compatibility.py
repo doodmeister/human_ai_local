@@ -6,7 +6,6 @@ Test script to verify PyTorch compatibility of dummy classes
 import sys
 import torch
 import torch.nn as nn
-from typing import List
 
 # Temporarily hide hflayers to test fallback
 original_modules = sys.modules.copy()

@@ -5,7 +5,6 @@ Test script to verify dummy classes work correctly when hopfield-layers is not a
 
 import sys
 import torch
-import torch.nn as nn
 
 # Temporarily hide hflayers to test fallback
 original_modules = sys.modules.copy()

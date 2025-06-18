@@ -2,8 +2,6 @@
 """
 Simple debug script for Life Period filtering
 """
-import sys
-import os
 
 print("🔍 Starting Life Period Debug")
 

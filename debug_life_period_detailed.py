@@ -4,8 +4,6 @@ Debug script for Life Period filtering in Episodic Memory
 """
 import tempfile
 import shutil
-from datetime import datetime, timedelta
-from src.memory.memory_system import MemorySystem
 from src.memory.episodic.episodic_memory import EpisodicMemorySystem
 
 def debug_life_period():
@@ -46,7 +44,7 @@ def debug_life_period():
         time.sleep(2)
         
         # Check what's actually stored in ChromaDB
-        print(f"\n2. Checking ChromaDB collection contents:")
+        print("\n2. Checking ChromaDB collection contents:")
         collection = episodic.collection
         if collection:
             # Get all documents
@@ -61,10 +59,10 @@ def debug_life_period():
                 if 'life_period' in metadata:
                     print(f"      ✅ life_period found: '{metadata['life_period']}'")
                 else:
-                    print(f"      ❌ life_period NOT found in metadata")
+                    print("      ❌ life_period NOT found in metadata")
         
         # Test direct search in episodic system
-        print(f"\n3. Testing direct search in EpisodicMemorySystem:")
+        print("\n3. Testing direct search in EpisodicMemorySystem:")
         results = episodic.search_memories(
             query="debug test",
             life_period=test_life_period,
@@ -76,7 +74,7 @@ def debug_life_period():
             print(f"        Life Period: {result.get('life_period', 'Not found')}")
         
         # Test search without life period filter
-        print(f"\n4. Testing search without life period filter:")
+        print("\n4. Testing search without life period filter:")
         all_results = episodic.search_memories(
             query="debug test",
             max_results=10
@@ -87,7 +85,7 @@ def debug_life_period():
             print(f"        Life Period: {result.get('life_period', 'Not found')}")
         
         # Test ChromaDB query directly with where clause
-        print(f"\n5. Testing ChromaDB direct query with where clause:")
+        print("\n5. Testing ChromaDB direct query with where clause:")
         try:
             direct_results = collection.query(
                 query_texts=["debug test"],
@@ -102,7 +100,7 @@ def debug_life_period():
             print(f"   ❌ Direct ChromaDB query failed: {e}")
         
         # Test if the issue is in the query construction
-        print(f"\n6. Testing various query constructions:")
+        print("\n6. Testing various query constructions:")
         test_queries = [
             {"life_period": test_life_period},
             {"life_period": {"$eq": test_life_period}},

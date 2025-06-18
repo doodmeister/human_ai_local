@@ -2,13 +2,12 @@
 Enhanced Long-Term Memory (LTM) System with Vector Database Integration
 Implements ChromaDB for semantic memory storage and retrieval
 """
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
-import hashlib
 
 try:
     import chromadb

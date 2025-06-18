@@ -4,7 +4,6 @@
 import os
 import tempfile
 import shutil
-from datetime import datetime, timedelta
 
 # Set up path
 import sys

@@ -2,13 +2,11 @@
 Enhanced Short-Term Memory (STM) System with Vector Database Integration
 Implements ChromaDB for semantic memory storage and retrieval while maintaining STM characteristics
 """
-from typing import Dict, List, Optional, Any, Tuple, Union
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
-import hashlib
 import types
 
 # Import ChromaDB and SentenceTransformers with fallback

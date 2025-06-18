@@ -13,7 +13,6 @@ import tempfile
 import shutil
 import time
 from src.memory.memory_system import MemorySystem
-from src.memory.episodic.episodic_memory import EpisodicContext
 
 
 def test_episodic_memory_integration():

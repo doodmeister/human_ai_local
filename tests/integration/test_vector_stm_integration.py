@@ -5,7 +5,6 @@ Test script for Vector STM integration with MemorySystem
 import sys
 import os
 import logging
-from datetime import datetime
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))

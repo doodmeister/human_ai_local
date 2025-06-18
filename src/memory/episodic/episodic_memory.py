@@ -12,22 +12,22 @@ Key Features:
 - Semantic search and temporal retrieval patterns
 """
 
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
-import hashlib
 import uuid
+import sys
 
+chromadb = None
+CHROMADB_AVAILABLE = False
 try:
     import chromadb
-    from chromadb.config import Settings
     CHROMADB_AVAILABLE = True
 except ImportError:
-    CHROMADB_AVAILABLE = False
-    chromadb = None
+    pass
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -37,6 +37,11 @@ except ImportError:
     SentenceTransformer = None
 
 logger = logging.getLogger(__name__)
+
+def _safe_first_list(val):
+    if isinstance(val, list) and len(val) > 0 and isinstance(val[0], list):
+        return val[0]
+    return []
 
 @dataclass
 class EpisodicContext:
@@ -230,7 +235,7 @@ class EpisodicMemorySystem:
                 logger.warning(f"Failed to load embedding model: {e}")
         
         # Initialize ChromaDB
-        self.client = None
+        self.chroma_client = None
         self.collection = None
         if CHROMADB_AVAILABLE:
             self._initialize_chromadb()
@@ -242,21 +247,23 @@ class EpisodicMemorySystem:
         logger.info("Episodic Memory System initialized")
     
     def _initialize_chromadb(self):
+        global chromadb
         """Initialize ChromaDB client and collection"""
         if not CHROMADB_AVAILABLE or chromadb is None:
-            logger.warning("ChromaDB not available")
+            self.chroma_client = None
+            self.collection = None
             return
             
         try:
             # Try to create client with minimal configuration
-            self.client = chromadb.PersistentClient(path=str(self.chroma_persist_dir))
+            self.chroma_client = chromadb.Client()
             
             # Get or create collection
             try:
-                self.collection = self.client.get_collection(self.collection_name)
+                self.collection = self.chroma_client.get_collection(self.collection_name)
                 logger.info(f"Loaded existing ChromaDB collection: {self.collection_name}")
             except ValueError:
-                self.collection = self.client.create_collection(
+                self.collection = self.chroma_client.create_collection(
                     name=self.collection_name,
                     metadata={"description": "Episodic memories with rich contextual metadata"}
                 )
@@ -264,8 +271,24 @@ class EpisodicMemorySystem:
                 
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
-            self.client = None
+            self.chroma_client = None
             self.collection = None
+        
+        # Ensure ChromaDB client and collection are initialized
+        if not hasattr(self, 'chroma_client') or self.chroma_client is None:
+            try:
+                import chromadb
+                self.chroma_client = chromadb.Client()
+                sys.stdout.flush()
+            except Exception:
+                sys.stdout.flush()
+        if self.collection is None and hasattr(self, 'chroma_client') and self.chroma_client is not None:
+            try:
+                sys.stdout.flush()
+                self.collection = self.chroma_client.get_or_create_collection(self.collection_name)
+                sys.stdout.flush()
+            except Exception:
+                sys.stdout.flush()
     
     def _load_from_json_backup(self):
         """Load memories from JSON backup files"""
@@ -369,12 +392,14 @@ class EpisodicMemorySystem:
                     "timestamp": memory.timestamp.isoformat(),
                     "importance": importance,
                     "emotional_valence": emotional_valence,
-                    "life_period": life_period or "",
+                    "life_period": life_period or "general",
                     "interaction_type": memory.context.interaction_type,
                     "duration": memory.duration.total_seconds(),
                     "vividness": memory.vividness,
                     "confidence": memory.confidence
                 }
+                if life_period:
+                    metadata["life_period"] = life_period
                 
                 self.collection.add(
                     ids=[memory_id],
@@ -442,65 +467,94 @@ class EpisodicMemorySystem:
                         "$lte": emotional_range[1]
                     }
                 
+                # Run the query
                 search_results = self.collection.query(
                     query_texts=[query],
                     n_results=limit * 2,  # Get more results for additional filtering
                     where=where_clause if where_clause else None
                 )
-                
-                for i, memory_id in enumerate(search_results["ids"][0]):
-                    distance = search_results["distances"][0][i] if search_results["distances"] else 0.5
-                    relevance = 1.0 - distance  # Convert distance to relevance
-                    
+
+                result_ids = _safe_first_list(search_results.get('ids'))
+                distances = _safe_first_list(search_results.get('distances'))
+                # Append all valid ChromaDB results to the results list
+                for i, memory_id in enumerate(result_ids):
+                    # If a metadata filter is used, treat all as relevant
+                    if where_clause:
+                        relevance = 1.0
+                        distance = distances[i] if distances and i < len(distances) else 0.0
+                    else:
+                        distance = distances[i] if distances and i < len(distances) else 0.0
+                        relevance = 1.0 - distance
                     if relevance < min_relevance:
                         continue
-                    
                     memory = self.retrieve_memory(memory_id)
                     if memory is None:
                         continue
-                    
-                    # Apply time range filter
-                    if time_range and not (time_range[0] <= memory.timestamp <= time_range[1]):
-                        continue
-                    
+                    # No extra filtering here; already filtered by ChromaDB
                     results.append(EpisodicSearchResult(
                         memory=memory,
                         relevance=relevance,
                         match_type="semantic",
                         search_metadata={"chroma_distance": distance}
                     ))
-                    
+                return results[:limit]
+                
             except Exception as e:
                 logger.warning(f"ChromaDB search failed: {e}")
-        
-        # Fallback to cache search if ChromaDB fails
-        if not results:
-            query_lower = query.lower()
-            for memory in self._memory_cache.values():
-                # Simple text matching
-                text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
-                if query_lower in text_to_search:
-                    # Apply filters
-                    if life_period and memory.life_period != life_period:
-                        continue
-                    if memory.importance < importance_threshold:
-                        continue
-                    if emotional_range and not (emotional_range[0] <= memory.emotional_valence <= emotional_range[1]):
-                        continue
-                    if time_range and not (time_range[0] <= memory.timestamp <= time_range[1]):
-                        continue
-                    
-                    # Simple relevance calculation
-                    relevance = 0.7 if query_lower in memory.summary.lower() else 0.5
-                    
-                    if relevance >= min_relevance:
-                        memory.update_access()
-                        results.append(EpisodicSearchResult(
-                            memory=memory,
-                            relevance=relevance,
-                            match_type="text_match",
-                            search_metadata={}
-                        ))
+                # Fallback to cache search if ChromaDB fails
+                results = []
+                query_lower = query.lower()
+                for memory in self._memory_cache.values():
+                    # Simple text matching
+                    text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
+                    if query_lower in text_to_search:
+                        # Apply filters
+                        if life_period and memory.life_period != life_period:
+                            continue
+                        if memory.importance < importance_threshold:
+                            continue
+                        if emotional_range and not (emotional_range[0] <= memory.emotional_valence <= emotional_range[1]):
+                            continue
+                        if time_range and not (time_range[0] <= memory.timestamp <= time_range[1]):
+                            continue
+                        # Simple relevance calculation
+                        relevance = 0.7 if query_lower in memory.summary.lower() else 0.5
+                        if relevance >= min_relevance:
+                            memory.update_access()
+                            results.append(EpisodicSearchResult(
+                                memory=memory,
+                                relevance=relevance,
+                                match_type="text_match",
+                                search_metadata={}
+                            ))
+                # Sort by relevance and limit results
+                results.sort(key=lambda x: x.relevance, reverse=True)
+                return results[:limit]
+        # If ChromaDB is not available at all, fallback to cache search
+        query_lower = query.lower()
+        for memory in self._memory_cache.values():
+            # Simple text matching
+            text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
+            if query_lower in text_to_search:
+                # Apply filters
+                if life_period and memory.life_period != life_period:
+                    continue
+                if memory.importance < importance_threshold:
+                    continue
+                if emotional_range and not (emotional_range[0] <= memory.emotional_valence <= emotional_range[1]):
+                    continue
+                if time_range and not (time_range[0] <= memory.timestamp <= time_range[1]):
+                    continue
+                # Simple relevance calculation
+                relevance = 0.7 if query_lower in memory.summary.lower() else 0.5
+                if relevance >= min_relevance:
+                    memory.update_access()
+                    results.append(EpisodicSearchResult(
+                        memory=memory,
+                        relevance=relevance,
+                        match_type="text_match",
+                        search_metadata={}
+                    ))
         
         # Sort by relevance and limit results
         results.sort(key=lambda x: x.relevance, reverse=True)
