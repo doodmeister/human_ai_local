@@ -5,13 +5,14 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import torch
 import numpy as np
+import uuid
 
-from .config import CognitiveConfig
+from .config import CognitiveConfig, PerformanceConfig
 from ..memory.memory_system import MemorySystem
 from ..attention.attention_mechanism import AttentionMechanism
 from ..processing.sensory import SensoryInterface, SensoryProcessor
 from ..processing.dream import DreamProcessor
-from ..optimization.performance_optimizer import PerformanceOptimizer, PerformanceConfig
+from ..optimization.performance_optimizer import PerformanceOptimizer
 
 class CognitiveAgent:
     """
@@ -42,16 +43,22 @@ class CognitiveAgent:
         self.current_fatigue = 0.0
         self.attention_focus = []
         self.active_goals = []
-        self.conversation_context = []
+        # Stores recent conversation history for proactive recall
+        self.conversation_context: List[Dict[str, Any]] = []
         
         print(f"Cognitive agent initialized with session ID: {self.session_id}")
     
     def _initialize_components(self):
-        """Initialize all cognitive architecture components"""        # Memory systems
+        """Initialize all cognitive architecture components"""
+        # Memory systems
         self.memory = MemorySystem(
             stm_capacity=self.config.memory.stm_capacity,
             stm_decay_threshold=self.config.memory.stm_decay_threshold,
-            ltm_storage_path=self.config.memory.ltm_storage_path
+            ltm_storage_path=self.config.memory.ltm_storage_path,
+            use_vector_ltm=self.config.memory.use_vector_ltm,
+            use_vector_stm=self.config.memory.use_vector_stm,
+            chroma_persist_dir=self.config.memory.chroma_persist_dir,
+            embedding_model=self.config.processing.embedding_model
         )
         
         # Attention mechanism
@@ -87,8 +94,7 @@ class CognitiveAgent:
         self.performance_optimizer = None
         if self.config.performance.enabled:
             self.performance_optimizer = PerformanceOptimizer(
-                config=PerformanceConfig.from_env(),
-                cognitive_agent=self
+                config=self.config.performance
             )
             print("✓ Performance optimizer initialized")
         
@@ -170,11 +176,27 @@ class CognitiveAgent:
             }
     
     async def _retrieve_memory_context(self, processed_input: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Retrieve relevant memories for context building"""
+        """
+        Retrieve relevant memories for context building.
+        Includes proactive recall based on the recent conversation context.
+        """
         try:
+            # Proactive recall: Use recent conversation context to form a richer query
+            if self.conversation_context:
+                recent_interactions = [
+                    f"User: {turn['user_input']}\nAI: {turn['ai_response']}"
+                    for turn in self.conversation_context[-2:]  # Last 2 interactions
+                ]
+                proactive_query = "\n".join(recent_interactions)
+                proactive_query += f"\nUser: {processed_input['raw_input']}"
+            else:
+                proactive_query = processed_input["raw_input"]
+
+            print(f"Proactive memory search with query: '{proactive_query[:200]}...'")
+
             # Use memory system to search for relevant context
             memories = self.memory.search_memories(
-                query=processed_input["raw_input"],
+                query=proactive_query,
                 max_results=5
             )
             
@@ -198,10 +220,11 @@ class CognitiveAgent:
                         "timestamp": memory_obj.encoding_time                    })
             
             return context_memories
+            
         except Exception as e:
             print(f"Error retrieving memory context: {e}")
             return []
-    
+
     async def _calculate_attention_allocation(
         self, 
         processed_input: Dict[str, Any], 
@@ -279,53 +302,35 @@ class CognitiveAgent:
         response: str,
         attention_scores: Dict[str, float]
     ):
-        """Consolidate the interaction into memory"""
-        # Create memory ID
-        memory_id = f"mem_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-        
-        # Store conversation in memory system
-        conversation_memory = {
-            "interaction": {
-                "input": input_data,
-                "response": response,
+        """Consolidate the current interaction into memory and update context."""
+        try:
+            # Add to short-term memory
+            interaction_content = f"User: {input_data}\nAI: {response}"
+            self.memory.store_memory(
+                memory_id=str(uuid.uuid4()),
+                content=interaction_content,
+                importance=attention_scores.get("overall_salience", 0.5)
+            )
+
+            # Update conversation context for proactive recall
+            interaction_record = {
+                "user_input": input_data,
+                "ai_response": response,
                 "timestamp": datetime.now()
-            },
-            "cognitive_state": {
-                "attention_score": attention_scores["overall_attention"],
-                "fatigue_level": self.current_fatigue,
-                "relevance": attention_scores["relevance"]
             }
-        }
-        
-        # Store in memory system with appropriate importance
-        self.memory.store_memory(
-            memory_id=memory_id,
-            content=conversation_memory,
-            importance=attention_scores["relevance"],
-            attention_score=attention_scores["overall_attention"],
-            emotional_valence=attention_scores["emotional_salience"],
-            memory_type="episodic",
-            tags=["conversation", "interaction"]
-        )
-        
-                # Also keep in temporary conversation context for immediate access
-        memory_entry = {
-            "id": memory_id,
-            "input": input_data,
-            "response": response,
-            "timestamp": datetime.now(),
-            "attention_score": attention_scores["overall_attention"],
-            "importance": attention_scores["relevance"]
-        }
-        
-        self.conversation_context.append(memory_entry)
-        
-        # Keep only recent context (temporary until proper memory system)
-        if len(self.conversation_context) > 10:
-            self.conversation_context = self.conversation_context[-10:]
-    
+            self.conversation_context.append(interaction_record)
+            
+            # Keep context to a reasonable size (e.g., last 10 interactions)
+            if len(self.conversation_context) > 10:
+                self.conversation_context.pop(0)
+
+            print("Interaction consolidated into memory and conversation context updated.")
+
+        except Exception as e:
+            print(f"Error in memory consolidation: {e}")
+
     def _update_cognitive_state(self, attention_scores: Dict[str, float]):
-        """Update cognitive state based on processing"""
+        """Update the agent's internal cognitive state"""
         # The attention mechanism handles its own fatigue and state updates
         # Just synchronize our local fatigue with the attention mechanism
         self.current_fatigue = self.attention.current_fatigue

@@ -13,11 +13,15 @@ class MemoryConfig:
     stm_capacity: int = 7  # Miller's magical number
     stm_decay_threshold: float = 0.1
     stm_decay_minutes: int = 60
-    
+    use_vector_stm: bool = True  # Enable vector-based short-term memory
+
     # Long-Term Memory
     ltm_storage_path: Optional[str] = None  # Will use default if None
+    chroma_persist_dir: Optional[str] = None
     ltm_similarity_threshold: float = 0.7
     ltm_max_results: int = 10
+    use_vector_stm: bool = True
+    use_vector_ltm: bool = True
     
     # Consolidation
     consolidation_interval_hours: int = 8

@@ -13,7 +13,7 @@ import torch.nn as nn
 import numpy as np
 import time
 import logging
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
@@ -21,41 +21,9 @@ import gc
 import psutil
 import asyncio
 
+from ..core.config import PerformanceConfig
+
 logger = logging.getLogger(__name__)
-
-@dataclass
-class PerformanceConfig:
-    """Configuration for performance optimization"""
-    # Batch processing
-    enable_batch_optimization: bool = True
-    dynamic_batch_sizing: bool = True
-    max_batch_size: int = 64
-    min_batch_size: int = 4
-    target_memory_usage: float = 0.8  # Target GPU memory usage
-    
-    # Memory efficiency
-    enable_memory_pooling: bool = True
-    enable_gradient_checkpointing: bool = True
-    memory_cleanup_interval: int = 100  # Steps between cleanup
-    tensor_cache_size: int = 1000
-    
-    # Neural training optimization
-    enable_mixed_precision: bool = True
-    enable_adaptive_learning_rate: bool = True
-    enable_early_stopping: bool = True
-    performance_monitoring_window: int = 50
-    
-    # Throughput optimization
-    enable_parallel_processing: bool = True
-    max_worker_threads: int = 4
-    enable_embedding_cache: bool = True
-    cache_ttl: int = 300  # Cache time-to-live in seconds
-    
-    # GPU optimization
-    enable_gpu_acceleration: bool = True
-    gpu_memory_fraction: float = 0.9
-    enable_tensor_cores: bool = True
-
 
 class BatchProcessor:
     """Optimized batch processing for neural networks"""
@@ -232,7 +200,7 @@ class NeuralTrainingOptimizer:
         self,
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
-        loss_fn: callable,
+        loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         inputs: torch.Tensor,
         targets: torch.Tensor,
         **kwargs
@@ -244,7 +212,7 @@ class NeuralTrainingOptimizer:
         optimizer.zero_grad()
         
         # Mixed precision forward pass
-        if self.mixed_precision_enabled:
+        if self.mixed_precision_enabled and self.scaler is not None:
             with torch.cuda.amp.autocast():
                 outputs = model(inputs, **kwargs)
                 loss = loss_fn(outputs, targets)
@@ -361,7 +329,7 @@ class ParallelProcessor:
     async def process_inputs_parallel(
         self,
         inputs: List[str],
-        process_func: callable,
+        process_func: Callable[[str], Any],
         **kwargs
     ) -> List[Any]:
         """Process multiple inputs in parallel"""
@@ -539,7 +507,7 @@ class PerformanceOptimizer:
         self,
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
-        loss_fn: callable,
+        loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         inputs: torch.Tensor,
         targets: torch.Tensor,
         **kwargs
@@ -552,7 +520,7 @@ class PerformanceOptimizer:
     async def process_parallel(
         self,
         inputs: List[str],
-        process_func: callable,
+        process_func: Callable[[str], Any],
         **kwargs
     ) -> List[Any]:
         """Process inputs in parallel"""

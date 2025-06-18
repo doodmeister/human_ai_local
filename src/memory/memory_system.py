@@ -2,12 +2,15 @@
 Integrated Memory System
 Coordinates between STM, LTM, and other memory components
 """
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple, Union, TYPE_CHECKING
 from datetime import datetime
 import logging
 from .stm import ShortTermMemory, VectorShortTermMemory
 from .ltm import LongTermMemory, VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
+
+if TYPE_CHECKING:
+    from .episodic.episodic_memory import EpisodicSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +74,8 @@ class MemorySystem:
             self.ltm = LongTermMemory(storage_path=ltm_storage_path)
         
         # Initialize Episodic Memory (if enabled)
-        episodic_persist_dir = f"{chroma_persist_dir}_episodic" if chroma_persist_dir else None
         self.episodic = EpisodicMemorySystem(
-            chroma_persist_dir=episodic_persist_dir,
+            chroma_persist_dir=chroma_persist_dir,
             embedding_model=embedding_model
         )
         
@@ -121,6 +123,20 @@ class MemorySystem:
         }
         
         try:
+            # Store in episodic memory if it's a significant event (independent of STM/LTM)
+            if importance > 0.6:
+                try:
+                    self.create_episodic_memory(
+                        summary=str(content)[:128],
+                        detailed_content=str(content),
+                        importance=importance,
+                        emotional_valence=emotional_valence,
+                        stm_ids=[memory_id] if not (force_ltm or importance >= 0.7 or abs(emotional_valence) >= 0.6) else [],
+                        ltm_ids=[memory_id] if (force_ltm or importance >= 0.7 or abs(emotional_valence) >= 0.6) else []
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create corresponding episodic memory for {memory_id}: {e}")
+
             # Determine storage location
             if force_ltm or importance >= 0.7 or abs(emotional_valence) >= 0.6:
                 # Store in LTM
@@ -184,6 +200,7 @@ class MemorySystem:
         query: str,
         search_stm: bool = True,
         search_ltm: bool = True,
+        search_episodic: bool = True,
         memory_types: Optional[List[str]] = None,
         max_results: int = 10
     ) -> List[Tuple[Any, float, str]]:
@@ -194,6 +211,7 @@ class MemorySystem:
             query: Search query
             search_stm: Whether to search STM
             search_ltm: Whether to search LTM
+            search_episodic: Whether to search Episodic Memory
             memory_types: Filter by memory types (LTM only)
             max_results: Maximum results
         
@@ -205,6 +223,7 @@ class MemorySystem:
         try:
             if search_stm:
                 stm_results = self.stm.search(query, max_results=max_results//2)
+                logger.debug(f"STM search for '{query}' returned: {stm_results}")
                 for memory, score in stm_results:
                     results.append((memory, score, 'STM'))
             
@@ -214,16 +233,42 @@ class MemorySystem:
                     memory_types=memory_types,
                     max_results=max_results//2
                 )
+                logger.debug(f"LTM search for '{query}' returned: {ltm_results}")
                 for memory, score in ltm_results:
                     results.append((memory, score, 'LTM'))
-            
-            # Sort by relevance
-            results.sort(key=lambda x: x[1], reverse=True)
-            return results[:max_results]
-            
+
+            if search_episodic:
+                try:
+                    episodic_results = self.episodic.search_memories(query=query, limit=max_results)
+                    logger.debug(f"Episodic search for '{query}' returned: {episodic_results}")
+                    for result in episodic_results:
+                        results.append((result.memory, result.relevance, 'Episodic'))
+                except Exception as e:
+                    logger.error(f"Error searching episodic memory for query '{query}': {e}")
+
         except Exception as e:
-            logger.error(f"Error searching memories with query '{query}': {e}")
-            return []
+            logger.error(f"Error searching memories for query '{query}': {e}")
+
+        # Combine and sort results
+        # Deduplicate based on content to avoid redundancy from different systems
+        seen_content = set()
+        unique_results = []
+        for mem, score, source in sorted(results, key=lambda item: item[1], reverse=True):
+            content_repr = ""
+            if source == 'Episodic':
+                # mem is an EpisodicMemory object
+                content_repr = repr(mem.detailed_content)
+            elif isinstance(mem, dict):
+                content_repr = repr(mem.get('content'))
+            elif hasattr(mem, 'content'):
+                # Assumes an object with a .content attribute
+                content_repr = repr(mem.content)
+            
+            if content_repr and content_repr not in seen_content:
+                unique_results.append((mem, score, source))
+                seen_content.add(content_repr)
+
+        return unique_results[:max_results]
     
     def consolidate_memories(self, force: bool = False) -> Dict[str, Any]:
         """
@@ -368,7 +413,8 @@ class MemorySystem:
                 query=query,
                 max_results=max_results,
                 min_similarity=min_similarity,
-                min_activation=min_activation            )
+                min_activation=min_activation
+            )
             return [(result.item, result.relevance_score) for result in vector_results]
         else:
             # Fallback to regular STM search
@@ -501,7 +547,7 @@ class MemorySystem:
         date_range: Optional[Tuple[datetime, datetime]] = None,
         life_periods: Optional[List[str]] = None,
         min_importance: float = 0.0
-    ) -> List[Any]:
+    ) -> List['EpisodicSearchResult']:
         """
         Search episodic memories with contextual filters
         
@@ -528,7 +574,7 @@ class MemorySystem:
                 life_period=life_periods[0] if life_periods and len(life_periods) > 0 else None,
                 importance_threshold=min_importance
             )
-            return [result.memory for result in results]
+            return results
         except Exception as e:
             logger.error(f"Error searching episodic memories: {e}")
             return []

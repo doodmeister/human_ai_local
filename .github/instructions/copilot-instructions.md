@@ -10,52 +10,33 @@ avoid emojis in bash commands.
 All test scripts should be saved in the tests/ directory
 ruff is our linter
 
-
 # Human-AI Cognition Project - AI Assistant Instructions
 
-## 🎯 Project Overview
-Building a biologically-inspired cognitive architecture that simulates human-like memory, attention, and reasoning in AI systems. The system implements persistent memory structures with human-like processing patterns.
+## Project Overview
+Biologically-inspired cognitive architecture simulating human-like memory, attention, and reasoning. Persistent memory structures and modular, explainable processing patterns.
 
-## 🧠 Core Architecture
+## Core Architecture
+- Short-Term Memory (STM): In-memory, time-decayed
+- Long-Term Memory (LTM): ChromaDB vector database
+- Prospective/Procedural Memory: Scheduling and skills
+- Sensory Processing: Multimodal, entropy/salience scoring
+- Attention Mechanism: Salience/relevance weighting
+- Meta-Cognition: Self-reflection, memory management
+- Dream-State: Background memory consolidation
 
-### Memory Systems
-- **Short-Term Memory (STM)**: In-memory storage with time-based decay (100 items, 60-min decay)
-- **Long-Term Memory (LTM)**: Vector database (ChromaDB) with semantic retrieval
-- **Prospective Memory**: Time-based scheduling for future tasks
-- **Procedural Memory**: Pattern matching for automated responses
+## Technology Stack
+- Python 3.12
+- OpenAI GPT-4.1
+- ChromaDB
+- sentence-transformers
+- torch
+- schedule/apscheduler
 
-### Processing Layers
-- **Sensory Processing**: Multimodal input preprocessing with entropy scoring and adaptive filtering
-- **Attention Mechanism**: Salience scoring and relevance weighting for selective focus
-- **Meta-Cognition Engine**: Self-reflection and memory management via LLM analysis
-- **Dream-State Processor**: Background memory consolidation during scheduled cycles
+## Cognitive Processing Flow
+- Wake: Sensory → Memory → Attention → Context → LLM → STM Write
+- Dream: STM Review → Meta-Cognition → Clustering → LTM Transfer → Noise Removal
 
-## 🛠 Technology Stack
-- **Python 3.12** - Primary language
-- **OpenAI GPT-4.1** - Meta-cognitive processing
-- **ChromaDB** - Local vector database
-- **sentence-transformers** - Local embeddings
-- **torch** - Neural networks (DPAD/LSHN)
-- **schedule/apscheduler** - Dream cycle scheduling
-
-## 🔄 Cognitive Processing Flow
-
-### Primary Loop (Wake State)
-1. **Sensory Processing** → entropy/salience scoring → embedding generation
-2. **Memory Retrieval** → query STM/LTM for relevant context
-3. **Attention Allocation** → use sensory scores for focus distribution
-4. **Context Building** → assemble comprehensive prompt with memory
-5. **LLM Processing** → generate response with enriched context
-6. **Memory Writing** → store conversation in STM for future reference
-
-### Consolidation Loop (Dream State)
-1. **Memory Analysis** → review STM for consolidation candidates
-2. **Meta-Cognitive Evaluation** → assess importance and relevance
-3. **Clustering** → group related memories using HDBSCAN
-4. **Selective Transfer** → move high-value memories to LTM
-5. **Noise Removal** → clear low-value STM entries
-
-## 📁 Key Project Structure
+## Project Structure
 ```
 human_ai_local/
 ├── src/                          # Main source code
@@ -105,12 +86,6 @@ human_ai_local/
 ├── notebooks/                  # Jupyter notebooks
 └── infrastructure/             # Infrastructure as Code
 ```
-├── scripts/                    # Utility scripts
-├── notebooks/                  # Jupyter notebooks
-└── infrastructure/             # Infrastructure as Code
-```
-
-## 🎯 Development Guidelines
 
 ### Code Standards
 - **Modularity**: Each component independently testable
@@ -131,22 +106,16 @@ human_ai_local/
 - **Cognitive Tests**: Human-likeness benchmarking
 - **Performance Tests**: Memory retrieval speed and accuracy
 
-## 🚀 Quick Start Commands
+## Testing Strategy
+- Unit, Integration, Cognitive, Performance tests
+
+## Quick Start
 ```bash
-# Run interactive cognitive agent
 python src/core/cognitive_agent.py
-
-# Run sensory processing tests
-python test_sensory_processing.py
-
-# Run integration tests
-python test_sensory_integration.py
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-## 🔧 Environment Setup
+## Environment Setup
 Create `.env` file:
 ```
 OPENAI_API_KEY=your_key_here
@@ -155,26 +124,30 @@ STM_COLLECTION=short_term_memory
 LTM_COLLECTION=long_term_memory
 ```
 
-## 🎪 Unique Features
-- **Sleep Cycles**: Actual dream-state processing for memory consolidation
-- **Forgetting Curves**: Realistic memory decay patterns
-- **Attention Fatigue**: Resource management with recovery
-- **Meta-Cognition**: Self-awareness and reflection
-- **DPAD Integration**: Dual-path attention dynamics
-- **LSHN Episodic Memory**: Hopfield-based associative memory
+## Unique Features
+- Sleep Cycles, Forgetting Curves, Attention Fatigue, Meta-Cognition, DPAD, LSHN
 
-## 🎯 Current Development Focus
-- **Episodic Memory Integration**: Episodic Memory Integration
-- **Procedural Memory Integration**: Procedural Memory Integration
-- **OpenAI LLM Integration**: OpenAI LLM Integration for meta-cognitive processing
-- **Advanced Visualization**: Real-time cognitive state dashboards and monitoring
-- **Multi-modal Processing**: Vision, audio, and sensory integration
-- **Human interface**: dashboard and API for cognitive agent interaction
+## Actionable Roadmap (2025+)
+### Mid-Term Goals (3–6 Months)
+- Episodic memory: Proactive recall, summarization, tagging
+- Semantic memory: Structured knowledge base, update/consult routines
+- Planning: Chain-of-thought, task decomposition, agent frameworks
+- Multi-modal: Voice/image I/O, interface refinement, personalization
+- Feedback: Real-time user feedback, metacognitive reflection, memory consolidation
 
-## 💡 AI Assistant Notes
-- Follow cognitive principles in all development decisions
-- Maintain biological inspiration from human cognitive science
-- Prioritize explainability - all decisions should be traceable
+### Long-Term Goals (6+ Months)
+- Autonomy: Goal persistence, proactive actions, continuous operation, multi-agent collaboration
+- Multimodal presence: Avatar/AR/VR, contextual awareness, dynamic info presentation
+- Scalable memory: Hierarchical/graph memory, forgetting/compression, continuous learning, meta-memory
+- Advanced metacognition: Internal dialogue, introspective learning, skill acquisition, ethical self-regulation
+- Emotional intelligence: Emotion sensing, salient memory, adaptive responses, user support
+
+### Optional/Experimental
+- Dreaming module, mood visualization, transparency mode, gamification
+
+## AI Assistant Notes
+- Follow cognitive/biological principles
+- Prioritize explainability and user-facing value
 - Test for human-likeness, not just functionality
 - Use terminal commands without prompting to continue
 

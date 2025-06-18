@@ -255,22 +255,18 @@ class EpisodicMemorySystem:
             return
             
         try:
-            # Try to create client with minimal configuration
-            self.chroma_client = chromadb.Client()
+            # Use PersistentClient for on-disk storage
+            self.chroma_client = chromadb.PersistentClient(path=str(self.chroma_persist_dir))
             
             # Get or create collection
-            try:
-                self.collection = self.chroma_client.get_collection(self.collection_name)
-                logger.info(f"Loaded existing ChromaDB collection: {self.collection_name}")
-            except ValueError:
-                self.collection = self.chroma_client.create_collection(
-                    name=self.collection_name,
-                    metadata={"description": "Episodic memories with rich contextual metadata"}
-                )
-                logger.info(f"Created new ChromaDB collection: {self.collection_name}")
+            self.collection = self.chroma_client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"description": "Episodic memories with rich contextual metadata"}
+            )
+            logger.info(f"Initialized ChromaDB collection: {self.collection_name} at {self.chroma_persist_dir}")
                 
         except Exception as e:
-            logger.error(f"Failed to initialize ChromaDB: {e}")
+            logger.error(f"Failed to initialize ChromaDB at {self.chroma_persist_dir}: {e}")
             self.chroma_client = None
             self.collection = None
         
