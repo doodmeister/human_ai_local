@@ -8,6 +8,7 @@ Build robust, production-ready AI with human-like cognition: persistent memory, 
 ## Core Architecture
 - Short-Term Memory (STM): In-memory, time-decayed, vector search (ChromaDB)
 - Long-Term Memory (LTM): ChromaDB vector database, semantic retrieval
+- Episodic Memory: ChromaDB vector database with rich metadata, proactive recall, and automatic summarization/tagging.
 - Prospective/Procedural Memory: Scheduling, skills, and routines
 - Sensory Processing: Multimodal, entropy/salience scoring
 - Attention Mechanism: Salience/relevance weighting, fatigue modeling
@@ -120,3 +121,9 @@ LTM_COLLECTION=long_term_memory
 
 ## Testing Strategy
 - Unit, Integration, Cognitive, Performance tests
+
+## Recent Updates (June 2025)
+- **Episodic Memory Proactive Recall:** The agent can now proactively recall relevant episodic memories based on the current context, improving conversational continuity and depth.
+- **Automatic Summarization and Tagging:** Episodic memories are automatically summarized and tagged with keywords upon creation, significantly enhancing search and retrieval efficiency.
+- **Enhanced Testing:** Added comprehensive integration and unit tests for proactive recall and episodic memory features to ensure system stability and correctness.
+- **ChromaDB Reliability:** Improved ChromaDB initialization and shutdown procedures to prevent file-locking issues, particularly on Windows environments.
