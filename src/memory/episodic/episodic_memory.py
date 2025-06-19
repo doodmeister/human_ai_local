@@ -20,6 +20,8 @@ import logging
 from pathlib import Path
 import uuid
 import sys
+import re
+from collections import Counter
 
 chromadb = None
 CHROMADB_AVAILABLE = False
@@ -112,6 +114,7 @@ class EpisodicMemory:
     last_access: datetime = field(default_factory=datetime.now)
     consolidation_strength: float = 0.0  # How well consolidated this memory is
     rehearsal_count: int = 0  # How many times it's been rehearsed/recalled
+    tags: List[str] = field(default_factory=list)  # Keywords for search
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage"""
@@ -135,7 +138,8 @@ class EpisodicMemory:
             "access_count": self.access_count,
             "last_access": self.last_access.isoformat(),
             "consolidation_strength": self.consolidation_strength,
-            "rehearsal_count": self.rehearsal_count
+            "rehearsal_count": self.rehearsal_count,
+            "tags": self.tags
         }
     
     @classmethod
@@ -164,7 +168,8 @@ class EpisodicMemory:
             access_count=data.get("access_count", 0),
             last_access=datetime.fromisoformat(data.get("last_access", datetime.now().isoformat())),
             consolidation_strength=data.get("consolidation_strength", 0.0),
-            rehearsal_count=data.get("rehearsal_count", 0)
+            rehearsal_count=data.get("rehearsal_count", 0),
+            tags=data.get("tags", [])
         )
     
     def update_access(self):
@@ -255,8 +260,12 @@ class EpisodicMemorySystem:
             return
             
         try:
-            # Use PersistentClient for on-disk storage
-            self.chroma_client = chromadb.PersistentClient(path=str(self.chroma_persist_dir))
+            from chromadb.config import Settings
+            # Use PersistentClient for on-disk storage, allowing resets for testing
+            self.chroma_client = chromadb.PersistentClient(
+                path=str(self.chroma_persist_dir),
+                settings=Settings(allow_reset=True)
+            )
             
             # Get or create collection
             self.collection = self.chroma_client.get_or_create_collection(
@@ -270,7 +279,7 @@ class EpisodicMemorySystem:
             self.chroma_client = None
             self.collection = None
         
-        # Ensure ChromaDB client and collection are initialized
+        # Fallback initialization logic
         if not hasattr(self, 'chroma_client') or self.chroma_client is None:
             try:
                 import chromadb
@@ -325,10 +334,36 @@ class EpisodicMemorySystem:
         except Exception as e:
             logger.warning(f"Failed to generate embedding: {e}")
             return None
+
+    def get_memory(self, memory_id: str) -> Optional[EpisodicMemory]:
+        """Retrieve a memory by its ID."""
+        return self._memory_cache.get(memory_id)
+
+    def shutdown(self):
+        """Shutdown the memory system and release resources."""
+        logger.info("Shutting down Episodic Memory System.")
+        if self.chroma_client:
+            try:
+                self.collection = None
+                self.chroma_client.reset()
+            except Exception as e:
+                logger.error(f"Error shutting down ChromaDB client: {e}")
+        self.chroma_client = None
+
+    def _summarize_content(self, content: str, max_length: int = 128) -> str:
+        """Generate a simple summary of the content."""
+        sentences = content.split('.')
+        return sentences[0] + '.' if sentences else content[:max_length]
+
+    def _extract_tags(self, content: str, max_tags: int = 10) -> List[str]:
+        """Extract keyword tags from the content."""
+        words = re.findall(r'\b\w+\b', content.lower())
+        stop_words = set(["the", "a", "an", "in", "on", "of", "for", "to", "and", "is", "are", "was", "were"])
+        words = [word for word in words if word not in stop_words and len(word) > 2]
+        return [word for word, _ in Counter(words).most_common(max_tags)]
     
     def store_memory(
         self,
-        summary: str,
         detailed_content: str,
         context: Optional[EpisodicContext] = None,
         associated_stm_ids: Optional[List[str]] = None,
@@ -342,7 +377,6 @@ class EpisodicMemorySystem:
         Store a new episodic memory
         
         Args:
-            summary: Brief summary of the episode
             detailed_content: Full content/narrative
             context: Rich contextual information
             associated_stm_ids: Related STM memory IDs
@@ -358,6 +392,10 @@ class EpisodicMemorySystem:
         # Generate unique ID
         memory_id = str(uuid.uuid4())
         
+        # Automatically generate summary and tags
+        summary = self._summarize_content(detailed_content)
+        tags = self._extract_tags(detailed_content)
+
         # Create memory object
         memory = EpisodicMemory(
             id=memory_id,
@@ -370,7 +408,8 @@ class EpisodicMemorySystem:
             source_memory_ids=source_memory_ids or [],
             importance=importance,
             emotional_valence=emotional_valence,
-            life_period=life_period
+            life_period=life_period,
+            tags=tags
         )
         
         # Store in cache
@@ -392,7 +431,8 @@ class EpisodicMemorySystem:
                     "interaction_type": memory.context.interaction_type,
                     "duration": memory.duration.total_seconds(),
                     "vividness": memory.vividness,
-                    "confidence": memory.confidence
+                    "confidence": memory.confidence,
+                    "tags": ",".join(tags) # Store tags as a comma-separated string
                 }
                 if life_period:
                     metadata["life_period"] = life_period

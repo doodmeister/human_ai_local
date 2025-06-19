@@ -1,0 +1,42 @@
+{
+  "id": "fec927cd-4ba7-492b-aef2-113446a42fa3",
+  "summary": "The quick brown fox jumps over the lazy dog.",
+  "detailed_content": "The quick brown fox jumps over the lazy dog. This is a classic sentence used for typing practice. The fox is a carnivorous mammal.",
+  "timestamp": "2025-06-18T17:13:06.540881",
+  "duration": 60.0,
+  "context": {
+    "location": null,
+    "emotional_state": 0.0,
+    "cognitive_load": 0.0,
+    "attention_focus": [],
+    "interaction_type": "conversation",
+    "participants": [],
+    "environmental_factors": {}
+  },
+  "associated_stm_ids": [],
+  "associated_ltm_ids": [],
+  "source_memory_ids": [],
+  "importance": 0.8,
+  "emotional_valence": 0.0,
+  "vividness": 0.5,
+  "confidence": 0.8,
+  "life_period": null,
+  "episode_sequence": 0,
+  "related_episodes": [],
+  "access_count": 0,
+  "last_access": "2025-06-18T17:13:06.540881",
+  "consolidation_strength": 0.0,
+  "rehearsal_count": 0,
+  "tags": [
+    "fox",
+    "quick",
+    "brown",
+    "jumps",
+    "over",
+    "lazy",
+    "dog",
+    "this",
+    "classic",
+    "sentence"
+  ]
+}

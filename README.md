@@ -94,7 +94,7 @@ LTM_COLLECTION=long_term_memory
 
 ## Actionable Roadmap (2025+)
 ### Mid-Term Goals (3–6 Months)
-- Episodic memory: Proactive recall, summarization, tagging
+- Episodic memory: Proactive recall, automatic summarization, and keyword tagging for enhanced search and retrieval.
 - Semantic memory: Structured knowledge base, update/consult routines
 - Planning: Chain-of-thought, task decomposition, agent frameworks
 - Multi-modal: Voice/image I/O, interface refinement, personalization
