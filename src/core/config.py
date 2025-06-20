@@ -22,6 +22,9 @@ class MemoryConfig:
     ltm_max_results: int = 10
     use_vector_stm: bool = True
     use_vector_ltm: bool = True
+
+    # Semantic Memory
+    semantic_storage_path: Optional[str] = None # Will use default if None
     
     # Consolidation
     consolidation_interval_hours: int = 8

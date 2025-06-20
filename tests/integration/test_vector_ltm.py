@@ -4,12 +4,6 @@ Test suite for Vector Long-Term Memory implementation
 import tempfile
 import shutil
 from pathlib import Path
-import sys
-
-# Add src to Python path
-current_dir = Path(__file__).parent
-src_dir = current_dir.parent / "src"
-sys.path.insert(0, str(src_dir))
 
 # Import the classes we want to test
 from memory.ltm.vector_ltm import VectorLongTermMemory, VectorSearchResult
@@ -70,12 +64,12 @@ class TestVectorLongTermMemory:
         # Retrieve the memory
         retrieved = ltm.retrieve(memory_id)
         assert retrieved is not None
-        assert retrieved.content == content
-        assert retrieved.memory_type == "semantic"
-        assert retrieved.importance == 0.8
-        assert "ai" in retrieved.tags
-        assert "test" in retrieved.tags
-        assert retrieved.source == "unit_test"
+        assert retrieved["content"] == content
+        assert retrieved["memory_type"] == "semantic"
+        assert retrieved["importance"] == 0.8
+        assert "ai" in retrieved["tags"]
+        assert "test" in retrieved["tags"]
+        assert retrieved["source"] == "unit_test"
     
     def test_semantic_search_fallback(self):
         """Test semantic search in fallback mode"""

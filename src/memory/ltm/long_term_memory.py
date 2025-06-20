@@ -2,12 +2,13 @@
 Long-Term Memory (LTM) System
 Implements persistent memory storage with semantic organization
 """
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Sequence
 from datetime import datetime
 from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
+from ..base import BaseMemorySystem
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class LTMRecord:
             consolidation_count=data.get("consolidation_count", 0)
         )
 
-class LongTermMemory:
+class LongTermMemory(BaseMemorySystem):
     """
     Long-Term Memory system with persistent storage and semantic organization
     
@@ -164,17 +165,43 @@ class LongTermMemory:
         logger.debug(f"Stored LTM record {memory_id} (type: {memory_type})")
         return True
     
-    def retrieve(self, memory_id: str) -> Optional[LTMRecord]:
+    def retrieve(self, memory_id: str) -> Optional[dict]:
         """Retrieve memory by ID"""
-        if memory_id not in self.memories:
+        record = self.memories.get(memory_id)
+        if record is None:
             return None
-        
-        record = self.memories[memory_id]
         record.update_access()
-        self._save_memory(record)  # Update access statistics on disk
-        
+        self._save_memory(record)
         logger.debug(f"Retrieved LTM record {memory_id}")
-        return record
+        return record.to_dict()
+
+    def delete(self, memory_id: str) -> bool:
+        """Delete memory by ID"""
+        if memory_id in self.memories:
+            del self.memories[memory_id]
+            logger.debug(f"Deleted LTM record {memory_id}")
+            return True
+        return False
+
+    def search(self, query: Optional[str] = None, **kwargs) -> Sequence[dict | tuple]:
+        """
+        Search memories by content
+        
+        Args:
+            query: Search query
+            memory_types: Filter by memory types
+            min_importance: Minimum importance threshold
+            max_results: Maximum results to return
+        
+        Returns:
+            List of (LTMRecord, relevance_score) tuples
+        """
+        min_relevance = kwargs.get('min_relevance', 0.0)
+        max_results = kwargs.get('max_results', 5)
+        results = []
+        for record, relevance in self.search_by_content(query or '', min_relevance, max_results):
+            results.append((record.to_dict(), relevance))
+        return results
     
     def search_by_content(
         self,

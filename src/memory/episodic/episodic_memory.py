@@ -22,6 +22,7 @@ import uuid
 import sys
 import re
 from collections import Counter
+from ..base import BaseMemorySystem  # Add import for base class
 
 chromadb = None
 CHROMADB_AVAILABLE = False
@@ -191,16 +192,10 @@ class EpisodicSearchResult:
     match_type: str  # "semantic", "temporal", "contextual", "cross_reference"
     search_metadata: Dict[str, Any] = field(default_factory=dict)
 
-class EpisodicMemorySystem:
+class EpisodicMemorySystem(BaseMemorySystem):
     """
     Episodic Memory System for autobiographical memory storage and retrieval
-    
-    Features:
-    - Rich contextual metadata storage
-    - Cross-references to STM and LTM systems
-    - Temporal and semantic search capabilities
-    - Autobiographical organization and clustering
-    - Integration with memory consolidation pipeline
+    Implements the unified memory interface.
     """
     
     def __init__(
@@ -335,10 +330,95 @@ class EpisodicMemorySystem:
             logger.warning(f"Failed to generate embedding: {e}")
             return None
 
-    def get_memory(self, memory_id: str) -> Optional[EpisodicMemory]:
-        """Retrieve a memory by its ID."""
-        return self._memory_cache.get(memory_id)
+    def store(
+        self,
+        detailed_content: str,
+        context: Optional[EpisodicContext] = None,
+        associated_stm_ids: Optional[List[str]] = None,
+        associated_ltm_ids: Optional[List[str]] = None,
+        source_memory_ids: Optional[List[str]] = None,
+        importance: float = 0.5,
+        emotional_valence: float = 0.0,
+        life_period: Optional[str] = None
+    ) -> str:
+        """
+        Store a new episodic memory (unified interface)
+        Returns the memory ID of the stored episode.
+        """
+        return self.store_memory(
+            detailed_content=detailed_content,
+            context=context,
+            associated_stm_ids=associated_stm_ids,
+            associated_ltm_ids=associated_ltm_ids,
+            source_memory_ids=source_memory_ids,
+            importance=importance,
+            emotional_valence=emotional_valence,
+            life_period=life_period
+        )
 
+    def retrieve(self, memory_id: str) -> Optional[dict]:
+        """
+        Retrieve a specific memory by ID (unified interface)
+        Returns the memory as a dict, or None if not found.
+        """
+        memory = self._memory_cache.get(memory_id)
+        if memory:
+            memory.update_access()
+            self._save_to_json_backup(memory)
+            return memory.to_dict()
+        return None
+
+    def delete(self, memory_id: str) -> bool:
+        """
+        Delete a memory by ID (unified interface)
+        Returns True if deleted, False otherwise.
+        """
+        removed = False
+        if memory_id in self._memory_cache:
+            del self._memory_cache[memory_id]
+            removed = True
+            # Remove from ChromaDB
+            if self.collection is not None:
+                try:
+                    self.collection.delete(ids=[memory_id])
+                except Exception as e:
+                    logger.warning(f"Failed to remove episodic memory {memory_id} from ChromaDB: {e}")
+            # Remove JSON file
+            if self.enable_json_backup:
+                json_file = self.storage_path / f"{memory_id}.json"
+                if json_file.exists():
+                    try:
+                        json_file.unlink()
+                    except Exception as e:
+                        logger.warning(f"Failed to remove JSON file for episodic memory {memory_id}: {e}")
+        return removed
+
+    def search(self, query: Optional[str] = None, **kwargs) -> List[dict]:
+        """
+        Search for episodic memories (unified interface).
+        Returns a list of matching memory dicts.
+        """
+        if not query:
+            # Return all memories as dicts if no query
+            return [m.to_dict() for m in self._memory_cache.values()]
+        # Use search_memories for semantic/text search
+        limit = kwargs.get('limit', 10)
+        min_relevance = kwargs.get('min_relevance', 0.3)
+        time_range = kwargs.get('time_range')
+        life_period = kwargs.get('life_period')
+        emotional_range = kwargs.get('emotional_range')
+        importance_threshold = kwargs.get('importance_threshold', 0.0)
+        results = self.search_memories(
+            query=query,
+            limit=limit,
+            min_relevance=min_relevance,
+            time_range=time_range,
+            life_period=life_period,
+            emotional_range=emotional_range,
+            importance_threshold=importance_threshold
+        )
+        return [r.memory.to_dict() for r in results]
+    
     def shutdown(self):
         """Shutdown the memory system and release resources."""
         logger.info("Shutting down Episodic Memory System.")

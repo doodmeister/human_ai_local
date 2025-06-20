@@ -8,6 +8,7 @@ Build robust, production-ready AI with human-like cognition: persistent memory, 
 ## Core Architecture
 - Short-Term Memory (STM): In-memory, time-decayed, vector search (ChromaDB)
 - Long-Term Memory (LTM): ChromaDB vector database, semantic retrieval
+- **Semantic Memory:** Structured factual knowledge (subject-predicate-object triples), persistent triple store, agent-level interface for storing, retrieving, and deleting facts
 - Episodic Memory: ChromaDB vector database with rich metadata, proactive recall, and automatic summarization/tagging.
 - Prospective/Procedural Memory: Scheduling, skills, and routines
 - Sensory Processing: Multimodal, entropy/salience scoring
@@ -123,6 +124,10 @@ LTM_COLLECTION=long_term_memory
 - Unit, Integration, Cognitive, Performance tests
 
 ## Recent Updates (June 2025)
+- **Semantic Memory System:** Added a persistent, structured semantic memory system for storing, retrieving, and deleting subject-predicate-object triples. Integrated at the agent level with a unified interface.
+- **Agent Fact Management:** The agent can now store, retrieve, and delete structured facts using the new semantic memory system. Fact operations are normalized and robust.
+- **Integration & Unit Tests:** Comprehensive integration and unit tests for semantic memory, including agent-level end-to-end tests for fact storage, retrieval, and deletion.
+- **Semantic Memory Config:** Added `semantic_storage_path` to configuration for flexible semantic memory storage location. Semantic memory can be cleared for testing.
 - **Episodic Memory Proactive Recall:** The agent can now proactively recall relevant episodic memories based on the current context, improving conversational continuity and depth.
 - **Automatic Summarization and Tagging:** Episodic memories are automatically summarized and tagged with keywords upon creation, significantly enhancing search and retrieval efficiency.
 - **Enhanced Testing:** Added comprehensive integration and unit tests for proactive recall and episodic memory features to ensure system stability and correctness.

@@ -8,6 +8,7 @@ import logging
 from .stm import ShortTermMemory, VectorShortTermMemory
 from .ltm import LongTermMemory, VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
+from .semantic.semantic_memory import SemanticMemorySystem
 
 if TYPE_CHECKING:
     from .episodic.episodic_memory import EpisodicSearchResult
@@ -33,7 +34,8 @@ class MemorySystem:
         use_vector_ltm: bool = True,
         use_vector_stm: bool = True,  # New parameter for vector STM
         chroma_persist_dir: Optional[str] = None,
-        embedding_model: str = "all-MiniLM-L6-v2"
+        embedding_model: str = "all-MiniLM-L6-v2",
+        semantic_storage_path: Optional[str] = None
     ):
         """
         Initialize integrated memory system
@@ -47,6 +49,7 @@ class MemorySystem:
             use_vector_stm: Whether to use vector-based STM with ChromaDB
             chroma_persist_dir: ChromaDB persistence directory
             embedding_model: SentenceTransformer model name
+            semantic_storage_path: Path for semantic memory JSON file
         """
         # Initialize STM with vector database support
         self.use_vector_stm = use_vector_stm
@@ -78,6 +81,10 @@ class MemorySystem:
             chroma_persist_dir=chroma_persist_dir,
             embedding_model=embedding_model
         )
+        
+        # Initialize Semantic Memory
+        semantic_storage = semantic_storage_path or "data/memory_stores/semantic/semantic_kb.json"
+        self.semantic = SemanticMemorySystem(storage_path=semantic_storage)
         
         self.consolidation_interval = consolidation_interval
         self.last_consolidation = datetime.now()
@@ -194,6 +201,18 @@ class MemorySystem:
         except Exception as e:
             logger.error(f"Error retrieving memory {memory_id}: {e}")
             return None
+    
+    def store_fact(self, subject: str, predicate: str, object_val: Any) -> str:
+        """Stores a new fact in the semantic memory system."""
+        return self.semantic.store_fact(subject, predicate, object_val)
+
+    def find_facts(self, subject: Optional[str] = None, predicate: Optional[str] = None, object_val: Optional[Any] = None) -> List[Dict[str, Any]]:
+        """Finds facts in the semantic memory system."""
+        return self.semantic.find_facts(subject, predicate, object_val)
+
+    def delete_fact(self, subject: str, predicate: str, object_val: Any) -> bool:
+        """Deletes a fact from the semantic memory system."""
+        return self.semantic.delete_fact(subject, predicate, object_val)
     
     def search_memories(
         self,

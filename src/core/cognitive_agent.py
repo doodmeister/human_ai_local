@@ -58,7 +58,8 @@ class CognitiveAgent:
             use_vector_ltm=self.config.memory.use_vector_ltm,
             use_vector_stm=self.config.memory.use_vector_stm,
             chroma_persist_dir=self.config.memory.chroma_persist_dir,
-            embedding_model=self.config.processing.embedding_model
+            embedding_model=self.config.processing.embedding_model,
+            semantic_storage_path=self.config.memory.semantic_storage_path
         )
         
         # Attention mechanism
@@ -328,6 +329,71 @@ class CognitiveAgent:
 
         except Exception as e:
             print(f"Error in memory consolidation: {e}")
+
+    def store_fact(self, subject: str, predicate: str, object: str):
+        """
+        Stores a structured fact (subject-predicate-object triple) in semantic memory.
+
+        Args:
+            subject: The subject of the fact.
+            predicate: The predicate of the fact.
+            object: The object of the fact.
+        """
+        try:
+            self.memory.store_fact(subject, predicate, object)
+            print(f"Stored fact: ({subject}, {predicate}, {object})")
+        except Exception as e:
+            print(f"Error storing fact: {e}")
+
+    def find_facts(
+        self,
+        subject: Optional[str] = None,
+        predicate: Optional[str] = None,
+        object: Optional[str] = None,
+    ) -> List[tuple[str, str, str]]:
+        """
+        Finds facts in semantic memory matching the given components.
+
+        Args:
+            subject: The subject to search for.
+            predicate: The predicate to search for.
+            object: The object to search for.
+
+        Returns:
+            A list of matching facts as (subject, predicate, object) tuples.
+        """
+        try:
+            results = self.memory.find_facts(subject, predicate, object)
+            return [
+                (fact["subject"], fact["predicate"], fact["object"])
+                for fact in results
+            ]
+        except Exception as e:
+            print(f"Error finding facts: {e}")
+            return []
+
+    def delete_fact(self, subject: str, predicate: str, object: str) -> bool:
+        """
+        Deletes a specific fact from semantic memory.
+
+        Args:
+            subject: The subject of the fact to delete.
+            predicate: The predicate of the fact to delete.
+            object: The object of the fact to delete.
+
+        Returns:
+            True if the fact was deleted, False otherwise.
+        """
+        try:
+            deleted = self.memory.delete_fact(subject, predicate, object)
+            if deleted:
+                print(f"Deleted fact: ({subject}, {predicate}, {object})")
+            else:
+                print(f"Fact not found for deletion: ({subject}, {predicate}, {object})")
+            return deleted
+        except Exception as e:
+            print(f"Error deleting fact: {e}")
+            return False
 
     def _update_cognitive_state(self, attention_scores: Dict[str, float]):
         """Update the agent's internal cognitive state"""

@@ -2,10 +2,11 @@
 Short-Term Memory (STM) System
 Implements working memory with capacity limits and decay mechanisms
 """
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Sequence
 from datetime import datetime
 from dataclasses import dataclass, field
 import logging
+from ..base import BaseMemorySystem
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class MemoryItem:
         activation = (recency * 0.4) + (frequency * 0.3) + (salience * 0.3)
         return max(0.0, min(1.0, activation))
 
-class ShortTermMemory:
+class ShortTermMemory(BaseMemorySystem):
     """
     Short-Term Memory system with capacity limits and decay
     
@@ -138,7 +139,7 @@ class ShortTermMemory:
         logger.debug(f"Stored memory {memory_id} in STM (size: {len(self.items)})")
         return True
     
-    def retrieve(self, memory_id: str) -> Optional[MemoryItem]:
+    def retrieve(self, memory_id: str) -> Optional[dict]:
         """
         Retrieve memory by ID
         
@@ -148,23 +149,70 @@ class ShortTermMemory:
         Returns:
             MemoryItem if found, None otherwise
         """
-        if memory_id not in self.items:
+        item = self.items.get(memory_id)
+        if item is None:
             return None
-        
-        item = self.items[memory_id]
         item.update_access()
         self._update_access_order(memory_id)
         
         logger.debug(f"Retrieved memory {memory_id} from STM")
-        return item
-    
-    def search(
+        return item.__dict__
+
+    def delete(self, memory_id: str) -> bool:
+        """
+        Remove a specific memory item from STM
+        
+        Args:
+            memory_id: ID of the memory to remove
+            
+        Returns:
+            True if item was removed, False if not found
+        """
+        if memory_id not in self.items:
+            return False
+        
+        del self.items[memory_id]
+        if memory_id in self.access_order:
+            self.access_order.remove(memory_id)
+        
+        logger.debug(f"Removed memory {memory_id} from STM")
+        return True
+
+    def _search_internal(
         self,
         query: str = "",
         min_activation: float = 0.0,
         max_results: int = 5,
         search_associations: bool = True
     ) -> List[Tuple[MemoryItem, float]]:
+        """
+        Internal search method for STM
+        
+        Args:
+            query: Search query (basic string matching for now)
+            min_activation: Minimum activation threshold
+            max_results: Maximum number of results
+            search_associations: Whether to include associatively linked memories
+        
+        Returns:
+            List of (MemoryItem, relevance_score) tuples
+        """
+        results = []
+        for memory_id, item in self.items.items():
+            # Calculate relevance score based on activation and query match
+            activation = item.calculate_activation()
+            if activation < min_activation:
+                continue
+            # Simple query matching (more complex logic can be added)
+            if query.lower() in str(item.content).lower():
+                relevance = activation  # Placeholder for real relevance calculation
+                results.append((item, relevance))
+        
+        # Sort results by relevance (desc) and limit to max_results
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:max_results]
+
+    def search(self, query: Optional[str] = None, **kwargs) -> Sequence[dict | tuple]:
         """
         Search STM for relevant memories
         
@@ -177,38 +225,13 @@ class ShortTermMemory:
         Returns:
             List of (MemoryItem, relevance_score) tuples
         """
+        min_activation = kwargs.get('min_activation', 0.0)
+        max_results = kwargs.get('max_results', 5)
+        search_associations = kwargs.get('search_associations', True)
         results = []
-        
-        for item in self.items.values():
-            activation = item.calculate_activation()
-            
-            if activation < min_activation:
-                continue
-            
-            # Simple relevance calculation (can be enhanced with embeddings)
-            relevance = activation
-            
-            if query:
-                # Basic string matching (placeholder for semantic search)
-                content_str = str(item.content).lower()
-                query_lower = query.lower()
-                
-                if query_lower in content_str:
-                    relevance += 0.3
-                
-                # Check for word overlap
-                query_words = set(query_lower.split())
-                content_words = set(content_str.split())
-                overlap = len(query_words.intersection(content_words))
-                if overlap > 0:
-                    relevance += 0.1 * overlap
-            
-            if relevance > 0:
-                results.append((item, relevance))
-        
-        # Sort by relevance and return top results
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results[:max_results]
+        for item, relevance in self._search_internal(query or '', min_activation, max_results, search_associations):
+            results.append((item.__dict__, relevance))
+        return results
     
     def decay_memories(self) -> List[str]:
         """
@@ -300,29 +323,3 @@ class ShortTermMemory:
         if memory_id in self.access_order:
             self.access_order.remove(memory_id)
         self.access_order.append(memory_id)
-    
-    def remove_item(self, memory_id: str) -> bool:
-        """
-        Remove a specific memory item from STM
-        
-        Args:
-            memory_id: ID of the memory to remove
-            
-        Returns:
-            True if item was removed, False if not found
-        """
-        if memory_id not in self.items:
-            return False
-        
-        del self.items[memory_id]
-        if memory_id in self.access_order:
-            self.access_order.remove(memory_id)
-        
-        logger.debug(f"Removed memory {memory_id} from STM")
-        return True
-
-    def clear(self):
-        """Clear all memories from STM"""
-        self.items.clear()
-        self.access_order.clear()
-        logger.info("STM cleared")

@@ -2,13 +2,15 @@
 Enhanced Long-Term Memory (LTM) System with Vector Database Integration
 Implements ChromaDB for semantic memory storage and retrieval
 """
-from typing import TYPE_CHECKING, Dict, List, Set, Optional, Any, Tuple
+from typing import TYPE_CHECKING, Dict, List, Set, Optional, Any, Tuple, Sequence  # Add Sequence
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
 import types  # <-- added
+
+from ..base import BaseMemorySystem  # Add import for base class
 
 if TYPE_CHECKING:
     # for mypy/pyright: use real type signature
@@ -44,9 +46,10 @@ class VectorSearchResult:
     similarity_score: float
     distance: float
     
-class VectorLongTermMemory:
+class VectorLongTermMemory(BaseMemorySystem):
     """
     Enhanced Long-Term Memory with ChromaDB vector database integration
+    Implements the unified memory interface.
     
     Features:
     - Semantic similarity search with embeddings
@@ -214,7 +217,7 @@ class VectorLongTermMemory:
         associations: Optional[List[str]] = None
     ) -> bool:
         """
-        Store memory with vector database integration
+        Store memory with vector database integration (unified interface)
         
         Args:
             memory_id: Unique identifier
@@ -321,13 +324,98 @@ class VectorLongTermMemory:
         except Exception as e:
             logger.error(f"Failed to store record {record.id} in ChromaDB: {e}")
     
-    def retrieve(self, memory_id: str) -> Optional[LTMRecord]:
-        """Retrieve memory by ID"""
+    def retrieve(self, memory_id: str) -> Optional[dict]:
+        """
+        Retrieve memory by ID (unified interface)
+        
+        Args:
+            memory_id: Unique identifier
+        
+        Returns:
+            Memory content as dict, or None if not found
+        """
         record = self.memories.get(memory_id)
         if record:
             record.update_access()
-            return record
+            # Save access update if needed
+            if self.enable_json_backup:
+                self._save_memory_json(record)
+            return record.to_dict()
         return None
+    
+    def delete(self, memory_id: str) -> bool:
+        """
+        Delete memory by ID (unified interface)
+        
+        Args:
+            memory_id: Unique identifier
+        
+        Returns:
+            True if deleted, False otherwise
+        """
+        removed = False
+        # Remove from in-memory store
+        if memory_id in self.memories:
+            record = self.memories.pop(memory_id)
+            removed = True
+            # Remove from indices
+            for tag in record.tags:
+                if tag in self.tags_index:
+                    self.tags_index[tag].discard(memory_id)
+                    if not self.tags_index[tag]:
+                        del self.tags_index[tag]
+            if memory_id in self.associations_index:
+                del self.associations_index[memory_id]
+        # Remove from ChromaDB
+        if self.collection and removed:
+            try:
+                self.collection.delete(ids=[memory_id])
+            except Exception as e:
+                logger.error(f"Failed to remove {memory_id} from ChromaDB: {e}")
+        # Remove JSON file
+        if self.enable_json_backup and removed:
+            json_file = self.storage_path / f"{memory_id}.json"
+            if json_file.exists():
+                try:
+                    json_file.unlink()
+                except Exception as e:
+                    logger.error(f"Failed to remove JSON file for {memory_id}: {e}")
+        if removed:
+            logger.debug(f"Removed memory {memory_id} from LTM")
+        return removed
+
+    def search(
+        self,
+        query: Optional[str] = None,
+        **kwargs
+    ) -> Sequence[dict]:
+        """
+        Search for memories (unified interface).
+        If query is provided, perform semantic search; otherwise, support tag/content search via kwargs.
+        
+        Args:
+            query: Optional search query
+            **kwargs: Additional search parameters (tags, content_query, etc.)
+        
+        Returns:
+            Sequence of matching memory dicts
+        """
+        # Semantic search if query is provided
+        if query:
+            results = self.search_semantic(query=query, max_results=kwargs.get('max_results', 10))
+            return [r.record.to_dict() for r in results]
+        # Tag-based search
+        tags = kwargs.get('tags')
+        if tags:
+            tag_results = self.search_by_tags(tags, operator=kwargs.get('operator', 'OR'))
+            return [r.to_dict() for r in tag_results]
+        # Content-based search
+        content_query = kwargs.get('content_query')
+        if content_query:
+            content_results = self.search_by_content(content_query)
+            return [r[0].to_dict() for r in content_results]
+        # Return all if no filter
+        return [r.to_dict() for r in self.memories.values()]
     
     def search_semantic(
         self,
