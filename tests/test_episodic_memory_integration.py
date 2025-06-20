@@ -257,17 +257,16 @@ def test_memory_search():
 def test_related_memories():
     """Test related memory functionality"""
     print("Testing related memories...")
-    
     system = EpisodicMemorySystem(
         chroma_persist_dir="test_data/chroma_episodic_related",
         collection_name="test_related", 
         enable_json_backup=True,
         storage_path="test_data/episodic_related"
     )
-    
+    # Clear all in-memory cache to avoid test data pollution
+    system.clear_all_memories()
     # Store memories with shared references
     base_time = datetime.now()
-    
     memory1_id = system.store_memory(
         detailed_content="Designed the architecture for STM and LTM integration",
         associated_stm_ids=["stm_design_1", "stm_design_2"],
@@ -275,10 +274,8 @@ def test_related_memories():
         importance=0.8,
         life_period="design_phase"
     )
-    
     # Store related memory shortly after with shared references
     system._memory_cache[memory1_id].timestamp = base_time
-    
     memory2_id = system.store_memory(
         detailed_content="Implemented the memory systems with cross-references",
         associated_stm_ids=["stm_design_2", "stm_impl_1"], # Shared stm_design_2
@@ -286,27 +283,22 @@ def test_related_memories():
         importance=0.9,
         life_period="implementation_phase"
     )
-    
     # Set timestamp for temporal relationship
     system._memory_cache[memory2_id].timestamp = base_time + timedelta(minutes=30)
-    
     # Test getting related memories
     related = system.get_related_memories(
         memory1_id,
         relationship_types=["cross_reference", "temporal"],
         limit=10
     )
-    
     assert len(related) > 0
-    
     # Should find memory2 due to shared references
     related_ids = [r.memory.id for r in related]
+    print(f"[DEBUG] test_related_memories: related_ids={related_ids}")
     assert memory2_id in related_ids
-    
     # Check relationship types
     cross_ref_found = any(r.match_type == "cross_reference" for r in related)
     temporal_found = any(r.match_type == "temporal" for r in related)
-    
     print(f"✓ Found {len(related)} related memories")
     print(f"✓ Cross-reference relationships: {cross_ref_found}")
     print(f"✓ Temporal relationships: {temporal_found}")

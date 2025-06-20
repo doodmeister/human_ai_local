@@ -602,9 +602,11 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         distance = distances[i] if distances and i < len(distances) else 0.0
                         relevance = 1.0 - distance
                     if relevance < min_relevance:
+                        print(f"[DEBUG] Skipping memory {memory_id} from ChromaDB: relevance {relevance} < min_relevance {min_relevance}")
                         continue
                     memory = self.retrieve_memory(memory_id)
                     if memory is None:
+                        print(f"[DEBUG] Memory {memory_id} from ChromaDB not found in cache.")
                         continue
                     # No extra filtering here; already filtered by ChromaDB
                     results.append(EpisodicSearchResult(
@@ -613,29 +615,20 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         match_type="semantic",
                         search_metadata={"chroma_distance": distance}
                     ))
-                return results[:limit]
-                
-            except Exception as e:
-                logger.warning(f"ChromaDB search failed: {e}")
-                # Fallback to cache search if ChromaDB fails
-                results = []
-                query_lower = query.lower()
-                for memory in self._memory_cache.values():
-                    # Simple text matching
-                    text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
-                    if query_lower in text_to_search:
-                        # Apply filters
-                        if life_period and memory.life_period != life_period:
-                            continue
-                        if memory.importance < importance_threshold:
-                            continue
-                        if emotional_range and not (emotional_range[0] <= memory.emotional_valence <= emotional_range[1]):
-                            continue
-                        if time_range and not (time_range[0] <= memory.timestamp <= time_range[1]):
-                            continue
-                        # Simple relevance calculation
-                        relevance = 0.7 if query_lower in memory.summary.lower() else 0.5
-                        if relevance >= min_relevance:
+                print(f"[DEBUG] ChromaDB search returned {len(results[:limit])} results.")
+                # If ChromaDB returns no results, try fallback
+                if not results:
+                    print(f"[DEBUG] ChromaDB returned no results, trying fallback search.")
+                    # Fallback logic (text match and word overlap)
+                    query_lower = query.lower()
+                    for memory in self._memory_cache.values():
+                        text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
+                        if query_lower in text_to_search:
+                            # Apply filters
+                            if life_period and memory.life_period != life_period:
+                                continue
+                            relevance = 0.6  # Default relevance for direct matches
+                            print(f"[DEBUG] Fallback text match: found '{query_lower}' in memory {memory.id}")
                             memory.update_access()
                             results.append(EpisodicSearchResult(
                                 memory=memory,
@@ -643,84 +636,153 @@ class EpisodicMemorySystem(BaseMemorySystem):
                                 match_type="text_match",
                                 search_metadata={}
                             ))
-                # Sort by relevance and limit results
+                    if not results:
+                        print(f"[DEBUG] No direct text matches found, trying word overlap fallback.")
+                        query_words = set(query_lower.split())
+                        for memory in self._memory_cache.values():
+                            text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
+                            overlap = query_words & text_words
+                            if overlap:
+                                # Apply filters
+                                if life_period and memory.life_period != life_period:
+                                    continue
+                                relevance = 0.4 + 0.1 * len(overlap)
+                                if relevance >= min_relevance:
+                                    print(f"[DEBUG] Word overlap fallback: memory {memory.id} overlap words: {overlap}")
+                                    memory.update_access()
+                                    results.append(EpisodicSearchResult(
+                                        memory=memory,
+                                        relevance=relevance,
+                                        match_type="word_overlap",
+                                        search_metadata={"overlap": list(overlap)}
+                                    ))
                 results.sort(key=lambda x: x.relevance, reverse=True)
+                print(f"[DEBUG] Fallback search returned {len(results[:limit])} results.")
+                return results[:limit]
+            except Exception as e:
+                logger.warning(f"ChromaDB search failed: {e}")
+                print(f"[DEBUG] ChromaDB search failed, falling back to cache search: {e}")
+                results = []
+                query_lower = query.lower()
+                for memory in self._memory_cache.values():
+                    text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
+                    if query_lower in text_to_search:
+                        # Apply filters
+                        if life_period and memory.life_period != life_period:
+                            continue
+                        relevance = 0.6  # Default relevance for direct matches
+                        print(f"[DEBUG] Fallback text match: found '{query_lower}' in memory {memory.id}")
+                        memory.update_access()
+                        results.append(EpisodicSearchResult(
+                            memory=memory,
+                            relevance=relevance,
+                            match_type="text_match",
+                            search_metadata={}
+                        ))
+                # Word overlap fallback if no results
+                if not results:
+                    print(f"[DEBUG] No direct text matches found, trying word overlap fallback.")
+                    query_words = set(query_lower.split())
+                    for memory in self._memory_cache.values():
+                        text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
+                        overlap = query_words & text_words
+                        if overlap:
+                            # Apply filters
+                            if life_period and memory.life_period != life_period:
+                                continue
+                            relevance = 0.4 + 0.1 * len(overlap)
+                            if relevance >= min_relevance:
+                                print(f"[DEBUG] Word overlap fallback: memory {memory.id} overlap words: {overlap}")
+                                memory.update_access()
+                                results.append(EpisodicSearchResult(
+                                    memory=memory,
+                                    relevance=relevance,
+                                    match_type="word_overlap",
+                                    search_metadata={"overlap": list(overlap)}
+                                ))
+                results.sort(key=lambda x: x.relevance, reverse=True)
+                print(f"[DEBUG] Fallback search returned {len(results[:limit])} results.")
                 return results[:limit]
         # If ChromaDB is not available at all, fallback to cache search
         query_lower = query.lower()
         for memory in self._memory_cache.values():
-            # Simple text matching
             text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
             if query_lower in text_to_search:
                 # Apply filters
                 if life_period and memory.life_period != life_period:
                     continue
-                if memory.importance < importance_threshold:
-                    continue
-                if emotional_range and not (emotional_range[0] <= memory.emotional_valence <= emotional_range[1]):
-                    continue
-                if time_range and not (time_range[0] <= memory.timestamp <= time_range[1]):
-                    continue
-                # Simple relevance calculation
-                relevance = 0.7 if query_lower in memory.summary.lower() else 0.5
-                if relevance >= min_relevance:
-                    memory.update_access()
-                    results.append(EpisodicSearchResult(
-                        memory=memory,
-                        relevance=relevance,
-                        match_type="text_match",
-                        search_metadata={}
-                    ))
-        
-        # Sort by relevance and limit results
+                relevance = 0.6  # Default relevance for direct matches
+                print(f"[DEBUG] Fallback (no ChromaDB) text match: found '{query_lower}' in memory {memory.id}")
+                memory.update_access()
+                results.append(EpisodicSearchResult(
+                    memory=memory,
+                    relevance=relevance,
+                    match_type="text_match",
+                    search_metadata={}
+                ))
+        # Word overlap fallback if no results
+        if not results:
+            print(f"[DEBUG] No direct text matches found (no ChromaDB), trying word overlap fallback.")
+            query_words = set(query_lower.split())
+            for memory in self._memory_cache.values():
+                text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
+                overlap = query_words & text_words
+                if overlap:
+                    # Apply filters
+                    if life_period and memory.life_period != life_period:
+                        continue
+                    relevance = 0.4 + 0.1 * len(overlap)
+                    if relevance >= min_relevance:
+                        print(f"[DEBUG] Word overlap fallback (no ChromaDB): memory {memory.id} overlap words: {overlap}")
+                        memory.update_access()
+                        results.append(EpisodicSearchResult(
+                            memory=memory,
+                            relevance=relevance,
+                            match_type="word_overlap",
+                            search_metadata={"overlap": list(overlap)}
+                        ))
         results.sort(key=lambda x: x.relevance, reverse=True)
+        print(f"[DEBUG] Fallback (no ChromaDB) search returned {len(results[:limit])} results.")
         return results[:limit]
-    
-    def get_related_memories(
-        self,
-        memory_id: str,
-        relationship_types: Optional[List[str]] = None,
-        limit: int = 10
-    ) -> List[EpisodicSearchResult]:
+
+    def get_related_memories(self, memory_id: str, relationship_types: Optional[List[str]] = None, limit: int = 10) -> List['EpisodicSearchResult']:
         """
-        Get memories related to a specific memory through various relationships
+        Get related memories for a given memory ID
         
         Args:
-            memory_id: ID of the reference memory
-            relationship_types: Types of relationships to search for
-            limit: Maximum results to return
+            memory_id: The ID of the memory to find relations for
+            relationship_types: List of relationship types to consider
+            limit: Maximum number of results to return
             
         Returns:
-            List of related memories
+            List of related EpisodicSearchResult objects
         """
         memory = self.retrieve_memory(memory_id)
         if not memory:
+            print(f"[DEBUG] Memory {memory_id} not found for related search.")
             return []
-        
         relationship_types = relationship_types or ["temporal", "cross_reference", "semantic"]
         results = []
-        
         # Explicit related episodes
         if "cross_reference" in relationship_types:
             for related_id in memory.related_episodes:
                 related_memory = self.retrieve_memory(related_id)
                 if related_memory:
+                    print(f"[DEBUG] Explicit related episode: {related_id}")
                     results.append(EpisodicSearchResult(
                         memory=related_memory,
                         relevance=0.9,
                         match_type="cross_reference",
                         search_metadata={"relationship": "explicit_related"}
                     ))
-        
         # Cross-referenced STM/LTM memories
         if "cross_reference" in relationship_types:
             for mem in self._memory_cache.values():
                 if mem.id == memory_id:
                     continue
-                
-                # Check for shared STM references
                 shared_stm = set(memory.associated_stm_ids) & set(mem.associated_stm_ids)
                 if shared_stm:
+                    print(f"[DEBUG] Shared STM cross-reference: {mem.id} shared_stm={shared_stm}")
                     relevance = min(0.8, len(shared_stm) * 0.2)
                     results.append(EpisodicSearchResult(
                         memory=mem,
@@ -728,10 +790,9 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         match_type="cross_reference",
                         search_metadata={"shared_stm_ids": list(shared_stm)}
                     ))
-                
-                # Check for shared LTM references
                 shared_ltm = set(memory.associated_ltm_ids) & set(mem.associated_ltm_ids)
                 if shared_ltm:
+                    print(f"[DEBUG] Shared LTM cross-reference: {mem.id} shared_ltm={shared_ltm}")
                     relevance = min(0.8, len(shared_ltm) * 0.2)
                     results.append(EpisodicSearchResult(
                         memory=mem,
@@ -739,16 +800,15 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         match_type="cross_reference",
                         search_metadata={"shared_ltm_ids": list(shared_ltm)}
                     ))
-        
         # Temporal proximity
         if "temporal" in relationship_types:
-            time_window = timedelta(hours=2)  # 2-hour window
+            time_window = timedelta(hours=2)
             for mem in self._memory_cache.values():
                 if mem.id == memory_id:
                     continue
-                
                 time_diff = abs((memory.timestamp - mem.timestamp).total_seconds())
                 if time_diff <= time_window.total_seconds():
+                    print(f"[DEBUG] Temporal relationship: {mem.id} time_diff={time_diff}")
                     relevance = 0.7 * (1.0 - time_diff / time_window.total_seconds())
                     results.append(EpisodicSearchResult(
                         memory=mem,
@@ -756,7 +816,6 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         match_type="temporal",
                         search_metadata={"time_diff_seconds": time_diff}
                     ))
-        
         # Semantic similarity
         if "semantic" in relationship_types and self.collection:
             try:
@@ -766,15 +825,14 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     limit=limit,
                     min_relevance=0.4
                 )
-                
                 for result in semantic_results:
                     if result.memory.id != memory_id:
+                        print(f"[DEBUG] Semantic related: {result.memory.id} relevance={result.relevance}")
                         result.match_type = "semantic"
                         results.append(result)
-                        
             except Exception as e:
                 logger.warning(f"Semantic search for related memories failed: {e}")
-        
+                print(f"[DEBUG] Semantic search for related memories failed: {e}")
         # Remove duplicates and sort by relevance
         seen_ids = set()
         unique_results = []
@@ -782,214 +840,119 @@ class EpisodicMemorySystem(BaseMemorySystem):
             if result.memory.id not in seen_ids:
                 seen_ids.add(result.memory.id)
                 unique_results.append(result)
-        
         unique_results.sort(key=lambda x: x.relevance, reverse=True)
+        print(f"[DEBUG] get_related_memories returning {len(unique_results[:limit])} results.")
         return unique_results[:limit]
-    
-    def get_autobiographical_timeline(
-        self,
-        life_period: Optional[str] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        limit: int = 50
-    ) -> List[EpisodicMemory]:
+
+    def get_autobiographical_timeline(self, life_period: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, limit: int = 50) -> List['EpisodicMemory']:
         """
         Get memories organized as an autobiographical timeline
         
         Args:
-            life_period: Filter by specific life period
-            start_date: Start of time range
-            end_date: End of time range
-            limit: Maximum memories to return
+            life_period: Optional life period to filter by
+            start_date: Optional start date for filtering
+            end_date: Optional end date for filtering
+            limit: Maximum number of results to return
             
         Returns:
-            List of memories sorted chronologically
+            List of EpisodicMemory objects sorted by timestamp
         """
-        filtered_memories = []
-        
-        for memory in self._memory_cache.values():
-            # Apply filters
-            if life_period and memory.life_period != life_period:
-                continue
-            if start_date and memory.timestamp < start_date:
-                continue
-            if end_date and memory.timestamp > end_date:
-                continue
-            
-            filtered_memories.append(memory)
-        
-        # Sort by timestamp
-        filtered_memories.sort(key=lambda x: x.timestamp)
-        
-        # Update access for retrieved memories
-        for memory in filtered_memories[:limit]:
-            memory.update_access()
-        
-        return filtered_memories[:limit]
-    
-    def consolidate_memory(self, memory_id: str, strength_increment: float = 0.2) -> bool:
+        memories = list(self._memory_cache.values())
+        if life_period:
+            memories = [m for m in memories if m.life_period == life_period]
+        if start_date:
+            memories = [m for m in memories if m.timestamp >= start_date]
+        if end_date:
+            memories = [m for m in memories if m.timestamp <= end_date]
+        memories.sort(key=lambda m: m.timestamp)
+        print(f"[DEBUG] get_autobiographical_timeline returning {len(memories[:limit])} results.")
+        return memories[:limit]
+
+    def consolidate_memory(self, memory_id: str, strength_increment: float = 0.1) -> bool:
         """
-        Consolidate a specific memory (typically called during dream cycles)
-        
+        Consolidate a memory by strengthening its consolidation
+
         Args:
-            memory_id: ID of memory to consolidate
-            strength_increment: How much to increase consolidation strength
-            
+            memory_id: The ID of the memory to consolidate
+            strength_increment: The amount to increase the consolidation strength
+
         Returns:
-            Success status
+            True if the memory was consolidated (strength increased), False otherwise
         """
         memory = self.retrieve_memory(memory_id)
         if not memory:
+            print(f"[DEBUG] consolidate_memory: memory {memory_id} not found.")
             return False
-        
-        # Increase consolidation strength
-        memory.consolidation_strength = min(1.0, memory.consolidation_strength + strength_increment)
-        
-        # Increase vividness for important memories
-        if memory.importance > 0.7:
-            memory.vividness = min(1.0, memory.vividness + 0.1)
-        
-        # Save updated memory
-        self._save_to_json_backup(memory)
-        
-        logger.debug(f"Consolidated memory {memory_id}: strength={memory.consolidation_strength:.2f}")
-        return True
-    
-    def get_consolidation_candidates(
-        self,
-        min_importance: float = 0.4,
-        max_consolidation: float = 0.8,
-        limit: int = 20
-    ) -> List[EpisodicMemory]:
+        before = memory.consolidation_strength
+        memory.rehearse(strength_increment)
+        after = memory.consolidation_strength
+        print(f"[DEBUG] consolidate_memory: {memory_id} strength {before} -> {after}")
+        return after > before
+
+    def get_memory_statistics(self) -> dict:
         """
-        Get memories that are candidates for consolidation
+        Get statistics about the memories in the system
         
-        Args:
-            min_importance: Minimum importance threshold
-            max_consolidation: Maximum current consolidation strength
-            limit: Maximum candidates to return
-            
         Returns:
-            List of memories needing consolidation
+            Dictionary containing various statistics about the memories
         """
-        candidates = []
-        
-        for memory in self._memory_cache.values():
-            if (memory.importance >= min_importance and 
-                memory.consolidation_strength <= max_consolidation):
-                candidates.append(memory)
-        
-        # Sort by importance and access frequency
-        candidates.sort(
-            key=lambda x: (x.importance, x.access_count, x.rehearsal_count),
-            reverse=True
-        )
-        
-        return candidates[:limit]
-    
-    def get_memory_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive statistics about the episodic memory system"""
-        if not self._memory_cache:
-            return {
-                "total_memories": 0,
-                "memory_system_status": "empty"
-            }
-        
         memories = list(self._memory_cache.values())
-        
-        # Basic counts
-        total_memories = len(memories)
-        life_periods = set(m.life_period for m in memories if m.life_period)
-        
-        # Time span
-        timestamps = [m.timestamp for m in memories]
-        earliest = min(timestamps)
-        latest = max(timestamps)
-        time_span = latest - earliest
-        
-        # Importance and emotional analysis
-        importances = [m.importance for m in memories]
-        emotional_valences = [m.emotional_valence for m in memories]
-        consolidation_strengths = [m.consolidation_strength for m in memories]
-        
-        # Access patterns
-        access_counts = [m.access_count for m in memories]
-        rehearsal_counts = [m.rehearsal_count for m in memories]
-        
-        return {
-            "total_memories": total_memories,
+        stats = {
+            "total_memories": len(memories),
             "memory_system_status": "active",
-            "time_span_days": time_span.days,
-            "earliest_memory": earliest.isoformat(),
-            "latest_memory": latest.isoformat(),
-            "life_periods": list(life_periods),
-            "life_period_count": len(life_periods),
-            "importance_stats": {
-                "mean": sum(importances) / len(importances),
-                "min": min(importances),
-                "max": max(importances)
-            },
-            "emotional_stats": {
-                "mean_valence": sum(emotional_valences) / len(emotional_valences),
-                "positive_memories": len([v for v in emotional_valences if v > 0.1]),
-                "negative_memories": len([v for v in emotional_valences if v < -0.1]),
-                "neutral_memories": len([v for v in emotional_valences if -0.1 <= v <= 0.1])
-            },
-            "consolidation_stats": {
-                "mean_strength": sum(consolidation_strengths) / len(consolidation_strengths),
-                "well_consolidated": len([s for s in consolidation_strengths if s > 0.7]),
-                "needs_consolidation": len([s for s in consolidation_strengths if s < 0.3])
-            },
-            "access_stats": {
-                "mean_access_count": sum(access_counts) / len(access_counts),
-                "total_accesses": sum(access_counts),
-                "frequently_accessed": len([c for c in access_counts if c > 5]),
-                "mean_rehearsal_count": sum(rehearsal_counts) / len(rehearsal_counts)
-            },
-            "chromadb_available": self.collection is not None,
-            "embedding_model_available": self.embedding_model is not None,
-            "json_backup_enabled": self.enable_json_backup
+            "life_period_count": len(set(m.life_period for m in memories if m.life_period)),
         }
-    
+        if not memories:
+            return stats
+        import numpy as np
+        importance = np.array([m.importance for m in memories])
+        emotional = np.array([m.emotional_valence for m in memories])
+        consolidation = np.array([m.consolidation_strength for m in memories])
+        access = np.array([m.access_count for m in memories])
+        stats["importance_stats"] = {"mean": float(importance.mean()), "min": float(importance.min()), "max": float(importance.max())}
+        stats["emotional_stats"] = {
+            "positive_memories": int((emotional > 0.1).sum()),
+            "negative_memories": int((emotional < -0.1).sum()),
+            "neutral_memories": int(((emotional >= -0.1) & (emotional <= 0.1)).sum()),
+        }
+        stats["consolidation_stats"] = {"mean": float(consolidation.mean()), "min": float(consolidation.min()), "max": float(consolidation.max())}
+        stats["access_stats"] = {"mean": float(access.mean()), "min": int(access.min()), "max": int(access.max())}
+        print(f"[DEBUG] get_memory_statistics: {stats}")
+        return stats
+
     def clear_memory(self, older_than: Optional[timedelta] = None, importance_threshold: Optional[float] = None):
         """
-        Clear memories based on age or importance
+        Clear memories from the system based on criteria
         
         Args:
-            older_than: Remove memories older than this duration
-            importance_threshold: Remove memories below this importance
+            older_than: Optional timedelta; if set, memories older than this will be removed
+            importance_threshold: Optional importance threshold; if set, memories with importance below this will be removed
         """
         to_remove = []
-        current_time = datetime.now()
-        
-        for memory_id, memory in self._memory_cache.items():
-            should_remove = False
-            
-            if older_than and (current_time - memory.timestamp) > older_than:
-                should_remove = True
-            
-            if importance_threshold and memory.importance < importance_threshold:
-                should_remove = True
-            
-            if should_remove:
-                to_remove.append(memory_id)
-        
-        # Remove from cache
-        for memory_id in to_remove:
-            del self._memory_cache[memory_id]
-        
-        # Remove from ChromaDB
-        if self.collection and to_remove:
-            try:
-                self.collection.delete(ids=to_remove)
-            except Exception as e:
-                logger.warning(f"Failed to remove memories from ChromaDB: {e}")
-        
-        # Remove JSON backups
-        if self.enable_json_backup:
-            for memory_id in to_remove:
-                json_file = self.storage_path / f"{memory_id}.json"
-                if json_file.exists():
-                    json_file.unlink()
-        
-        logger.info(f"Cleared {len(to_remove)} episodic memories")
+        now = datetime.now()
+        for mem_id, mem in self._memory_cache.items():
+            if older_than and (now - mem.timestamp) > older_than:
+                to_remove.append(mem_id)
+            elif importance_threshold is not None and mem.importance < importance_threshold:
+                to_remove.append(mem_id)
+        for mem_id in to_remove:
+            print(f"[DEBUG] clear_memory: removing {mem_id}")
+            self._memory_cache.pop(mem_id, None)
+        print(f"[DEBUG] clear_memory: removed {len(to_remove)} memories.")
+
+    def get_consolidation_candidates(self, min_importance: float = 0.5, max_consolidation: float = 0.9, limit: int = 10) -> list:
+        """
+        Get memories that are candidates for consolidation based on importance and consolidation strength.
+        """
+        candidates = [
+            m for m in self._memory_cache.values()
+            if m.importance >= min_importance and m.consolidation_strength <= max_consolidation
+        ]
+        candidates.sort(key=lambda m: (-m.importance, m.consolidation_strength))
+        print(f"[DEBUG] get_consolidation_candidates returning {len(candidates[:limit])} candidates.")
+        return candidates[:limit]
+
+    def clear_all_memories(self):
+        """Clear all episodic memories from the in-memory cache (for test isolation)."""
+        self._memory_cache.clear()
+        print("[DEBUG] clear_all_memories: all in-memory episodic memories cleared.")
