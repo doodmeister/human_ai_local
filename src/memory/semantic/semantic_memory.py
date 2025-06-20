@@ -82,26 +82,43 @@ class SemanticMemorySystem(BaseMemorySystem):
             List[Dict[str, Any]]: A list of matching facts.
         """
         results = []
-        if not subject and not predicate and not object_val:
-            return []
-            
-        subj_lower = subject.lower() if subject else None
-        pred_lower = predicate.lower() if predicate else None
-
+        
+        # Normalize search terms to lowercase for comparison
+        search_subject = subject.lower() if subject else None
+        search_predicate = predicate.lower() if predicate else None
+        
         for fact_id, fact in self.knowledge_base.items():
-            match_subject = (subj_lower is None) or (fact.get("subject") == subj_lower)
-            match_predicate = (pred_lower is None) or (fact.get("predicate") == pred_lower)
-            match_object = (object_val is None) or (fact.get("object") == object_val)
+            match = True
             
-            if match_subject and match_predicate and match_object:
-                results.append({"fact_id": fact_id, **fact})
+            if search_subject and fact.get("subject") != search_subject:
+                match = False
+            if search_predicate and fact.get("predicate") != search_predicate:
+                match = False
+            if object_val is not None and fact.get("object") != object_val:
+                match = False
+            
+            if match:
+                # Include the fact_id in the result
+                result = fact.copy()
+                result["fact_id"] = fact_id
+                results.append(result)
+        
         return results
 
-    def store(self, subject: str, predicate: str, object_val: Any) -> str:
+    def store(self, *args, **kwargs) -> str:
         """
         Store a new fact (triple) in the knowledge base.
         Returns the unique fact ID.
         """
+        # Accepts (subject, predicate, object_val) as positional or keyword args
+        if args and len(args) == 3:
+            subject, predicate, object_val = args
+        else:
+            subject = kwargs.get('subject')
+            predicate = kwargs.get('predicate')
+            object_val = kwargs.get('object_val')
+        if not subject or not predicate:
+            raise ValueError("Both subject and predicate are required to store a fact.")
         return self.store_fact(subject, predicate, object_val)
 
     def retrieve(self, memory_id: str) -> Optional[dict]:
@@ -116,21 +133,68 @@ class SemanticMemorySystem(BaseMemorySystem):
         Delete a fact by its unique ID (memory_id).
         Returns True if deleted, False otherwise.
         """
-        if memory_id in self.knowledge_base:
-            del self.knowledge_base[memory_id]
-            self._save_kb()
-            return True
-        return False
+        return super().delete(memory_id) if hasattr(super(), 'delete') else self.knowledge_base.pop(memory_id, None) is not None
+
+    def delete_fact(self, subject: str, predicate: str, object_val: Any) -> bool:
+        """
+        Delete a fact from the semantic memory system
+    
+        Args:
+            subject: The subject of the fact
+            predicate: The predicate/relationship
+            object_val: The object value
+    
+        Returns:
+            True if fact was found and deleted, False otherwise
+        """
+        try:
+            # Find matching facts
+            matching_facts = []
+            for fact_id, fact in self.knowledge_base.items():
+                if (fact["subject"] == subject and 
+                    fact["predicate"] == predicate and 
+                    fact["object"] == object_val):
+                    matching_facts.append(fact_id)
+        
+            # Delete matching facts
+            deleted_count = 0
+            for fact_id in matching_facts:
+                del self.knowledge_base[fact_id]
+                deleted_count += 1
+        
+            # Save changes if any facts were deleted
+            if deleted_count > 0:
+                self._save_kb()
+                return True
+            else:
+                return False
+            
+        except Exception as e:
+            return False
 
     def search(self, query: Optional[str] = None, **kwargs) -> Sequence[dict | tuple]:
         """
         Search for facts. If query is None, use kwargs for subject/predicate/object_val.
         Returns a sequence of matching fact dicts.
         """
-        subject = kwargs.get('subject')
-        predicate = kwargs.get('predicate')
-        object_val = kwargs.get('object_val')
-        return self.find_facts(subject, predicate, object_val)
+        if query:
+            # Text-based search across all fact content
+            results = []
+            query_lower = query.lower()
+            for fact_id, fact in self.knowledge_base.items():
+                subject_match = query_lower in str(fact.get("subject", "")).lower()
+                predicate_match = query_lower in str(fact.get("predicate", "")).lower()
+                object_match = query_lower in str(fact.get("object", "")).lower()
+                if subject_match or predicate_match or object_match:
+                    result = fact.copy()
+                    result["fact_id"] = fact_id
+                    results.append(result)
+            return results
+        else:
+            subject = kwargs.get('subject')
+            predicate = kwargs.get('predicate')
+            object_val = kwargs.get('object_val')
+            return self.find_facts(subject, predicate, object_val)
 
     def clear(self):
         """Clears the entire knowledge base (for testing)."""

@@ -9,6 +9,7 @@ from .stm import ShortTermMemory, VectorShortTermMemory
 from .ltm import LongTermMemory, VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .semantic.semantic_memory import SemanticMemorySystem
+from .prospective.prospective_memory import ProspectiveMemorySystem
 
 if TYPE_CHECKING:
     from .episodic.episodic_memory import EpisodicSearchResult
@@ -85,6 +86,9 @@ class MemorySystem:
         # Initialize Semantic Memory
         semantic_storage = semantic_storage_path or "data/memory_stores/semantic/semantic_kb.json"
         self.semantic = SemanticMemorySystem(storage_path=semantic_storage)
+        
+        # Initialize Prospective Memory
+        self.prospective = ProspectiveMemorySystem()
         
         self.consolidation_interval = consolidation_interval
         self.last_consolidation = datetime.now()
@@ -339,7 +343,7 @@ class MemorySystem:
                         )
                         
                         if success:
-                            self.stm.remove_item(memory_id)
+                            self.stm.delete(memory_id)
                             stats['consolidated_count'] += 1
                         else:
                             stats['failed_count'] += 1
@@ -437,7 +441,17 @@ class MemorySystem:
             return [(result.item, result.relevance_score) for result in vector_results]
         else:
             # Fallback to regular STM search
-            return self.stm.search(query=query, max_results=max_results, min_activation=min_activation)
+            results = self.stm.search(query=query, max_results=max_results, min_activation=min_activation)
+            # Ensure return type is List[Tuple[Any, float]]
+            out = []
+            for r in results:
+                if isinstance(r, tuple) and len(r) == 2:
+                    out.append((r[0], r[1]))
+                elif isinstance(r, dict):
+                    out.append((r, 1.0))
+                else:
+                    out.append((r, 1.0))
+            return out
     
     def get_context_for_query(
         self,
@@ -544,7 +558,6 @@ class MemorySystem:
             )
             
             episode_id = self.episodic.store_memory(
-                summary=summary,
                 detailed_content=detailed_content,
                 context=context,
                 associated_stm_ids=stm_ids or [],
@@ -637,3 +650,20 @@ class MemorySystem:
         except Exception as e:
             logger.error(f"Error getting cross-referenced episodes: {e}")
             return []
+    
+    # Prospective memory API
+    def add_prospective_reminder(self, description: str, due_time: datetime) -> str:
+        """Add a new prospective reminder"""
+        return self.prospective.add_reminder(description, due_time)
+    
+    def get_due_prospective_reminders(self, now: Optional[datetime] = None):
+        """Get due prospective reminders"""
+        return self.prospective.get_due_reminders(now)
+    
+    def list_prospective_reminders(self, include_completed: bool = False):
+        """List all prospective reminders"""
+        return self.prospective.list_reminders(include_completed)
+    
+    def complete_prospective_reminder(self, item_id: str):
+        """Mark a prospective reminder as complete"""
+        return self.prospective.complete_reminder(item_id)

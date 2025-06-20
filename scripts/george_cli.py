@@ -84,6 +84,50 @@ async def main():
         except KeyboardInterrupt:
             print("\n[George] Session ended.")
             break
+        if cmd.startswith("/remind"):
+            import re
+            from datetime import datetime, timedelta
+            # Example: /remind me to call mom at 2025-06-21 15:00
+            match = re.match(r"/remind (me to )?(?P<desc>.+?) (at|on|in) (?P<time>.+)", user_input, re.IGNORECASE)
+            if not match:
+                print("[George] Usage: /remind me to <task> at <YYYY-MM-DD HH:MM> or /remind me to <task> in <minutes> minutes")
+                continue
+            desc = match.group("desc").strip()
+            time_str = match.group("time").strip()
+            # Try to parse time
+            due_time = None
+            try:
+                if "minute" in time_str:
+                    match_result = re.search(r"(\d+)", time_str)
+                    if match_result:
+                        mins = int(match_result.group(1))
+                        due_time = datetime.now() + timedelta(minutes=mins)
+                    else:
+                        raise ValueError("No number found in time string")
+                else:
+                    due_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M")
+            except Exception:
+                print("[George] Could not parse time. Use 'at YYYY-MM-DD HH:MM' or 'in N minutes'.")
+                continue
+            reminder_id = agent.memory.add_prospective_reminder(desc, due_time)
+            print(f"[George] Reminder set: '{desc}' at {due_time.strftime('%Y-%m-%d %H:%M')}")
+            continue
+        if cmd == "/reminders":
+            reminders = agent.memory.list_prospective_reminders()
+            if not reminders:
+                print("[George] No scheduled reminders.")
+            else:
+                print("[George] Scheduled reminders:")
+                for r in reminders:
+                    print(f"  [Due: {format_time(r.due_time)}] {r.description} (ID: {r.id})")
+            continue
+        # Announce due reminders at each turn
+        due = agent.memory.get_due_prospective_reminders()
+        if due:
+            print("[George] Reminder(s) due:")
+            for r in due:
+                print(f"  [Due: {format_time(r.due_time)}] {r.description}")
+                agent.memory.complete_prospective_reminder(r.id)
 
 if __name__ == "__main__":
     asyncio.run(main())
