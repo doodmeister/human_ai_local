@@ -6,6 +6,9 @@ from datetime import datetime
 import torch
 import numpy as np
 import uuid
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
 
 from .config import CognitiveConfig, PerformanceConfig
 from ..memory.memory_system import MemorySystem
@@ -13,6 +16,19 @@ from ..attention.attention_mechanism import AttentionMechanism
 from ..processing.sensory import SensoryInterface, SensoryProcessor
 from ..processing.dream import DreamProcessor
 from ..optimization.performance_optimizer import PerformanceOptimizer
+
+# Load environment variables for LLM
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4.1-nano")
+
+# Default guiding system prompt for the agent
+DEFAULT_SYSTEM_PROMPT = (
+    "You are George, a virtual AI with human-like cognition. "
+    "You act as the metacognitive layer of a human mind, orchestrating short-term, long-term, episodic, and procedural memory. "
+    "Your responses should reflect self-awareness, context integration, and adaptive reasoning, as if you were a thoughtful, introspective human. "
+    "Always strive for clarity, empathy, and explainability in your interactions."
+)
 
 class CognitiveAgent:
     """
@@ -25,7 +41,7 @@ class CognitiveAgent:
     4. Response generation and memory consolidation
     """
     
-    def __init__(self, config: Optional[CognitiveConfig] = None):
+    def __init__(self, config: Optional[CognitiveConfig] = None, system_prompt: Optional[str] = None):
         """
         Initialize the cognitive agent
         
@@ -45,6 +61,15 @@ class CognitiveAgent:
         self.active_goals = []
         # Stores recent conversation history for proactive recall
         self.conversation_context: List[Dict[str, Any]] = []
+        
+        # LLM configuration - Initialize OpenAI client
+        self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self.llm_conversation = []  # For LLM chat history
+        if not OPENAI_API_KEY:
+            print("[WARNING] OPENAI_API_KEY not set. LLM features will not work.")
+            self.openai_client = None
+        else:
+            self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
         
         print(f"Cognitive agent initialized with session ID: {self.session_id}")
     
@@ -290,12 +315,63 @@ class CognitiveAgent:
         attention_scores: Dict[str, float]
     ) -> str:
         """Generate response using LLM with cognitive context"""
-        # Enhanced placeholder that includes memory context
-        context_info = ""
+        if not OPENAI_API_KEY:
+            return "[LLM unavailable: No API key configured.]"
+        # Build LLM messages
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": f"Current date and time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
+        ]
+        # Add memory context as assistant messages, including timestamps
         if memory_context:
-            context_info = f" (I found {len(memory_context)} related memories)"
+            context_str = "\n".join(
+                f"Memory ({m['source']}, {m['timestamp'] if 'timestamp' in m and m['timestamp'] else 'no time'}): {m['content']}"
+                for m in memory_context
+            )
+            messages.append({"role": "assistant", "content": f"Relevant memories:\n{context_str}"})
+        # Add conversation history
+        messages += self.llm_conversation[-6:]  # Last 3 user/assistant pairs
+        # Add user input
+        user_msg = processed_input['raw_input']
+        messages.append({"role": "user", "content": user_msg})
+        try:
+            response = await self._call_openai_chat(messages)
+            # Update LLM conversation history
+            self.llm_conversation.append({"role": "user", "content": user_msg})
+            self.llm_conversation.append({"role": "assistant", "content": response})
+            return response
+        except Exception as e:
+            return f"[ERROR] LLM call failed: {e}"
+
+    async def _call_openai_chat(self, messages):
+        """Call OpenAI chat completion API asynchronously."""
+        if not self.openai_client:
+            raise Exception("OpenAI client not initialized - missing API key")
+            
+        import asyncio
+        loop = asyncio.get_event_loop()
         
-        return f"I understand you said: '{processed_input['raw_input']}'. This is a placeholder response{context_info}."
+        def make_openai_call():
+            if not self.openai_client:
+                raise Exception("OpenAI client is None - API key not configured")
+            response = self.openai_client.chat.completions.create(
+                model=OPENAI_MODEL_NAME,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=512,
+            )
+            content = response.choices[0].message.content
+            return content.strip() if content is not None else ""
+        
+        return await loop.run_in_executor(None, make_openai_call)
+
+    def set_system_prompt(self, prompt: str):
+        """Set a new system prompt for the agent."""
+        self.system_prompt = prompt
+
+    def reset_llm_conversation(self):
+        """Clear the LLM conversation history."""
+        self.llm_conversation = []
     
     async def _consolidate_memory(
         self,

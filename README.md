@@ -1,5 +1,93 @@
 # Human-AI Cognition Framework
 
+## Overview
+Biologically-inspired cognitive architecture simulating human-like memory, attention, and reasoning. Persistent memory structures and modular, explainable processing patterns.
+
+---
+
+## 🚀 Recent Major Update: Unified Memory Interface & Episodic Memory Improvements (June 2025)
+
+### Unified Memory Interface
+- **All major memory modules (STM, LTM, Episodic, Semantic)** now implement a consistent, type-safe interface via a shared `BaseMemorySystem` class (`src/memory/base.py`).
+- **Unified API methods** for all memory systems:
+  - `store(...)`: Store a new memory (returns memory ID)
+  - `retrieve(memory_id)`: Retrieve a memory as a dict
+  - `delete(memory_id)`: Delete a memory by ID
+  - `search(query, **kwargs)`: Search for memories (returns list of dicts)
+- All memory modules return dicts and use unified parameter names for easier integration and testing.
+
+### Episodic Memory System Enhancements
+- **Fallback search**: Robust fallback logic using word overlap heuristics and debug output if ChromaDB is unavailable or returns no results.
+- **Related memory logic**: Improved detection of related memories (temporal, cross-reference, semantic) with debug output for explainability.
+- **New/Updated Public API Methods**:
+  - `get_related_memories(memory_id, relationship_types=None, limit=10)`
+  - `get_autobiographical_timeline(life_period=None, start_date=None, end_date=None, limit=50)`
+  - `consolidate_memory(memory_id, strength_increment=0.1)`
+  - `get_memory_statistics()`
+  - `clear_memory(older_than=None, importance_threshold=None)`
+  - `get_consolidation_candidates(min_importance=0.5, max_consolidation=0.9, limit=10)`
+  - `clear_all_memories()` (for test isolation)
+- **Debug output**: All fallback and related memory logic now prints detailed debug information for transparency and troubleshooting.
+
+### Testing & Reliability
+- **Integration tests** for vector LTM and episodic memory updated to use the new interface and auto-generated summaries.
+- **Test isolation**: All tests clear persistent and in-memory data before each run for clean, isolated test runs.
+- **All episodic memory integration tests pass.**
+
+---
+
+## Unified Memory Interface and Episodic Memory Enhancements (June 2025)
+
+### Unified Memory Interface
+- All major memory modules (STM, LTM, Episodic, Semantic) now implement a consistent, type-safe interface via a shared `BaseMemorySystem` class (`src/memory/base.py`).
+- Unified public API methods: `store`, `retrieve`, `delete`, `search` (all return dicts, use unified parameter names).
+- All memory modules inherit from `BaseMemorySystem` and enforce type annotations for robust, modular design.
+
+### Episodic Memory System Improvements
+- Major refactor of `EpisodicMemorySystem` (`src/memory/episodic/episodic_memory.py`):
+  - Robust fallback search logic (word overlap, text match) with detailed debug output for explainability.
+  - Enhanced related memory logic (cross-reference, temporal, semantic) with debug output.
+  - All required public API methods implemented and exposed:
+    - `get_related_memories`
+    - `get_autobiographical_timeline`
+    - `consolidate_memory`
+    - `get_memory_statistics`
+    - `clear_memory`
+    - `get_consolidation_candidates`
+    - `clear_all_memories` (for test isolation)
+- All methods return type-safe results and provide debug output for fallback/related memory logic.
+
+### Testing and Test Isolation
+- Integration tests for vector LTM and episodic memory updated to use the new interface.
+- Test isolation: persistent and in-memory data cleared before each run to ensure clean test runs.
+- All episodic memory integration tests pass.
+
+### Documentation
+- This section documents the new unified memory interface, episodic memory improvements, new public API methods, and updated testing strategy.
+- See `src/memory/base.py` for the base interface and `src/memory/episodic/episodic_memory.py` for the full implementation and debug logic.
+
+---
+
+## Usage Example (Unified Memory API)
+```python
+# Example: Storing and searching episodic memory
+from src.memory.episodic.episodic_memory import EpisodicMemorySystem
+
+memsys = EpisodicMemorySystem()
+mem_id = memsys.store(detailed_content="Visited the science museum with friends.")
+result = memsys.retrieve(mem_id)
+print(result)
+
+# Search
+results = memsys.search(query="museum")
+for r in results:
+    print(r)
+```
+
+---
+
+# Human-AI Cognition Framework
+
 A biologically-inspired cognitive architecture for human-like memory, attention, and reasoning in AI systems. Features persistent, explainable memory structures, modular processing, and advanced neural integration.
 
 ## Project Vision
@@ -96,11 +184,9 @@ LTM_COLLECTION=long_term_memory
 
 ## Actionable Roadmap (2025+)
 ### Mid-Term Goals (3–6 Months)
-- Episodic memory: Proactive recall, automatic summarization, and keyword tagging for enhanced search and retrieval.
-- Semantic memory: Structured knowledge base, update/consult routines
-- Planning: Chain-of-thought, task decomposition, agent frameworks
-- Multi-modal: Voice/image I/O, interface refinement, personalization
-- Feedback: Real-time user feedback, metacognitive reflection, memory consolidation
+- Planning: Chain-of-thought, task decomposition, agent frameworks *(Not yet accomplished)*
+- Multi-modal: Voice/image I/O, interface refinement, personalization *(Not yet accomplished)*
+- Feedback: Real-time user feedback, metacognitive reflection, memory consolidation *(Partially accomplished: memory consolidation present; real-time feedback and metacognitive reflection not yet implemented)*
 
 ### Long-Term Goals (6+ Months)
 - Autonomy: Goal persistence, proactive actions, continuous operation, multi-agent collaboration
