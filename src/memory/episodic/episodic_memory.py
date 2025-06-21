@@ -618,7 +618,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 print(f"[DEBUG] ChromaDB search returned {len(results[:limit])} results.")
                 # If ChromaDB returns no results, try fallback
                 if not results:
-                    print(f"[DEBUG] ChromaDB returned no results, trying fallback search.")
+                    print("[DEBUG] ChromaDB returned no results, trying fallback search.")
                     # Fallback logic (text match and word overlap)
                     query_lower = query.lower()
                     for memory in self._memory_cache.values():
@@ -637,7 +637,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                                 search_metadata={}
                             ))
                     if not results:
-                        print(f"[DEBUG] No direct text matches found, trying word overlap fallback.")
+                        print("[DEBUG] No direct text matches found, trying word overlap fallback.")
                         query_words = set(query_lower.split())
                         for memory in self._memory_cache.values():
                             text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
@@ -681,7 +681,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         ))
                 # Word overlap fallback if no results
                 if not results:
-                    print(f"[DEBUG] No direct text matches found, trying word overlap fallback.")
+                    print("[DEBUG] No direct text matches found, trying word overlap fallback.")
                     query_words = set(query_lower.split())
                     for memory in self._memory_cache.values():
                         text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
@@ -722,7 +722,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 ))
         # Word overlap fallback if no results
         if not results:
-            print(f"[DEBUG] No direct text matches found (no ChromaDB), trying word overlap fallback.")
+            print("[DEBUG] No direct text matches found (no ChromaDB), trying word overlap fallback.")
             query_words = set(query_lower.split())
             for memory in self._memory_cache.values():
                 text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())

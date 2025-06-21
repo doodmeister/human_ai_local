@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Dict, Tuple, Union, Sequence
+from typing import Optional, Union, Sequence
 
 class BaseMemorySystem(ABC):
     """

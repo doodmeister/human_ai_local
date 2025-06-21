@@ -10,7 +10,7 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from .config import CognitiveConfig, PerformanceConfig
+from .config import CognitiveConfig
 from ..memory.memory_system import MemorySystem
 from ..attention.attention_mechanism import AttentionMechanism
 from ..processing.sensory import SensoryInterface, SensoryProcessor

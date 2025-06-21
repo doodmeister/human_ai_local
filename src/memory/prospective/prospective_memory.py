@@ -3,8 +3,8 @@ Prospective Memory System for Human-AI Cognition Framework
 
 Stores and manages future intentions, reminders, and scheduled tasks.
 """
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from typing import List, Optional, Dict
+from datetime import datetime
 from dataclasses import dataclass, field
 import uuid
 

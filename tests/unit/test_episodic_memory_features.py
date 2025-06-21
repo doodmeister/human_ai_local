@@ -1,8 +1,6 @@
 import unittest
 import os
-import shutil
 import uuid
-import time
 
 from src.memory.episodic.episodic_memory import EpisodicMemorySystem
 

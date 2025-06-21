@@ -169,7 +169,7 @@ class SemanticMemorySystem(BaseMemorySystem):
             else:
                 return False
             
-        except Exception as e:
+        except Exception:
             return False
 
     def search(self, query: Optional[str] = None, **kwargs) -> Sequence[dict | tuple]:

@@ -1,6 +1,5 @@
 import unittest
 import os
-import json
 import shutil
 from src.memory.semantic.semantic_memory import SemanticMemorySystem
 
