@@ -3,7 +3,7 @@ Long-Term Memory (LTM) System
 Implements persistent memory storage with semantic organization
 """
 from typing import Dict, List, Optional, Any, Tuple, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 import json
 import logging
@@ -251,6 +251,14 @@ class LongTermMemory(BaseMemorySystem):
             relevance *= (1.0 + record.importance)
             relevance *= (1.0 + min(record.access_count / 10.0, 1.0))
             
+            # Recency weighting (exponential decay based on time since last_access)
+            now = datetime.now()
+            seconds_since_access = (now - record.last_access).total_seconds()
+            # Decay half-life: 1 day (86400s) by default
+            half_life = 86400
+            recency_weight = 0.5 ** (seconds_since_access / half_life)
+            relevance *= (1.0 + recency_weight)  # Boost recent memories
+            
             if relevance > 0:
                 results.append((record, relevance))
         
@@ -432,3 +440,33 @@ class LongTermMemory(BaseMemorySystem):
             self._save_memory(record)
         
         logger.info(f"Saved {len(self.memories)} memories to disk")
+    
+    def decay_memories(self, decay_rate: float = 0.01, half_life_days: float = 30.0, min_importance: float = 0.05, min_confidence: float = 0.1) -> int:
+        """
+        Decay importance and confidence for old, rarely accessed memories.
+        Args:
+            decay_rate: Base decay rate per call (default 1%)
+            half_life_days: Half-life in days for exponential decay (default 30 days)
+            min_importance: Minimum importance value
+            min_confidence: Minimum confidence value
+        Returns:
+            Number of decayed memories
+        """
+        now = datetime.now()
+        decayed = 0
+        half_life_seconds = half_life_days * 86400
+        for record in self.memories.values():
+            seconds_since_access = (now - record.last_access).total_seconds()
+            # Exponential decay factor based on time since last access
+            decay_factor = 0.5 ** (seconds_since_access / half_life_seconds)
+            # Only decay if not accessed recently (e.g., >1 day)
+            if seconds_since_access > 86400:
+                old_importance = record.importance
+                old_confidence = record.confidence
+                record.importance = max(min_importance, record.importance * (1 - decay_rate) * decay_factor)
+                record.confidence = max(min_confidence, record.confidence * (1 - decay_rate/2) * decay_factor)
+                if record.importance < old_importance or record.confidence < old_confidence:
+                    self._save_memory(record)
+                    decayed += 1
+        logger.info(f"Decayed {decayed} LTM memories (rate={decay_rate}, half_life_days={half_life_days})")
+        return decayed

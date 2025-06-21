@@ -68,6 +68,39 @@ Biologically-inspired cognitive architecture simulating human-like memory, atten
 
 ---
 
+## 🚀 Major Update: Unified Memory, Procedural Memory, and CLI Integration (June 2025)
+
+### Procedural Memory System
+- **ProceduralMemory** is now fully integrated with STM and LTM. Procedures (skills, routines, action sequences) can be stored as either short-term or long-term memories.
+- Unified API: Store, retrieve, search, use, delete, and clear procedural memories via the same interface as other memory types.
+- **Persistence:** Procedures stored in LTM are persistent across runs; STM procedures are in-memory only.
+- **Tested:** Comprehensive tests ensure correct storage, retrieval, and deletion from both STM and LTM.
+
+### CLI Integration
+- The `george_cli.py` script now supports procedural memory management:
+  - `/procedure add` — interactively add a new procedure (description, steps, tags, STM/LTM)
+  - `/procedure list` — list all stored procedures
+  - `/procedure search <query>` — search procedures by description/steps
+  - `/procedure use <id>` — increment usage and display steps for a procedure
+  - `/procedure delete <id>` — delete a procedure by ID
+  - `/procedure clear` — remove all procedural memories
+
+### Example: Using Procedural Memory in Python
+```python
+from src.memory.memory_system import MemorySystem
+memsys = MemorySystem()
+proc_id = memsys.procedural.store(
+    description="How to make tea",
+    steps=["Boil water", "Add tea leaves", "Steep", "Pour into cup"],
+    tags=["kitchen", "beverage"],
+    memory_type="ltm"  # or "stm"
+)
+proc = memsys.procedural.retrieve(proc_id)
+print(proc)
+```
+
+---
+
 ## Usage Example (Unified Memory API)
 ```python
 # Example: Storing and searching episodic memory

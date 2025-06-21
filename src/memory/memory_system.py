@@ -10,6 +10,7 @@ from .ltm import LongTermMemory, VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .semantic.semantic_memory import SemanticMemorySystem
 from .prospective.prospective_memory import ProspectiveMemorySystem
+from .procedural.procedural_memory import ProceduralMemory
 
 if TYPE_CHECKING:
     from .episodic.episodic_memory import EpisodicSearchResult
@@ -89,6 +90,9 @@ class MemorySystem:
         
         # Initialize Prospective Memory
         self.prospective = ProspectiveMemorySystem()
+        
+        # Initialize Procedural Memory with STM and LTM
+        self.procedural = ProceduralMemory(stm=self.stm, ltm=self.ltm)
         
         self.consolidation_interval = consolidation_interval
         self.last_consolidation = datetime.now()
@@ -365,28 +369,25 @@ class MemorySystem:
         
         return stats
     
-    def dream_state_consolidation(self, duration_minutes: int = 10) -> Dict[str, Any]:
+    def dream_state_consolidation(
+        self,
+        min_importance: float = 0.5,
+        max_consolidation: float = 0.9,
+        limit: int = 20,
+        strength_increment: float = 0.2,
+        cluster: bool = True
+    ) -> dict:
         """
-        Legacy dream-state consolidation mode (basic version)
-        
-        Note: This is kept for backward compatibility. 
-        For advanced dream processing, use the DreamProcessor class.
-        
-        Args:
-            duration_minutes: Duration of dream processing
-        
-        Returns:
-            Dream state processing results
+        Run batch dream-state consolidation on episodic memory (with optional clustering/merging).
+        Returns a summary dict.
         """
-        logger.info(f"Starting basic dream-state consolidation for {duration_minutes} minutes")
-        
-        # Basic consolidation with enhanced criteria
-        stats = self.consolidate_memories(force=True)
-          # Note: Memory reinforcement would require additional methods in LTM classes
-        stats['reinforced_memories'] = 0
-        stats['dream_duration_minutes'] = duration_minutes
-        
-        return stats
+        return self.episodic.batch_consolidate_memories(
+            min_importance=min_importance,
+            max_consolidation=max_consolidation,
+            limit=limit,
+            strength_increment=strength_increment,
+            cluster=cluster
+        )
     
     def get_status(self) -> Dict[str, Any]:
         """Get comprehensive memory system status"""

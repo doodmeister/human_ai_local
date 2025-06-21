@@ -85,7 +85,8 @@ class ShortTermMemory(BaseMemorySystem):
         importance: float = 0.5,
         attention_score: float = 0.0,
         emotional_valence: float = 0.0,
-        associations: Optional[List[str]] = None
+        associations: Optional[List[str]] = None,
+        memory_type: Optional[str] = None,  # Added for procedural memory compatibility
     ) -> bool:
         """
         Store new item in STM
@@ -97,6 +98,7 @@ class ShortTermMemory(BaseMemorySystem):
             attention_score: Attention paid during encoding
             emotional_valence: Emotional weight (-1.0 to 1.0)
             associations: List of associated memory IDs
+            memory_type: Optional type for compatibility (not used internally)
         
         Returns:
             True if stored successfully, False if rejected

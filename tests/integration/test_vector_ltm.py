@@ -6,8 +6,8 @@ import shutil
 from pathlib import Path
 
 # Import the classes we want to test
-from memory.ltm.vector_ltm import VectorLongTermMemory, VectorSearchResult
-from memory.ltm.long_term_memory import LTMRecord
+from src.memory.ltm.vector_ltm import VectorLongTermMemory, VectorSearchResult
+from src.memory.ltm.long_term_memory import LTMRecord
 
 class TestVectorLongTermMemory:
     """Test cases for VectorLongTermMemory"""

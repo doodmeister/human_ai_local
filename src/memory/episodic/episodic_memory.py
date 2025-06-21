@@ -104,6 +104,7 @@ class EpisodicMemory:
     emotional_valence: float = 0.0  # -1.0 to 1.0 
     vividness: float = 0.5  # How clear/detailed the memory is (0.0 to 1.0)
     confidence: float = 0.8  # Confidence in memory accuracy (0.0 to 1.0)
+    entropy: float = 0.2  # Entropy/uncertainty score (0.0 = certain, 1.0 = forgotten)
     
     # Autobiographical organization
     life_period: Optional[str] = None  # e.g., "work_conversation", "learning_session"
@@ -116,6 +117,12 @@ class EpisodicMemory:
     consolidation_strength: float = 0.0  # How well consolidated this memory is
     rehearsal_count: int = 0  # How many times it's been rehearsed/recalled
     tags: List[str] = field(default_factory=list)  # Keywords for search
+    
+    # Provenance and recency tracking
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+    source: Optional[str] = None
+    episodic_source: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage"""
@@ -140,7 +147,12 @@ class EpisodicMemory:
             "last_access": self.last_access.isoformat(),
             "consolidation_strength": self.consolidation_strength,
             "rehearsal_count": self.rehearsal_count,
-            "tags": self.tags
+            "tags": self.tags,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "source": self.source,
+            "episodic_source": self.episodic_source,
+            "entropy": self.entropy
         }
     
     @classmethod
@@ -170,19 +182,50 @@ class EpisodicMemory:
             last_access=datetime.fromisoformat(data.get("last_access", datetime.now().isoformat())),
             consolidation_strength=data.get("consolidation_strength", 0.0),
             rehearsal_count=data.get("rehearsal_count", 0),
-            tags=data.get("tags", [])
+            tags=data.get("tags", []),
+            created_at=datetime.fromisoformat(data.get("created_at", data.get("timestamp", datetime.now().isoformat()))),
+            updated_at=datetime.fromisoformat(data.get("updated_at", data.get("last_access", datetime.now().isoformat()))),
+            source=data.get("source"),
+            episodic_source=data.get("episodic_source"),
+            entropy=data.get("entropy", 0.2)
         )
     
     def update_access(self):
         """Update access tracking when memory is retrieved"""
         self.access_count += 1
         self.last_access = datetime.now()
+        self.updated_at = self.last_access
+        # Retrieval reduces entropy (increases certainty)
+        self.entropy = max(0.0, self.entropy - 0.01)
     
     def rehearse(self, strength_increment: float = 0.1):
-        """Rehearse the memory, strengthening consolidation"""
+        """Rehearse the memory, strengthening consolidation and reducing entropy"""
         self.rehearsal_count += 1
         self.consolidation_strength = min(1.0, self.consolidation_strength + strength_increment)
+        self.entropy = max(0.0, self.entropy - 0.02)
         self.update_access()
+    
+    def decay_entropy(self, amount: float = 0.01, nonlinear: bool = True, context: Optional[dict] = None):
+        """Increase entropy (uncertainty) due to time/distraction, with nonlinear/sigmoid option."""
+        # Contextual modulation
+        mod = 1.0
+        if context:
+            # Example: higher cognitive load or low attention increases decay
+            mod *= 1.0 + context.get("cognitive_load", 0.0)
+            if context.get("attention", 1.0) < 0.5:
+                mod *= 1.2
+        base = self.entropy
+        if nonlinear:
+            # Sigmoid-like: dE = k * (1 / (1 + exp(-a*(E-b))))
+            import math
+            a = 6.0  # steepness
+            b = 0.5  # midpoint
+            k = amount * mod
+            sigmoid = 1 / (1 + math.exp(-a * (base - b)))
+            delta = k * sigmoid
+        else:
+            delta = amount * mod
+        self.entropy = min(1.0, self.entropy + delta)
 
 @dataclass
 class EpisodicSearchResult:
@@ -360,11 +403,43 @@ class EpisodicMemorySystem(BaseMemorySystem):
         """
         Retrieve a specific memory by ID (unified interface)
         Returns the memory as a dict, or None if not found.
+        Also boosts rehearsal/consolidation strength and reduces entropy.
         """
         memory = self._memory_cache.get(memory_id)
         if memory:
+            # Ensure all required attributes exist and are consistent
+            if not hasattr(memory, 'consolidation_strength'):
+                memory.consolidation_strength = getattr(memory, 'consolidation_strength', 0.5)
+            if not hasattr(memory, 'rehearsal_count'):
+                memory.rehearsal_count = getattr(memory, 'rehearsal_count', 0)
+            if not hasattr(memory, 'access_count'):
+                memory.access_count = getattr(memory, 'access_count', 0)
+            if not hasattr(memory, 'importance'):
+                memory.importance = getattr(memory, 'importance', 0.5)
+            if not hasattr(memory, 'emotional_valence'):
+                memory.emotional_valence = getattr(memory, 'emotional_valence', 0.0)
+            if not hasattr(memory, 'life_period'):
+                memory.life_period = getattr(memory, 'life_period', None)
+            if not hasattr(memory, 'tags'):
+                memory.tags = getattr(memory, 'tags', [])
+            if not hasattr(memory, 'related_episodes'):
+                memory.related_episodes = getattr(memory, 'related_episodes', [])
+            if not hasattr(memory, 'associated_stm_ids'):
+                memory.associated_stm_ids = getattr(memory, 'associated_stm_ids', [])
+            if not hasattr(memory, 'associated_ltm_ids'):
+                memory.associated_ltm_ids = getattr(memory, 'associated_ltm_ids', [])
+            if not hasattr(memory, 'source_memory_ids'):
+                memory.source_memory_ids = getattr(memory, 'source_memory_ids', [])
+            if not hasattr(memory, 'context'):
+                from .episodic_memory import EpisodicContext
+                memory.context = EpisodicContext()
             memory.update_access()
-            self._save_to_json_backup(memory)
+            # Boost rehearsal/consolidation strength on retrieval
+            memory.rehearsal_count += 1  # Increment rehearsal count
+            memory.consolidation_strength = min(1.0, memory.consolidation_strength + 0.05)  # Boost consolidation
+            # Optionally, increase confidence (reduce uncertainty/entropy)
+            memory.confidence = min(1.0, memory.confidence + 0.01)
+            self._save_to_json_backup(memory)  # Update backup with access info
             return memory.to_dict()
         return None
 
@@ -582,137 +657,40 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         "$gte": emotional_range[0],
                         "$lte": emotional_range[1]
                     }
-                
                 # Run the query
                 search_results = self.collection.query(
                     query_texts=[query],
                     n_results=limit * 2,  # Get more results for additional filtering
                     where=where_clause if where_clause else None
                 )
-
                 result_ids = _safe_first_list(search_results.get('ids'))
                 distances = _safe_first_list(search_results.get('distances'))
-                # Append all valid ChromaDB results to the results list
                 for i, memory_id in enumerate(result_ids):
-                    # If a metadata filter is used, treat all as relevant
-                    if where_clause:
-                        relevance = 1.0
-                        distance = distances[i] if distances and i < len(distances) else 0.0
-                    else:
-                        distance = distances[i] if distances and i < len(distances) else 0.0
-                        relevance = 1.0 - distance
+                    distance = distances[i] if distances and i < len(distances) else 0.0
+                    relevance = 1.0 - distance
                     if relevance < min_relevance:
-                        print(f"[DEBUG] Skipping memory {memory_id} from ChromaDB: relevance {relevance} < min_relevance {min_relevance}")
                         continue
                     memory = self.retrieve_memory(memory_id)
                     if memory is None:
-                        print(f"[DEBUG] Memory {memory_id} from ChromaDB not found in cache.")
                         continue
-                    # No extra filtering here; already filtered by ChromaDB
                     results.append(EpisodicSearchResult(
                         memory=memory,
                         relevance=relevance,
                         match_type="semantic",
                         search_metadata={"chroma_distance": distance}
                     ))
-                print(f"[DEBUG] ChromaDB search returned {len(results[:limit])} results.")
-                # If ChromaDB returns no results, try fallback
-                if not results:
-                    print("[DEBUG] ChromaDB returned no results, trying fallback search.")
-                    # Fallback logic (text match and word overlap)
-                    query_lower = query.lower()
-                    for memory in self._memory_cache.values():
-                        text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
-                        if query_lower in text_to_search:
-                            # Apply filters
-                            if life_period and memory.life_period != life_period:
-                                continue
-                            relevance = 0.6  # Default relevance for direct matches
-                            print(f"[DEBUG] Fallback text match: found '{query_lower}' in memory {memory.id}")
-                            memory.update_access()
-                            results.append(EpisodicSearchResult(
-                                memory=memory,
-                                relevance=relevance,
-                                match_type="text_match",
-                                search_metadata={}
-                            ))
-                    if not results:
-                        print("[DEBUG] No direct text matches found, trying word overlap fallback.")
-                        query_words = set(query_lower.split())
-                        for memory in self._memory_cache.values():
-                            text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
-                            overlap = query_words & text_words
-                            if overlap:
-                                # Apply filters
-                                if life_period and memory.life_period != life_period:
-                                    continue
-                                relevance = 0.4 + 0.1 * len(overlap)
-                                if relevance >= min_relevance:
-                                    print(f"[DEBUG] Word overlap fallback: memory {memory.id} overlap words: {overlap}")
-                                    memory.update_access()
-                                    results.append(EpisodicSearchResult(
-                                        memory=memory,
-                                        relevance=relevance,
-                                        match_type="word_overlap",
-                                        search_metadata={"overlap": list(overlap)}
-                                    ))
-                results.sort(key=lambda x: x.relevance, reverse=True)
-                print(f"[DEBUG] Fallback search returned {len(results[:limit])} results.")
                 return results[:limit]
             except Exception as e:
                 logger.warning(f"ChromaDB search failed: {e}")
-                print(f"[DEBUG] ChromaDB search failed, falling back to cache search: {e}")
-                results = []
-                query_lower = query.lower()
-                for memory in self._memory_cache.values():
-                    text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
-                    if query_lower in text_to_search:
-                        # Apply filters
-                        if life_period and memory.life_period != life_period:
-                            continue
-                        relevance = 0.6  # Default relevance for direct matches
-                        print(f"[DEBUG] Fallback text match: found '{query_lower}' in memory {memory.id}")
-                        memory.update_access()
-                        results.append(EpisodicSearchResult(
-                            memory=memory,
-                            relevance=relevance,
-                            match_type="text_match",
-                            search_metadata={}
-                        ))
-                # Word overlap fallback if no results
-                if not results:
-                    print("[DEBUG] No direct text matches found, trying word overlap fallback.")
-                    query_words = set(query_lower.split())
-                    for memory in self._memory_cache.values():
-                        text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
-                        overlap = query_words & text_words
-                        if overlap:
-                            # Apply filters
-                            if life_period and memory.life_period != life_period:
-                                continue
-                            relevance = 0.4 + 0.1 * len(overlap)
-                            if relevance >= min_relevance:
-                                print(f"[DEBUG] Word overlap fallback: memory {memory.id} overlap words: {overlap}")
-                                memory.update_access()
-                                results.append(EpisodicSearchResult(
-                                    memory=memory,
-                                    relevance=relevance,
-                                    match_type="word_overlap",
-                                    search_metadata={"overlap": list(overlap)}
-                                ))
-                results.sort(key=lambda x: x.relevance, reverse=True)
-                print(f"[DEBUG] Fallback search returned {len(results[:limit])} results.")
-                return results[:limit]
-        # If ChromaDB is not available at all, fallback to cache search
+                # Fallback to cache search below
+        # Fallback: cache search
         query_lower = query.lower()
         for memory in self._memory_cache.values():
             text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
             if query_lower in text_to_search:
-                # Apply filters
                 if life_period and memory.life_period != life_period:
                     continue
-                relevance = 0.6  # Default relevance for direct matches
-                print(f"[DEBUG] Fallback (no ChromaDB) text match: found '{query_lower}' in memory {memory.id}")
+                relevance = 0.6
                 memory.update_access()
                 results.append(EpisodicSearchResult(
                     memory=memory,
@@ -722,27 +700,22 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 ))
         # Word overlap fallback if no results
         if not results:
-            print("[DEBUG] No direct text matches found (no ChromaDB), trying word overlap fallback.")
             query_words = set(query_lower.split())
             for memory in self._memory_cache.values():
                 text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
                 overlap = query_words & text_words
                 if overlap:
-                    # Apply filters
                     if life_period and memory.life_period != life_period:
                         continue
                     relevance = 0.4 + 0.1 * len(overlap)
                     if relevance >= min_relevance:
-                        print(f"[DEBUG] Word overlap fallback (no ChromaDB): memory {memory.id} overlap words: {overlap}")
-                        memory.update_access()
                         results.append(EpisodicSearchResult(
                             memory=memory,
                             relevance=relevance,
                             match_type="word_overlap",
-                            search_metadata={"overlap": list(overlap)}
+                            search_metadata={}
                         ))
         results.sort(key=lambda x: x.relevance, reverse=True)
-        print(f"[DEBUG] Fallback (no ChromaDB) search returned {len(results[:limit])} results.")
         return results[:limit]
 
     def get_related_memories(self, memory_id: str, relationship_types: Optional[List[str]] = None, limit: int = 10) -> List['EpisodicSearchResult']:
@@ -956,3 +929,63 @@ class EpisodicMemorySystem(BaseMemorySystem):
         """Clear all episodic memories from the in-memory cache (for test isolation)."""
         self._memory_cache.clear()
         print("[DEBUG] clear_all_memories: all in-memory episodic memories cleared.")
+
+    def batch_consolidate_memories(self, min_importance: float = 0.5, max_consolidation: float = 0.9, limit: int = 20, strength_increment: float = 0.2, cluster: bool = True) -> dict:
+        """
+        Batch consolidate episodic memories (dream-state consolidation).
+        Optionally cluster/merge similar memories for compression.
+        Returns a summary dict.
+        """
+        candidates = self.get_consolidation_candidates(min_importance=min_importance, max_consolidation=max_consolidation, limit=limit)
+        consolidated = []
+        merged = []
+        if cluster and candidates:
+            # Simple clustering: group by similar summary (could use embedding similarity for more advanced)
+            from collections import defaultdict
+            import difflib
+            clusters = defaultdict(list)
+            for mem in candidates:
+                found = False
+                for key in clusters:
+                    # Use difflib to check if summaries are similar
+                    if difflib.SequenceMatcher(None, mem.summary, key).ratio() > 0.8:
+                        clusters[key].append(mem)
+                        found = True
+                        break
+                if not found:
+                    clusters[mem.summary].append(mem)
+            # Merge clusters with more than one memory
+            for key, group in clusters.items():
+                if len(group) > 1:
+                    # Merge: concatenate details, average importance/valence, keep earliest timestamp
+                    merged_content = "\n---\n".join([m.detailed_content for m in group])
+                    avg_importance = sum(m.importance for m in group) / len(group)
+                    avg_valence = sum(m.emotional_valence for m in group) / len(group)
+                    earliest = min(m.timestamp for m in group)
+                    merged_summary = key + f" (merged {len(group)})"
+                    merged_id = self.store_memory(
+                        detailed_content=merged_content,
+                        importance=avg_importance,
+                        emotional_valence=avg_valence,
+                        context=group[0].context,
+                        life_period=group[0].life_period
+                    )
+                    # Optionally, delete originals
+                    for m in group:
+                        self.delete(m.id)
+                    merged.append(merged_id)
+                else:
+                    # Singletons: just reinforce
+                    self.consolidate_memory(group[0].id, strength_increment=strength_increment)
+                    consolidated.append(group[0].id)
+        else:
+            # No clustering, just reinforce all
+            for mem in candidates:
+                self.consolidate_memory(mem.id, strength_increment=strength_increment)
+                consolidated.append(mem.id)
+        return {
+            "consolidated": consolidated,
+            "merged": merged,
+            "total_candidates": len(candidates),
+            "clusters": len(merged),
+        }

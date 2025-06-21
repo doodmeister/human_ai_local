@@ -13,7 +13,7 @@ import shutil
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from memory.episodic.episodic_memory import (
+from src.memory.episodic.episodic_memory import (
     EpisodicMemorySystem,
     EpisodicMemory,
     EpisodicContext
@@ -377,6 +377,7 @@ def test_memory_consolidation():
     
     # Get initial consolidation state
     memory = system.retrieve_memory(memory_id)
+    assert memory is not None  # Ensure memory retrieval succeeded
     initial_consolidation = memory.consolidation_strength
     
     # Consolidate the memory
@@ -385,6 +386,7 @@ def test_memory_consolidation():
     
     # Check consolidation increase
     updated_memory = system.retrieve_memory(memory_id)
+    assert updated_memory is not None  # Ensure memory retrieval succeeded
     assert updated_memory.consolidation_strength > initial_consolidation
     
     # Test getting consolidation candidates
@@ -428,8 +430,11 @@ def test_memory_statistics():
             life_period=f"phase_{i % 3 + 1}"
         )
         mem = system.retrieve_memory(mem_id)
-        # Use startswith to ignore trailing punctuation
-        assert mem.summary.startswith(mem.detailed_content[:len(mem.summary)].rstrip('.'))
+        if mem is not None:
+            # Use startswith to ignore trailing punctuation
+            assert mem.summary.startswith(mem.detailed_content[:len(mem.summary)].rstrip('.'))
+        else:
+            raise AssertionError(f"Memory with id {mem_id} could not be retrieved")
     
     # Get statistics
     stats = system.get_memory_statistics()

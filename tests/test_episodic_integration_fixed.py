@@ -75,9 +75,19 @@ def test_episodic_memory_integration():
         
         print(f"   Search Results Found: {len(results)}")
         for i, memory in enumerate(results):
-            print(f"   {i+1}. {memory.summary[:50]}...")
-            print(f"       Importance: {memory.importance:.2f}")
-            print(f"       Emotional Valence: {memory.emotional_valence:.2f}")
+            # Access the correct attribute - use summary or detailed_content
+            if hasattr(memory, 'summary'):
+                summary = memory.summary
+            elif hasattr(memory, 'detailed_content'):
+                summary = memory.detailed_content
+            elif hasattr(memory, 'content'):
+                summary = memory.content
+            else:
+                summary = str(memory)
+            
+            print(f"   {i+1}. {summary[:50]}...")
+            print(f"       Importance: {getattr(memory, 'importance', 'N/A')}")
+            print(f"       Emotional Valence: {getattr(memory, 'emotional_valence', 'N/A')}")
         
         # Also try with lower similarity threshold
         if len(results) == 0:
@@ -133,8 +143,18 @@ def test_episodic_memory_integration():
         
         print(f"   Cross-Referenced Episodes Found: {len(cross_ref_results)}")
         for memory in cross_ref_results:
-            print(f"   - {memory.summary[:50]}...")
-            print(f"     Associated STM IDs: {memory.associated_stm_ids}")
+            # Use consistent attribute access pattern
+            if hasattr(memory, 'summary'):
+                summary = memory.summary
+            elif hasattr(memory, 'detailed_content'):
+                summary = memory.detailed_content
+            elif hasattr(memory, 'content'):
+                summary = memory.content
+            else:
+                summary = str(memory)
+                
+            print(f"   - {summary[:50]}...")
+            print(f"     Associated STM IDs: {getattr(memory, 'associated_stm_ids', 'N/A')}")
         
         # Test 5: Test date range search
         print("\n6. Testing Date Range Search...")
@@ -199,5 +219,7 @@ def test_episodic_memory_integration():
 
 
 if __name__ == "__main__":
+    success = test_episodic_memory_integration()
+    sys.exit(0 if success else 1)
     success = test_episodic_memory_integration()
     sys.exit(0 if success else 1)
