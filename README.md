@@ -5,6 +5,86 @@ Biologically-inspired cognitive architecture simulating human-like memory, atten
 
 ---
 
+## 🧠 Major Update: Enhanced Long-Term Memory with Biologically-Inspired Features (June 2025)
+
+### Advanced LTM Capabilities
+The Long-Term Memory (LTM) system has been significantly enhanced with biologically-inspired features that mirror human memory processes:
+
+#### 1. Salience & Recency Weighting in Retrieval
+- **Dynamic Retrieval Scoring**: Memory retrieval now considers both content relevance and temporal/access patterns
+- **Exponential Decay Model**: Recent and frequently accessed memories receive higher priority in search results
+- **Access Pattern Learning**: System learns which memories are most valuable based on usage patterns
+
+#### 2. Memory Decay & Forgetting
+- **Biological Forgetting Curves**: Implements Ebbinghaus-style forgetting with configurable decay rates
+- **Importance-Based Preservation**: More important memories resist decay longer
+- **Confidence Degradation**: Memory confidence naturally decreases over time without reinforcement
+- **Selective Pruning**: Old, rarely accessed memories automatically lose strength
+
+#### 3. Consolidation Tracking
+- **STM→LTM Transfer Monitoring**: Tracks when and how memories move from short-term to long-term storage
+- **Consolidation Metadata**: Records consolidation timestamps, sources, and transfer statistics
+- **Query Methods**: Retrieve recently consolidated memories and analyze consolidation patterns
+- **Performance Analytics**: Detailed statistics on memory consolidation efficiency
+
+#### 4. Meta-Cognitive Feedback
+- **Self-Monitoring**: System tracks its own memory performance and retrieval patterns
+- **Health Diagnostics**: Automatic assessment of memory system health and performance
+- **Usage Statistics**: Comprehensive metrics on search success rates, timing, and efficiency
+- **Recommendations Engine**: System provides suggestions for memory management optimization
+
+#### 5. Emotionally Weighted Consolidation
+- **Emotional Significance**: Memories with strong emotional content (positive or negative) are prioritized for consolidation
+- **Multi-Factor Scoring**: Combines importance, access frequency, emotional weight, and recency for consolidation decisions
+- **Adaptive Thresholds**: Emotional memories may be consolidated even with lower traditional importance scores
+- **Trauma/Joy Preservation**: Both traumatic and highly positive experiences receive enhanced consolidation
+
+#### 6. Cross-System Query & Linking
+- **Bidirectional Associations**: Create and query links between LTM and other memory systems (STM, episodic)
+- **Semantic Clustering**: Automatically identify and group related memories by content and tags
+- **Cross-System Suggestions**: AI-powered recommendations for linking memories across different systems
+- **Association Networks**: Build rich networks of related memories for enhanced recall and context
+
+### Enhanced API Methods
+```python
+# Salience/Recency weighted search
+results = ltm.search_by_content("query", max_results=10)  # Now includes temporal weighting
+
+# Memory decay management
+decayed_count = ltm.decay_memories(decay_rate=0.01, half_life_days=30.0)
+
+# Consolidation tracking
+consolidated = ltm.consolidate_from_stm(stm_items)  # Now with emotional weighting
+recent_memories = ltm.get_recently_consolidated(hours=24)
+stats = ltm.get_consolidation_stats()
+
+# Meta-cognitive feedback
+meta_stats = ltm.get_metacognitive_stats()
+health_report = ltm.get_memory_health_report()
+ltm.reset_metacognitive_stats()
+
+# Cross-system linking
+ltm.create_cross_system_link(memory1_id, memory2_id, "association")
+links = ltm.find_cross_system_links(memory_id)
+clusters = ltm.get_semantic_clusters(min_cluster_size=2)
+suggestions = ltm.suggest_cross_system_associations(external_memories, "system_type")
+```
+
+### Testing & Validation
+- **Comprehensive Test Suite**: Individual tests for each enhanced feature
+- **Integration Testing**: End-to-end testing of all features working together
+- **Performance Benchmarks**: Validation of enhanced retrieval speed and accuracy
+- **Biological Validation**: Tests confirm human-like memory behavior patterns
+
+### Key Benefits
+- **Human-Like Memory**: More realistic forgetting and remembering patterns
+- **Improved Efficiency**: Better memory management through automated decay and consolidation
+- **Enhanced Recall**: Smarter retrieval based on usage patterns and emotional significance
+- **Self-Optimization**: System continuously improves its own memory management
+- **Rich Associations**: Better context and relationship understanding across memories
+
+---
+
 ## 🚀 Recent Major Update: Unified Memory Interface & Episodic Memory Improvements (June 2025)
 
 ### Unified Memory Interface
@@ -128,7 +208,13 @@ Build robust, production-ready AI with human-like cognition: persistent memory, 
 
 ## Core Architecture
 - Short-Term Memory (STM): In-memory, time-decayed, vector search (ChromaDB)
-- Long-Term Memory (LTM): ChromaDB vector database, semantic retrieval
+- **Long-Term Memory (LTM): Enhanced ChromaDB vector database with biologically-inspired features:**
+  - **Salience/Recency Weighting**: Temporal and access-pattern based retrieval prioritization
+  - **Memory Decay & Forgetting**: Ebbinghaus-style forgetting curves with selective preservation
+  - **Consolidation Tracking**: STM→LTM transfer monitoring with detailed analytics
+  - **Meta-Cognitive Feedback**: Self-monitoring and health diagnostics
+  - **Emotional Weighting**: Emotion-based consolidation prioritization
+  - **Cross-System Linking**: Bidirectional associations and semantic clustering
 - **Semantic Memory:** Structured factual knowledge (subject-predicate-object triples), persistent triple store, agent-level interface for storing, retrieving, and deleting facts
 - Episodic Memory: ChromaDB vector database with rich metadata, proactive recall, and automatic summarization/tagging.
 - Prospective/Procedural Memory: Scheduling, skills, and routines
@@ -213,7 +299,12 @@ LTM_COLLECTION=long_term_memory
 ```
 
 ## Unique Features
-- Sleep cycles, forgetting curves, attention fatigue, meta-cognition, DPAD, LSHN
+- **Biologically-Inspired Memory**: Realistic forgetting curves, salience weighting, emotional consolidation
+- **Meta-Cognitive Self-Monitoring**: System tracks and optimizes its own memory performance
+- **Cross-System Memory Linking**: Rich associative networks across different memory types
+- Sleep cycles, attention fatigue, dream-state consolidation
+- Advanced neural networks: DPAD (Dual-Path Attention Dynamics), LSHN (Latent Structured Hopfield Networks)
+- Temporal memory dynamics with decay and reinforcement patterns
 
 ## Actionable Roadmap (2025+)
 ### Mid-Term Goals (3–6 Months)
@@ -243,6 +334,7 @@ LTM_COLLECTION=long_term_memory
 - Unit, Integration, Cognitive, Performance tests
 
 ## Recent Updates (June 2025)
+- **Enhanced Long-Term Memory (LTM) with Biologically-Inspired Features:** Complete overhaul of LTM system with salience/recency weighting, memory decay/forgetting, consolidation tracking, meta-cognitive feedback, emotionally weighted consolidation, and cross-system query/linking capabilities.
 - **Semantic Memory System:** Added a persistent, structured semantic memory system for storing, retrieving, and deleting subject-predicate-object triples. Integrated at the agent level with a unified interface.
 - **Agent Fact Management:** The agent can now store, retrieve, and delete structured facts using the new semantic memory system. Fact operations are normalized and robust.
 - **Integration & Unit Tests:** Comprehensive integration and unit tests for semantic memory, including agent-level end-to-end tests for fact storage, retrieval, and deletion.
