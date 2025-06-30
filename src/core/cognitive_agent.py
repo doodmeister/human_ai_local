@@ -657,6 +657,27 @@ class CognitiveAgent:
         print("Manual metacognitive reflection triggered.")
         return self.reflect()
 
+    def get_reflection_status(self) -> dict:
+        """Return current reflection scheduler status and interval."""
+        status = {
+            "scheduler_running": getattr(self, '_reflection_scheduler_running', False),
+            "interval_minutes": None
+        }
+        # Try to infer interval from schedule jobs
+        try:
+            jobs = [j for j in schedule.get_jobs('reflection')]
+            if jobs:
+                status["interval_minutes"] = jobs[0].interval
+        except Exception:
+            pass
+        return status
+
+    def get_last_reflection_report(self) -> dict:
+        """Return the most recent reflection report, or None."""
+        if self.reflection_reports:
+            return self.reflection_reports[-1]
+        return {}  # Return empty dict for type safety
+
     async def _enhance_attention_with_neural(
         self,
         processed_input: Dict[str, Any],

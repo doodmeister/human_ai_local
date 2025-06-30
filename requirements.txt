@@ -170,10 +170,10 @@ statsmodels>=0.14.0
 # ========================================
 
 # Fast API Framework (for future API endpoints)
-# fastapi>=0.104.0  # Uncomment if building REST API
+fastapi>=0.104.0  # Uncomment if building REST API
 
 # ASGI Server for FastAPI
-# uvicorn>=0.24.0  # Uncomment if building REST API
+uvicorn>=0.24.0  # Uncomment if building REST API
 
 # WebSocket Support
 # websockets>=12.0  # Uncomment if adding real-time features

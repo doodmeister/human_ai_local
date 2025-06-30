@@ -544,3 +544,16 @@ ASYNC_PROCESSING=True
 - **Intentional Forgetting**: Meta-cognitive memory suppression for harmful or outdated content
 - **Surprise-Driven Encoding**: Enhanced retention for novel or unexpected information
 - **Theory of Mind Simulation**: Dual-agent system for social cognition and self-awareness
+
+---
+
+## 🧠 Metacognitive Reflection & Self-Monitoring (2025)
+- The agent can periodically or manually analyze its own memory health, usage, and performance.
+- Reflection scheduler runs in the background at a configurable interval (default: 10 min).
+- Reflection reports include LTM/STM stats, health diagnostics, and recommendations for memory management.
+- CLI commands:
+  - `/reflect` — manually trigger a reflection and print summary
+  - `/reflection status` — show last 3 reflection reports
+  - `/reflection start [interval]` — start scheduler (interval in minutes)
+  - `/reflection stop` — stop scheduler
+- All reflection logic is modular and independently testable.

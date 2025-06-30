@@ -165,18 +165,23 @@ suggestions = ltm.suggest_cross_system_associations(external_memories, "system_t
   - `/procedure delete <id>` — delete a procedure by ID
   - `/procedure clear` — remove all procedural memories
 
-### Example: Using Procedural Memory in Python
-```python
-from src.memory.memory_system import MemorySystem
-memsys = MemorySystem()
-proc_id = memsys.procedural.store(
-    description="How to make tea",
-    steps=["Boil water", "Add tea leaves", "Steep", "Pour into cup"],
-    tags=["kitchen", "beverage"],
-    memory_type="ltm"  # or "stm"
-)
-proc = memsys.procedural.retrieve(proc_id)
-print(proc)
+### Metacognitive Reflection & Self-Monitoring (June 2025)
+- **Agent-level self-reflection:** The agent can periodically or manually analyze its own memory health, usage, and performance.
+- **Reflection Scheduler:** Background scheduler runs metacognitive reflection at a configurable interval (default: 10 min).
+- **Manual Reflection:** Trigger a reflection at any time via CLI or API.
+- **Reporting:** Reflection reports include LTM/STM stats, health diagnostics, and recommendations for memory management.
+- **CLI Integration:**
+  - `/reflect` — manually trigger a reflection and print summary
+  - `/reflection status` — show last 3 reflection reports
+  - `/reflection start [interval]` — start scheduler (interval in minutes)
+  - `/reflection stop` — stop scheduler
+
+#### Example CLI Usage
+```
+/reflect
+/reflection status
+/reflection start 5
+/reflection stop
 ```
 
 ---
@@ -343,3 +348,33 @@ LTM_COLLECTION=long_term_memory
 - **Automatic Summarization and Tagging:** Episodic memories are automatically summarized and tagged with keywords upon creation, significantly enhancing search and retrieval efficiency.
 - **Enhanced Testing:** Added comprehensive integration and unit tests for proactive recall and episodic memory features to ensure system stability and correctness.
 - **ChromaDB Reliability:** Improved ChromaDB initialization and shutdown procedures to prevent file-locking issues, particularly on Windows environments.
+
+## Next Steps & Roadmap (2025+)
+
+### Security & Production Readiness
+- Restrict `/test/reset` endpoint to test/dev environments only
+- Add authentication for API endpoints if exposed outside localhost
+- Implement rate limiting and logging for API endpoints
+
+### API & Feature Expansion
+- Expose more agent features via API: STM/LTM queries, feedback, procedural memory, etc.
+- Enhance OpenAPI/Swagger docs with more examples and descriptions
+
+### Monitoring & Observability
+- Add metrics endpoints (e.g., `/metrics` for Prometheus)
+- Integrate logging for API calls and agent events
+
+### Dashboard/UI
+- Build a Streamlit or React dashboard for real-time monitoring and control of the agent (reflection, memory stats, etc.)
+
+### Documentation
+- Update `README.md` and/or create a dedicated `docs/api.md` for API usage, examples, and test instructions
+- Add architecture diagrams to `docs/`
+
+### Cloud/Deployment
+- Dockerize the API for easy deployment
+- Add CI/CD (e.g., GitHub Actions) for linting, testing, and deployment
+
+### Advanced Cognitive Features
+- Extend metacognitive reflection to other memory systems (STM, procedural, etc.)
+- Implement automated self-healing/optimization using reflection results

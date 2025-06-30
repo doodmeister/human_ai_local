@@ -274,6 +274,41 @@ async def main():
                     continue
                 print("[George] Usage: /episodic [add|list|search <query>|retrieve <id>|delete <id>]")
                 continue
+            # Reflection commands
+            if cmd == "/reflect":
+                report = agent.manual_reflect()
+                print("[George] Metacognitive reflection complete. Summary:")
+                print(f"  Timestamp: {report['timestamp']}")
+                print(f"  LTM memories: {report['ltm_status'].get('total_memories', 'N/A') if report['ltm_status'] else 'N/A'}")
+                print(f"  STM items: {report['stm_status'].get('size', 'N/A') if report['stm_status'] else 'N/A'}")
+                print(f"  LTM health: {report.get('ltm_health_report', {}).get('memory_categories', {})}")
+                continue
+            if cmd.startswith("/reflection"):
+                subcmd = user_input[len("/reflection"):].strip()
+                if subcmd.startswith("status"):
+                    reports = agent.get_reflection_reports(3)
+                    if not reports:
+                        print("[George] No reflection reports available.")
+                    else:
+                        print("[George] Last 3 reflection reports:")
+                        for r in reports:
+                            print(f"  [{r['timestamp']}] LTM: {r['ltm_status'].get('total_memories', 'N/A') if r['ltm_status'] else 'N/A'}, STM: {r['stm_status'].get('size', 'N/A') if r['stm_status'] else 'N/A'}")
+                    continue
+                if subcmd.startswith("start"):
+                    import re
+                    match = re.search(r"start(\\s+(\\d+))?", subcmd)
+                    interval = 10
+                    if match and match.group(2):
+                        interval = int(match.group(2))
+                    agent.start_reflection_scheduler(interval_minutes=interval)
+                    print(f"[George] Reflection scheduler started (every {interval} min).")
+                    continue
+                if subcmd.startswith("stop"):
+                    agent.stop_reflection_scheduler()
+                    print("[George] Reflection scheduler stopped.")
+                    continue
+                print("[George] Usage: /reflection [status|start [interval]|stop]")
+                continue
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -35,6 +35,18 @@ Successfully implemented and tested 6 major biologically-inspired enhancements t
 - **Behavior**: Emotionally significant memories prioritized even with lower importance scores
 - **Test Results**: ✅ 3 emotional memories consolidated despite lower importance thresholds
 
+## 🧠 Metacognitive Reflection & Self-Monitoring (June 2025)
+- **Agent-level Reflection:** The cognitive agent can now periodically or manually analyze its own memory health, usage, and performance.
+- **Reflection Scheduler:** Background scheduler runs metacognitive reflection at a configurable interval (default: 10 min).
+- **Manual Reflection:** Reflection can be triggered at any time via CLI or API.
+- **Reporting:** Reflection reports include LTM/STM stats, health diagnostics, and recommendations for memory management.
+- **CLI Integration:**
+  - `/reflect` — manually trigger a reflection and print summary
+  - `/reflection status` — show last 3 reflection reports
+  - `/reflection start [interval]` — start scheduler (interval in minutes)
+  - `/reflection stop` — stop scheduler
+- **Testing:** Comprehensive unit and integration tests for reflection logic and reporting.
+
 ## Technical Implementation Details
 
 ### New Methods Added
