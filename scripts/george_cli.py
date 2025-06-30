@@ -34,7 +34,7 @@ async def main():
             if cmd == "/dream-batch":
                 print("[George] Running dream-state batch consolidation (episodic memory)...")
                 result = agent.memory.dream_state_consolidation()
-                print(f"[George] Dream-state batch consolidation complete.")
+                print("[George] Dream-state batch consolidation complete.")
                 print(f"  Consolidated: {len(result['consolidated'])}")
                 print(f"  Merged: {len(result['merged'])}")
                 print(f"  Total candidates: {result['total_candidates']}")

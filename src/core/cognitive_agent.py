@@ -9,6 +9,9 @@ import uuid
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
+import threading
+import time
+import schedule
 
 from .config import CognitiveConfig
 from ..memory.memory_system import MemorySystem
@@ -16,6 +19,7 @@ from ..attention.attention_mechanism import AttentionMechanism
 from ..processing.sensory import SensoryInterface, SensoryProcessor
 from ..processing.dream import DreamProcessor
 from ..optimization.performance_optimizer import PerformanceOptimizer
+from ..memory.ltm.long_term_memory import LongTermMemory
 
 # Load environment variables for LLM
 load_dotenv()
@@ -70,6 +74,11 @@ class CognitiveAgent:
             self.openai_client = None
         else:
             self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Reflection state
+        self.reflection_reports: List[Dict[str, Any]] = []
+        self._reflection_scheduler_thread = None
+        self._reflection_scheduler_running = False
         
         print(f"Cognitive agent initialized with session ID: {self.session_id}")
     
@@ -584,6 +593,70 @@ class CognitiveAgent:
         
         print("Cognitive agent shutdown complete")
     
+    def reflect(self) -> Dict[str, Any]:
+        """
+        Perform metacognitive reflection across all memory systems.
+        Aggregates stats and health reports, stores the result.
+        Returns the reflection report.
+        """
+        timestamp = datetime.now().isoformat()
+        ltm = self.memory.ltm
+        stm = self.memory.stm
+        ltm_metacognitive_stats = None
+        ltm_health_report = None
+        if isinstance(ltm, LongTermMemory):
+            ltm_metacognitive_stats = ltm.get_metacognitive_stats()
+            ltm_health_report = ltm.get_memory_health_report()
+        report = {
+            "timestamp": timestamp,
+            "ltm_metacognitive_stats": ltm_metacognitive_stats,
+            "ltm_health_report": ltm_health_report,
+            "ltm_status": ltm.get_status() if hasattr(ltm, 'get_status') else None,
+            "stm_status": stm.get_status() if hasattr(stm, 'get_status') else None,
+            # Add more systems as needed
+        }
+        self.reflection_reports.append(report)
+        return report
+
+    def get_reflection_reports(self, n: int = 5) -> List[Dict[str, Any]]:
+        """Return the last n reflection reports."""
+        return self.reflection_reports[-n:]
+
+    def start_reflection_scheduler(self, interval_minutes: int = 10):
+        """
+        Start a background thread to periodically call reflect().
+        Uses the 'schedule' library for timing.
+        """
+        if self._reflection_scheduler_running:
+            print("Reflection scheduler already running.")
+            return
+        self._reflection_scheduler_running = True
+        schedule.clear('reflection')
+        schedule.every(interval_minutes).minutes.do(self.reflect).tag('reflection')
+        def run_scheduler():
+            while self._reflection_scheduler_running:
+                schedule.run_pending()
+                time.sleep(1)
+        self._reflection_scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        self._reflection_scheduler_thread.start()
+        print(f"Started metacognitive reflection scheduler (every {interval_minutes} min)")
+
+    def stop_reflection_scheduler(self):
+        """
+        Stop the background reflection scheduler.
+        """
+        self._reflection_scheduler_running = False
+        schedule.clear('reflection')
+        print("Stopped metacognitive reflection scheduler.")
+
+    def manual_reflect(self) -> Dict[str, Any]:
+        """
+        Manually trigger a metacognitive reflection (CLI/API hook).
+        Returns the reflection report.
+        """
+        print("Manual metacognitive reflection triggered.")
+        return self.reflect()
+
     async def _enhance_attention_with_neural(
         self,
         processed_input: Dict[str, Any],

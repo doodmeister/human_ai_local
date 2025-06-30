@@ -28,7 +28,7 @@ try:
         enable_json_backup=True,
         storage_path=episodic_dir
     )
-    print(f"✅ Memory system initialized")
+    print("✅ Memory system initialized")
     
     # Create episode
     episode_id = memory_system.create_episodic_memory(

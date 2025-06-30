@@ -31,6 +31,7 @@ class LTMRecord:
     consolidation_count: int = 0  # Number of times reinforced
     consolidated_at: Optional[datetime] = None  # When last consolidated from STM
     consolidation_source: str = "direct"  # "stm", "manual", "direct"
+    feedback: List[Dict[str, Any]] = field(default_factory=list)
     
     def update_access(self):
         """Update access statistics"""
@@ -60,13 +61,14 @@ class LTMRecord:
             "associations": self.associations,
             "consolidation_count": self.consolidation_count,
             "consolidated_at": self.consolidated_at.isoformat() if self.consolidated_at else None,
-            "consolidation_source": self.consolidation_source
+            "consolidation_source": self.consolidation_source,
+            "feedback": self.feedback
         }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "LTMRecord":
         """Create LTMRecord from dictionary"""
-        return cls(
+        obj = cls(
             id=data["id"],
             content=data["content"],
             memory_type=data["memory_type"],
@@ -83,6 +85,8 @@ class LTMRecord:
             consolidated_at=datetime.fromisoformat(data["consolidated_at"]) if data.get("consolidated_at") else None,
             consolidation_source=data.get("consolidation_source", "direct")
         )
+        obj.feedback = data.get("feedback", [])
+        return obj
 
 class LongTermMemory(BaseMemorySystem):
     """
@@ -954,3 +958,47 @@ class LongTermMemory(BaseMemorySystem):
         # Sort by confidence score
         suggestions.sort(key=lambda x: x["confidence"], reverse=True)
         return suggestions[:20]  # Return top 20 suggestions
+
+    def add_feedback(self, memory_id: str, feedback_type: str, value: Any, comment: Optional[str] = None, user_id: Optional[str] = None):
+        """Add user feedback to a memory record."""
+        from datetime import datetime
+        record = self.memories.get(memory_id)
+        if not record:
+            raise KeyError(f"Memory ID {memory_id} not found.")
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "type": feedback_type,
+            "value": value,
+            "comment": comment,
+            "user_id": user_id
+        }
+        record.feedback.append(event)
+        # Optionally update memory fields based on feedback type
+        if feedback_type == "relevance":
+            record.confidence = min(1.0, max(0.0, float(value) / 5.0))
+        elif feedback_type == "importance":
+            record.importance = min(1.0, max(0.0, float(value) / 5.0))
+        elif feedback_type == "emotion":
+            record.emotional_valence = float(value)
+        # Save updated record
+        self._save_memory(record)
+
+    def get_feedback(self, memory_id: str) -> list:
+        """Return all feedback events for a memory."""
+        record = self.memories.get(memory_id)
+        if not record:
+            raise KeyError(f"Memory ID {memory_id} not found.")
+        return record.feedback
+
+    def get_feedback_summary(self, memory_id: str) -> dict:
+        """Return summary statistics for feedback on a memory."""
+        record = self.memories.get(memory_id)
+        if not record:
+            raise KeyError(f"Memory ID {memory_id} not found.")
+        summary = {}
+        for event in record.feedback:
+            t = event["type"]
+            summary.setdefault(t, []).append(event["value"])
+        stats = {k: (sum(map(float, v))/len(v) if v else 0) for k, v in summary.items()}
+        stats["count"] = len(record.feedback)
+        return stats

@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 from src.memory.ltm.long_term_memory import LongTermMemory
 from src.memory.stm.short_term_memory import MemoryItem
 import uuid
-import time
 
 def test_enhanced_ltm_features():
     """Test all enhanced LTM features"""
@@ -238,7 +237,7 @@ def test_enhanced_ltm_features():
     print("\n🎉 Enhanced LTM Features Test Summary")
     print("=" * 50)
     print(f"✅ Total memories in LTM: {len(ltm.memories)}")
-    print(f"✅ Salience/Recency weighting: Working")
+    print("✅ Salience/Recency weighting: Working")
     print(f"✅ Decay/Forgetting: {decayed_count} memories decayed")
     print(f"✅ Consolidation tracking: {stats['total_consolidated']} tracked")
     print(f"✅ Meta-cognitive feedback: {meta_stats['search_queries']} operations monitored")
