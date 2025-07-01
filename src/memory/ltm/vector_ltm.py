@@ -47,6 +47,55 @@ class VectorSearchResult:
     distance: float
     
 class VectorLongTermMemory(BaseMemorySystem):
+    def add_feedback(self, memory_id: str, feedback_type: str, value: Any, comment: Optional[str] = None, user_id: Optional[str] = None):
+        """Add user feedback to a memory record (vector LTM)."""
+        from datetime import datetime
+        record = self.memories.get(memory_id)
+        if not record:
+            raise KeyError(f"Memory ID {memory_id} not found.")
+        # Ensure feedback field exists (for compatibility)
+        if not hasattr(record, "feedback"):
+            record.feedback = []
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "type": feedback_type,
+            "value": value,
+            "comment": comment,
+            "user_id": user_id
+        }
+        record.feedback.append(event)
+        # Optionally update memory fields based on feedback type
+        if feedback_type == "relevance":
+            record.confidence = min(1.0, max(0.0, float(value) / 5.0))
+        elif feedback_type == "importance":
+            record.importance = min(1.0, max(0.0, float(value) / 5.0))
+        elif feedback_type == "emotion":
+            record.emotional_valence = float(value)
+        # Save updated record (JSON backup)
+        if self.enable_json_backup:
+            self._save_memory_json(record)
+        # Optionally update in ChromaDB (not supported for feedback fields)
+        logger.debug(f"Added feedback to LTM record {memory_id}: {event}")
+
+    def get_feedback(self, memory_id: str) -> list:
+        """Return all feedback events for a memory."""
+        record = self.memories.get(memory_id)
+        if not record:
+            raise KeyError(f"Memory ID {memory_id} not found.")
+        return getattr(record, "feedback", [])
+
+    def get_feedback_summary(self, memory_id: str) -> dict:
+        """Return summary statistics for feedback on a memory."""
+        record = self.memories.get(memory_id)
+        if not record:
+            raise KeyError(f"Memory ID {memory_id} not found.")
+        summary = {}
+        for event in getattr(record, "feedback", []):
+            t = event["type"]
+            summary.setdefault(t, []).append(event["value"])
+        stats = {k: (sum(map(float, v))/len(v) if v else 0) for k, v in summary.items()}
+        stats["count"] = len(getattr(record, "feedback", []))
+        return stats
     """
     Enhanced Long-Term Memory with ChromaDB vector database integration
     Implements the unified memory interface.

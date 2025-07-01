@@ -54,17 +54,32 @@ def get_system(system: str):
 
 @app.post("/memory/{system}/store")
 def store_memory(system: str, req: StoreMemoryRequest):
+    import uuid
     memsys = get_system(system)
-    memory_id = memsys.store(
-        memory_id=None,
-        content=req.content,
-        memory_type=req.memory_type,
-        importance=req.importance,
-        emotional_valence=req.emotional_valence,
-        source=req.source,
-        tags=req.tags,
-        associations=req.associations,
-    )
+    if system == "stm":
+        # STM requires a unique memory_id and content
+        memory_id = str(uuid.uuid4())
+        memsys.store(
+            memory_id=memory_id,
+            content=req.content,
+            importance=req.importance if req.importance is not None else 0.5,
+            attention_score=0.0,  # Optionally expose in API if needed
+            emotional_valence=req.emotional_valence if req.emotional_valence is not None else 0.0,
+            associations=req.associations,
+        )
+    else:
+        # LTM requires a valid string memory_id
+        memory_id = uuid.uuid4().hex
+        memsys.store(
+            memory_id=memory_id,
+            content=req.content,
+            memory_type=req.memory_type,
+            importance=req.importance,
+            emotional_valence=req.emotional_valence,
+            source=req.source,
+            tags=req.tags,
+            associations=req.associations,
+        )
     return {"memory_id": memory_id}
 
 @app.get("/memory/{system}/retrieve/{memory_id}")
@@ -86,25 +101,42 @@ def delete_memory(system: str, memory_id: str):
 @app.post("/memory/{system}/search")
 def search_memory(system: str, req: SearchMemoryRequest):
     memsys = get_system(system)
-    if req.query:
-        results = memsys.search(query=req.query, min_importance=req.min_importance, max_results=req.max_results)
-    elif req.tags:
-        results = memsys.search_by_tags(tags=req.tags, operator=req.operator)
+    if system == "stm":
+        # STM: Only pass supported arguments
+        if req.query:
+            results = memsys.search(query=req.query)
+        elif req.tags:
+            # If STM supports tag search, otherwise return error
+            if hasattr(memsys, "search_by_tags"):
+                results = memsys.search_by_tags(tags=req.tags, operator=req.operator)
+            else:
+                raise HTTPException(status_code=400, detail="Tag search not supported for STM")
+        else:
+            raise HTTPException(status_code=400, detail="Must provide query or tags")
     else:
-        raise HTTPException(status_code=400, detail="Must provide query or tags")
+        # LTM: Pass all supported arguments
+        if req.query:
+            results = memsys.search(query=req.query, min_importance=req.min_importance, max_results=req.max_results)
+        elif req.tags:
+            results = memsys.search_by_tags(tags=req.tags, operator=req.operator)
+        else:
+            raise HTTPException(status_code=400, detail="Must provide query or tags")
     return {"results": results}
 
 @app.post("/memory/ltm/feedback/{memory_id}")
 def add_feedback(memory_id: str, req: FeedbackRequest):
     ltm = get_system("ltm")
-    try:
-        ltm.add_feedback(
-            memory_id=memory_id,
-            feedback_type=req.feedback_type,
-            value=req.value,
-            comment=req.comment,
-            user_id=req.user_id,
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    return {"status": "feedback added"}
+    if hasattr(ltm, "add_feedback") and callable(getattr(ltm, "add_feedback", None)):
+        try:
+            ltm.add_feedback(
+                memory_id=memory_id,
+                feedback_type=req.feedback_type,
+                value=req.value,
+                comment=req.comment,
+                user_id=req.user_id,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Memory not found")
+        return {"status": "feedback added"}
+    else:
+        raise HTTPException(status_code=501, detail="Feedback not supported for this LTM implementation")

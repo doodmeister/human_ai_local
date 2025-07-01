@@ -29,10 +29,21 @@ from typing import Optional
 import threading
 
 # Import the cognitive agent and reflection logic
-from src.core.cognitive_agent import CognitiveAgent
+
+from src.core.agent_singleton import agent
+
+
+# Import routers instead of FastAPI app for unified API registration
+from src.interfaces.api.memory_api import router as memory_router
+from src.interfaces.api.procedural_api import router as procedural_router
+
+
+
 
 app = FastAPI()
-agent = CognitiveAgent()
+# Register both memory and procedural routers under /api
+app.include_router(memory_router, prefix="/api")
+app.include_router(procedural_router, prefix="/api")
 
 # Reflection state (for status/report endpoints)
 reflection_lock = threading.Lock()
