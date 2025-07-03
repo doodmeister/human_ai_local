@@ -39,6 +39,14 @@ class AttentionConfig:
     max_attention_items: int = 7  # Miller's magical number
 
 @dataclass
+class AgentConfig:
+    """Configuration for the agent's cognitive state"""
+    fatigue_increase_rate: float = 0.01
+    max_active_goals: int = 3
+    max_context_turns: int = 10 # Max conversation turns to keep for proactive context
+    max_concurrent_tasks: int = 5
+
+@dataclass
 class ProcessingConfig:
     """Configuration for cognitive processing"""
     embedding_model: str = "all-MiniLM-L6-v2"
@@ -102,13 +110,10 @@ class CognitiveConfig:
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     aws: AWSConfig = field(default_factory=AWSConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
-    
-    # Runtime settings
-    debug_mode: bool = field(default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true")
-    log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    agent: AgentConfig = field(default_factory=AgentConfig)
     
     def __post_init__(self):
-        """Initialize derived paths"""
+        """Create data and model directories after initialization"""
         self.data_dir = self.project_root / "data"
         self.model_dir = self.project_root / "model"
         

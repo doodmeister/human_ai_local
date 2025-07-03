@@ -668,3 +668,76 @@ class MemorySystem:
     def complete_prospective_reminder(self, item_id: str):
         """Mark a prospective reminder as complete"""
         return self.prospective.complete_reminder(item_id)
+
+    def hierarchical_search(
+        self,
+        query: str,
+        max_results: int = 10,
+        max_per_system: int = 5,
+    ) -> List[Tuple[Any, float, str]]:
+        """
+        Perform a hierarchical search across all memory systems in a specific order.
+        Order: STM -> LTM -> Episodic -> Semantic
+        """
+        all_results = []
+
+        # 1. Search STM
+        try:
+            stm_results = self.stm.search(query, max_results=max_per_system)
+            for memory, score in stm_results:
+                all_results.append((memory, score, 'STM'))
+        except Exception as e:
+            logger.error(f"Error searching STM for query '{query}': {e}")
+
+        # 2. Search LTM
+        try:
+            ltm_results = self.ltm.search_by_content(query=query, max_results=max_per_system)
+            for memory, score in ltm_results:
+                all_results.append((memory, score, 'LTM'))
+        except Exception as e:
+            logger.error(f"Error searching LTM for query '{query}': {e}")
+
+        # 3. Search Episodic Memory
+        try:
+            episodic_results = self.episodic.search_memories(query=query, limit=max_per_system)
+            for result in episodic_results:
+                all_results.append((result.memory, result.relevance, 'Episodic'))
+        except Exception as e:
+            logger.error(f"Error searching Episodic Memory for query '{query}': {e}")
+
+        # 4. Search Semantic Memory
+        try:
+            # Semantic search is different, it looks for facts.
+            # We can create a composite query or just use the raw query.
+            # For simplicity, we search for the query in subject, predicate, or object.
+            # This part might need more sophisticated logic depending on requirements.
+            subject_matches = self.semantic.find_facts(subject=query)
+            object_matches = self.semantic.find_facts(object_val=query)
+            # A simple scoring mechanism for semantic results
+            for fact in subject_matches:
+                all_results.append((fact, 0.9, 'Semantic')) # High relevance for direct match
+            for fact in object_matches:
+                all_results.append((fact, 0.8, 'Semantic'))
+        except Exception as e:
+            logger.error(f"Error searching Semantic Memory for query '{query}': {e}")
+
+        # Deduplicate and sort results
+        seen_content = set()
+        unique_results = []
+        # Sort by relevance score, descending
+        for mem, score, source in sorted(all_results, key=lambda item: item[1], reverse=True):
+            content_repr = ""
+            if source == 'Episodic':
+                content_repr = repr(mem.detailed_content)
+            elif source == 'Semantic':
+                content_repr = repr(mem) # Fact is a dict
+            elif isinstance(mem, dict):
+                content_repr = repr(mem.get('content'))
+            elif hasattr(mem, 'content'):
+                content_repr = repr(mem.content)
+
+            if content_repr and content_repr not in seen_content:
+                unique_results.append((mem, score, source))
+                seen_content.add(content_repr)
+
+        return unique_results[:max_results]

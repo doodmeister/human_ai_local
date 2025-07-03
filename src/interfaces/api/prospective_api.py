@@ -1,7 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List, Any
-from src.core.agent_singleton import agent
 
 router = APIRouter()
 
@@ -12,7 +11,8 @@ class ProspectiveRequest(BaseModel):
     memory_type: str = "ltm"  # or "stm"
 
 @router.post("/prospective/store")
-def store_prospective(req: ProspectiveRequest):
+def store_prospective(req: ProspectiveRequest, request: Request):
+    agent = request.app.state.agent
     memsys = agent.memory.prospective
     event_id = memsys.store(
         description=req.description,
@@ -23,7 +23,8 @@ def store_prospective(req: ProspectiveRequest):
     return {"event_id": event_id}
 
 @router.get("/prospective/retrieve/{event_id}")
-def retrieve_prospective(event_id: str):
+def retrieve_prospective(event_id: str, request: Request):
+    agent = request.app.state.agent
     memsys = agent.memory.prospective
     event = memsys.retrieve(event_id)
     if not event:
@@ -31,13 +32,15 @@ def retrieve_prospective(event_id: str):
     return event
 
 @router.post("/prospective/search")
-def search_prospective(query: Optional[str] = None):
+def search_prospective(request: Request, query: Optional[str] = None):
+    agent = request.app.state.agent
     memsys = agent.memory.prospective
     results = memsys.search(query or "")
     return {"results": results}
 
 @router.delete("/prospective/delete/{event_id}")
-def delete_prospective(event_id: str):
+def delete_prospective(event_id: str, request: Request):
+    agent = request.app.state.agent
     memsys = agent.memory.prospective
     success = memsys.delete(event_id)
     if not success:
@@ -45,7 +48,8 @@ def delete_prospective(event_id: str):
     return {"status": "deleted"}
 
 @router.post("/prospective/clear")
-def clear_prospective():
+def clear_prospective(request: Request):
+    agent = request.app.state.agent
     memsys = agent.memory.prospective
     memsys.clear()
     return {"status": "cleared"}

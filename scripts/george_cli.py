@@ -2,9 +2,12 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import asyncio
-from src.core.cognitive_agent import CognitiveAgent
-from datetime import datetime
+import requests
+import json
+from datetime import datetime, timedelta
+import re
+
+BASE_URL = "http://127.0.0.1:8000/api"
 
 def format_time(ts):
     if not ts:
@@ -16,8 +19,8 @@ def format_time(ts):
             return str(ts)
     return ts.strftime('%Y-%m-%d %H:%M:%S')
 
-async def main():
-    agent = CognitiveAgent()
+def main():
+    # agent = CognitiveAgent() # No longer needed for most memory operations
     print("[George] Hello! I am George, your virtual cognitive agent. Type 'exit' to quit.")
     while True:
         try:
@@ -26,122 +29,65 @@ async def main():
             if cmd in {"exit", "quit"}:
                 print("[George] Goodbye!")
                 break
-            if cmd == "/dream":
-                print("[George] Initiating dream (consolidation) cycle...")
-                await agent.enter_dream_state()
-                print("[George] Dream cycle complete. STM memories have been consolidated to LTM (if eligible).")
-                continue
-            if cmd == "/dream-batch":
-                print("[George] Running dream-state batch consolidation (episodic memory)...")
-                result = agent.memory.dream_state_consolidation()
-                print("[George] Dream-state batch consolidation complete.")
-                print(f"  Consolidated: {len(result['consolidated'])}")
-                print(f"  Merged: {len(result['merged'])}")
-                print(f"  Total candidates: {result['total_candidates']}")
-                print(f"  Clusters merged: {result['clusters']}")
-                continue
-            if cmd == "/memories":
-                print("[George] Recent STM memories:")
-                stm_items = getattr(agent.memory.stm, 'items', {})
-                for m in list(stm_items.values())[-5:]:
-                    print(f"  [{format_time(getattr(m, 'encoding_time', None))}] {getattr(m, 'content', '')}")
-                print("[George] Recent LTM memories:")
-                ltm_memories = getattr(agent.memory.ltm, 'memories', {})
-                for m in list(ltm_memories.values())[-5:]:
-                    print(f"  [{format_time(getattr(m, 'encoding_time', None))}] {getattr(m, 'content', '')}")
-                continue
-            if cmd == "/episodic":
-                print("[George] Recent episodic memories:")
-                episodic_cache = getattr(getattr(agent.memory, 'episodic', None), '_memory_cache', {})
-                for m in list(episodic_cache.values())[-5:]:
-                    print(f"  [{format_time(getattr(m, 'timestamp', None))}] {getattr(m, 'summary', '')}")
-                continue
-            if cmd.startswith("/remember"):
-                to_remember = user_input[len("/remember"):].strip()
-                if not to_remember:
-                    print("[George] Please provide something for me to remember, e.g. /remember your favorite color is blue.")
+
+            # Non-API commands (for now)
+            if cmd in {"/dream", "/dream-batch", "/memories", "/remember"} or any(kw in cmd for kw in ["what did i ask you to remember", "what do you remember", "recall", "remind me"]):
+                 print(f"[George] Command '{cmd}' is not fully supported via API yet or pending refactor.")
+                 continue
+
+            # Reflection commands
+            if cmd.startswith("/reflect"):
+                subcmd = user_input[len("/reflect"):].strip()
+                if not subcmd:
+                    try:
+                        response = requests.post(f"{BASE_URL}/reflect")
+                        response.raise_for_status()
+                        report = response.json().get('report', {})
+                        print("[George] Metacognitive reflection complete. Summary:")
+                        print(f"  Timestamp: {report.get('timestamp')}")
+                        print(f"  LTM memories: {report.get('ltm_status', {}).get('total_memories', 'N/A')}")
+                        print(f"  STM items: {report.get('stm_status', {}).get('size', 'N/A')}")
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error triggering reflection: {e}")
                     continue
-                # Summarize and store in STM
-                import uuid
-                summary = f"User asked me to remember: {to_remember}"
-                memory_id = str(uuid.uuid4())
-                agent.memory.stm.store(memory_id=memory_id, content=summary)
-                print(f"[George] I will remember: '{to_remember}' (STM id: {memory_id})")
-                continue
-            # On recall, prioritize explicit 'remember' entries
-            if any(kw in cmd for kw in ["what did i ask you to remember", "what do you remember", "recall", "remind me"]):
-                stm_items = getattr(agent.memory.stm, 'items', {})
-                remembered = [m for m in stm_items.values() if "remember:" in str(m.content).lower() or "asked me to remember" in str(m.content).lower()]
-                if remembered:
-                    print("[George] Here is what you asked me to remember:")
-                    for m in remembered[-5:]:
-                        print(f"  [{format_time(getattr(m, 'encoding_time', None))}] {getattr(m, 'content', '')}")
-                else:
-                    print("[George] I don't have any explicit memories you asked me to remember in STM.")
-                continue
-            response = await agent.process_input(user_input)
-            # Print memory context for transparency
-            # (We call the agent's internal memory search directly for this printout)
-            processed_input = {"raw_input": user_input, "type": "text"}
-            memory_context = await agent._retrieve_memory_context(processed_input)
-            if memory_context:
-                print("[George] (Memory context for this response):")
-                for m in memory_context:
-                    ts = format_time(m.get('timestamp'))
-                    print(f"  [{ts}] ({m.get('source')}) {m.get('content')}")
-            print(f"[George] {response}")
-        except KeyboardInterrupt:
-            print("\n[George] Session ended.")
-            break
-        if cmd.startswith("/remind"):
-            import re
-            from datetime import datetime, timedelta
-            # Example: /remind me to call mom at 2025-06-21 15:00
-            match = re.match(r"/remind (me to )?(?P<desc>.+?) (at|on|in) (?P<time>.+)", user_input, re.IGNORECASE)
-            if not match:
-                print("[George] Usage: /remind me to <task> at <YYYY-MM-DD HH:MM> or /remind me to <task> in <minutes> minutes")
-                continue
-            desc = match.group("desc").strip()
-            time_str = match.group("time").strip()
-            # Try to parse time
-            due_time = None
-            try:
-                if "minute" in time_str:
-                    match_result = re.search(r"(\d+)", time_str)
-                    if match_result:
-                        mins = int(match_result.group(1))
-                        due_time = datetime.now() + timedelta(minutes=mins)
-                    else:
-                        raise ValueError("No number found in time string")
-                else:
-                    due_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M")
-            except Exception:
-                print("[George] Could not parse time. Use 'at YYYY-MM-DD HH:MM' or 'in N minutes'.")
-                continue
-            reminder_id = agent.memory.add_prospective_reminder(desc, due_time)
-            print(f"[George] Reminder set: '{desc}' at {due_time.strftime('%Y-%m-%d %H:%M')}")
-            continue
-        if cmd == "/reminders":
-            reminders = agent.memory.list_prospective_reminders()
-            if not reminders:
-                print("[George] No scheduled reminders.")
-            else:
-                print("[George] Scheduled reminders:")
-                for r in reminders:
-                    print(f"  [Due: {format_time(r.due_time)}] {r.description} (ID: {r.id})")
-            continue
-        # Announce due reminders at each turn
-        due = agent.memory.get_due_prospective_reminders()
-        if due:
-            print("[George] Reminder(s) due:")
-            for r in due:
-                print(f"  [Due: {format_time(r.due_time)}] {r.description}")
-                agent.memory.complete_prospective_reminder(r.id)
-            continue
+
+                if subcmd.startswith("ion"):
+                    subcmd = subcmd[len("ion"):].strip()
+                    if subcmd.startswith("status"):
+                        try:
+                            response = requests.get(f"{BASE_URL}/reflection/status")
+                            response.raise_for_status()
+                            status = response.json()
+                            print(f"[George] Reflection scheduler status: {status.get('status')}")
+                        except requests.exceptions.RequestException as e:
+                            print(f"[George] Error getting reflection status: {e}")
+                        continue
+                    if subcmd.startswith("start"):
+                        interval_str = subcmd[len("start"):].strip()
+                        interval = 10
+                        if interval_str and interval_str.isdigit():
+                            interval = int(interval_str)
+                        try:
+                            response = requests.post(f"{BASE_URL}/reflection/start", json={"interval": interval})
+                            response.raise_for_status()
+                            print(f"[George] Reflection scheduler started (every {interval} min).")
+                        except requests.exceptions.RequestException as e:
+                            print(f"[George] Error starting reflection scheduler: {e}")
+                        continue
+                    if subcmd.startswith("stop"):
+                        try:
+                            response = requests.post(f"{BASE_URL}/reflection/stop")
+                            response.raise_for_status()
+                            print("[George] Reflection scheduler stopped.")
+                        except requests.exceptions.RequestException as e:
+                            print(f"[George] Error stopping reflection scheduler: {e}")
+                        continue
+                    print("[George] Usage: /reflection [status|start [interval]|stop]")
+                    continue
+
             # Procedural memory commands
             if cmd.startswith("/procedure"):
                 subcmd = user_input[len("/procedure"):].strip()
-                pm = agent.memory.procedural
                 if subcmd.startswith("add"):
                     print("[George] Adding a new procedural memory.")
                     desc = input("  Description: ").strip()
@@ -154,161 +100,252 @@ async def main():
                         steps.append(step)
                     tags = input("  Tags (comma separated): ").strip().split(",")
                     tags = [t.strip() for t in tags if t.strip()]
-                    memtype = input("  Store in (stm/ltm) [stm]: ").strip().lower() or "stm"
-                    proc_id = pm.store(description=desc, steps=steps, tags=tags, memory_type=memtype)
-                    print(f"[George] Procedure stored with ID: {proc_id}")
+                    payload = {"description": desc, "steps": steps, "tags": tags}
+                    try:
+                        response = requests.post(f"{BASE_URL}/procedural/store", json=payload)
+                        response.raise_for_status()
+                        proc_id = response.json()
+                        print(f"[George] Procedure stored with ID: {proc_id}")
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error storing procedure: {e}")
                     continue
                 if subcmd.startswith("list"):
-                    procs = pm.all_procedures()
-                    if not procs:
-                        print("[George] No procedural memories stored.")
-                    else:
-                        print("[George] Stored procedures:")
-                        for p in procs:
-                            print(f"  ID: {p['id']} | Desc: {p['description']} | Steps: {len(p['steps'])} | Strength: {p.get('strength', 0):.2f}")
+                    try:
+                        response = requests.get(f"{BASE_URL}/procedural/list")
+                        response.raise_for_status()
+                        procs = response.json()
+                        if not procs:
+                            print("[George] No procedural memories stored.")
+                        else:
+                            print("[George] Stored procedures:")
+                            for p in procs:
+                                print(f"  ID: {p['id']} | Desc: {p['description']} | Steps: {len(p['steps'])} | Strength: {p.get('strength', 0):.2f}")
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error listing procedures: {e}")
                     continue
                 if subcmd.startswith("search"):
                     query = subcmd[len("search"):].strip()
                     if not query:
                         print("[George] Usage: /procedure search <query>")
                         continue
-                    results = pm.search(query)
-                    if not results:
-                        print("[George] No procedures found matching query.")
-                    else:
-                        print("[George] Search results:")
-                        for p in results:
-                            print(f"  ID: {p['id']} | Desc: {p['description']} | Steps: {len(p['steps'])} | Strength: {p.get('strength', 0):.2f}")
+                    try:
+                        response = requests.get(f"{BASE_URL}/procedural/search", params={"query": query})
+                        response.raise_for_status()
+                        results = response.json()
+                        if not results:
+                            print("[George] No procedures found matching query.")
+                        else:
+                            print("[George] Search results:")
+                            for p in results:
+                                print(f"  ID: {p['id']} | Desc: {p['description']} | Steps: {len(p['steps'])} | Strength: {p.get('strength', 0):.2f}")
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error searching procedures: {e}")
                     continue
                 if subcmd.startswith("use"):
                     proc_id = subcmd[len("use"):].strip()
                     if not proc_id:
                         print("[George] Usage: /procedure use <id>")
                         continue
-                    success = pm.use(proc_id)
-                    if success:
-                        proc = pm.retrieve(proc_id)
-                        print(f"[George] Used procedure: {proc['description']}")
-                        print("  Steps:")
-                        for i, step in enumerate(proc['steps'], 1):
-                            print(f"    {i}. {step}")
-                    else:
-                        print("[George] Procedure not found.")
+                    try:
+                        response = requests.get(f"{BASE_URL}/procedural/retrieve/{proc_id}")
+                        response.raise_for_status()
+                        proc = response.json()
+                        if proc:
+                            print(f"[George] Used procedure: {proc['description']}")
+                            print("  Steps:")
+                            for i, step in enumerate(proc['steps'], 1):
+                                print(f"    {i}. {step}")
+                        else:
+                            print("[George] Procedure not found.")
+                    except requests.exceptions.RequestException as e:
+                        if e.response and e.response.status_code == 404:
+                            print("[George] Procedure not found.")
+                        else:
+                            print(f"[George] Error using procedure: {e}")
                     continue
                 if subcmd.startswith("delete"):
                     proc_id = subcmd[len("delete"):].strip()
                     if not proc_id:
                         print("[George] Usage: /procedure delete <id>")
                         continue
-                    if pm.delete(proc_id):
-                        print(f"[George] Procedure {proc_id} deleted.")
-                    else:
-                        print("[George] Procedure not found.")
+                    try:
+                        response = requests.delete(f"{BASE_URL}/procedural/delete/{proc_id}")
+                        response.raise_for_status()
+                        if response.json().get("success"):
+                            print(f"[George] Procedure {proc_id} deleted.")
+                        else:
+                            print(f"[George] Procedure not found or could not be deleted.")
+                    except requests.exceptions.RequestException as e:
+                        if e.response and e.response.status_code == 404:
+                            print("[George] Procedure not found.")
+                        else:
+                            print(f"[George] Error deleting procedure: {e}")
                     continue
                 if subcmd.startswith("clear"):
-                    pm.clear()
-                    print("[George] All procedural memories cleared.")
+                    print("[George] /procedure clear is not supported via API yet.")
                     continue
                 print("[George] Usage: /procedure [add|list|search <query>|use <id>|delete <id>|clear]")
                 continue
-            # Episodic memory commands
-            if cmd.startswith("/episodic "):
-                subcmd = user_input[len("/episodic"):].strip()
-                em = getattr(agent.memory, 'episodic', None)
-                if em is None:
-                    print("[George] Episodic memory system not available.")
+
+            # Generic memory commands
+            if cmd.startswith("/memory "):
+                parts = user_input.strip().split(" ", 3)
+                if len(parts) < 3:
+                    print("[George] Usage: /memory <store|retrieve|search|delete> <system> [args...]")
                     continue
-                if subcmd.startswith("add"):
-                    print("[George] Adding a new episodic memory.")
-                    content = input("  Detailed content: ").strip()
-                    importance = float(input("  Importance (0.0-1.0) [0.5]: ") or 0.5)
-                    emotional_valence = float(input("  Emotional valence (-1.0 to 1.0) [0.0]: ") or 0.0)
-                    life_period = input("  Life period (optional): ").strip() or None
-                    mem_id = em.store(detailed_content=content, importance=importance, emotional_valence=emotional_valence, life_period=life_period)
-                    print(f"[George] Episodic memory stored with ID: {mem_id}")
+
+                command, system, args_str = parts[1], parts[2], parts[3] if len(parts) > 3 else ""
+
+                if command == "list":
+                    payload = {"query": ""} # Sending an empty query to get all items
+                    try:
+                        # The memory API uses a POST for search, we'll use it to list all
+                        response = requests.post(f"{BASE_URL}/memory/{system}/search", json=payload)
+                        response.raise_for_status()
+                        results = response.json().get("results", [])
+                        if not results:
+                            print(f"[George] No memories found in {system}.")
+                        else:
+                            print(f"[George] All memories in {system}:")
+                            for r in results:
+                                print(json.dumps(r, indent=2))
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error listing memories: {e}")
                     continue
-                if subcmd.startswith("list"):
-                    memories = em.search()
-                    if not memories:
-                        print("[George] No episodic memories stored.")
-                    else:
-                        print("[George] Stored episodic memories:")
-                        for m in memories[-10:]:
-                            print(f"  ID: {m['id']} | {m['summary']} | Importance: {m.get('importance', 0):.2f} | Valence: {m.get('emotional_valence', 0):.2f}")
-                    continue
-                if subcmd.startswith("search"):
-                    query = subcmd[len("search"):].strip()
-                    if not query:
-                        print("[George] Usage: /episodic search <query>")
+
+                if command == "store":
+                    if not args_str:
+                        print(f"[George] Usage: /memory store {system} <content>")
                         continue
-                    results = em.search(query)
-                    if not results:
-                        print("[George] No episodic memories found matching query.")
-                    else:
-                        print("[George] Search results:")
-                        for m in results:
-                            print(f"  ID: {m['id']} | {m['summary']} | Importance: {m.get('importance', 0):.2f} | Valence: {m.get('emotional_valence', 0):.2f}")
+                    payload = {"content": args_str}
+                    try:
+                        response = requests.post(f"{BASE_URL}/memory/{system}/store", json=payload)
+                        response.raise_for_status()
+                        mem_id = response.json().get("memory_id")
+                        print(f"[George] Memory stored in {system} with ID: {mem_id}")
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error storing memory: {e}")
                     continue
-                if subcmd.startswith("retrieve"):
-                    mem_id = subcmd[len("retrieve"):].strip()
-                    if not mem_id:
-                        print("[George] Usage: /episodic retrieve <id>")
+
+                if command == "retrieve":
+                    if not args_str:
+                        print(f"[George] Usage: /memory retrieve {system} <memory_id>")
                         continue
-                    mem = em.retrieve(mem_id)
-                    if mem:
-                        print(f"[George] Episodic memory: {mem['summary']}")
-                        print(f"  Content: {mem['detailed_content']}")
-                        print(f"  Importance: {mem.get('importance', 0):.2f} | Valence: {mem.get('emotional_valence', 0):.2f}")
-                    else:
-                        print("[George] Episodic memory not found.")
+                    try:
+                        response = requests.get(f"{BASE_URL}/memory/{system}/retrieve/{args_str}")
+                        response.raise_for_status()
+                        memory = response.json()
+                        print(f"[George] Retrieved from {system}:")
+                        print(json.dumps(memory, indent=2))
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error retrieving memory: {e}")
                     continue
-                if subcmd.startswith("delete"):
-                    mem_id = subcmd[len("delete"):].strip()
-                    if not mem_id:
-                        print("[George] Usage: /episodic delete <id>")
+
+                if command == "search":
+                    # args_str is the query
+                    payload = {"query": args_str}
+                    try:
+                        # The memory API uses a POST for search
+                        response = requests.post(f"{BASE_URL}/memory/{system}/search", json=payload)
+                        response.raise_for_status()
+                        results = response.json().get("results", [])
+                        if not results:
+                            print(f"[George] No memories found in {system} for that query.")
+                        else:
+                            print(f"[George] Search results from {system}:")
+                            for r in results:
+                                print(json.dumps(r, indent=2))
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error searching memory: {e}")
+                    continue
+                
+                if command == "delete":
+                    if not args_str:
+                        print(f"[George] Usage: /memory delete {system} <memory_id>")
                         continue
-                    if em.delete(mem_id):
-                        print(f"[George] Episodic memory {mem_id} deleted.")
-                    else:
-                        print("[George] Episodic memory not found.")
+                    try:
+                        response = requests.delete(f"{BASE_URL}/memory/{system}/delete/{args_str}")
+                        response.raise_for_status()
+                        print(f"[George] Deleted memory {args_str} from {system}.")
+                    except requests.exceptions.RequestException as e:
+                        print(f"[George] Error deleting memory: {e}")
                     continue
-                print("[George] Usage: /episodic [add|list|search <query>|retrieve <id>|delete <id>]")
-                continue
-            # Reflection commands
-            if cmd == "/reflect":
-                report = agent.manual_reflect()
-                print("[George] Metacognitive reflection complete. Summary:")
-                print(f"  Timestamp: {report['timestamp']}")
-                print(f"  LTM memories: {report['ltm_status'].get('total_memories', 'N/A') if report['ltm_status'] else 'N/A'}")
-                print(f"  STM items: {report['stm_status'].get('size', 'N/A') if report['stm_status'] else 'N/A'}")
-                print(f"  LTM health: {report.get('ltm_health_report', {}).get('memory_categories', {})}")
-                continue
-            if cmd.startswith("/reflection"):
-                subcmd = user_input[len("/reflection"):].strip()
-                if subcmd.startswith("status"):
-                    reports = agent.get_reflection_reports(3)
-                    if not reports:
-                        print("[George] No reflection reports available.")
-                    else:
-                        print("[George] Last 3 reflection reports:")
-                        for r in reports:
-                            print(f"  [{r['timestamp']}] LTM: {r['ltm_status'].get('total_memories', 'N/A') if r['ltm_status'] else 'N/A'}, STM: {r['stm_status'].get('size', 'N/A') if r['stm_status'] else 'N/A'}")
-                    continue
-                if subcmd.startswith("start"):
-                    import re
-                    match = re.search(r"start(\\s+(\\d+))?", subcmd)
-                    interval = 10
-                    if match and match.group(2):
-                        interval = int(match.group(2))
-                    agent.start_reflection_scheduler(interval_minutes=interval)
-                    print(f"[George] Reflection scheduler started (every {interval} min).")
-                    continue
-                if subcmd.startswith("stop"):
-                    agent.stop_reflection_scheduler()
-                    print("[George] Reflection scheduler stopped.")
-                    continue
-                print("[George] Usage: /reflection [status|start [interval]|stop]")
+                # This was missing the final "continue", which could cause fall-through
                 continue
 
+            # Prospective memory (reminders)
+            if cmd.startswith("/remind "):
+                match = re.match(r"/remind (me to )?(?P<desc>.+?) (at|on|in) (?P<time>.+)", user_input, re.IGNORECASE)
+                if not match:
+                    print("[George] Usage: /remind me to <task> at <YYYY-MM-DD HH:MM> or /remind me to <task> in <minutes> minutes")
+                    continue
+                desc = match.group("desc").strip()
+                time_str = match.group("time").strip()
+                due_time = None
+                try:
+                    if "minute" in time_str:
+                        match_result = re.search(r"(\d+)", time_str)
+                        if match_result:
+                            mins = int(match_result.group(1))
+                            due_time = datetime.now() + timedelta(minutes=mins)
+                        else:
+                            raise ValueError("No number found in time string")
+                    else:
+                        due_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M")
+                except Exception:
+                    print(f"[George] Could not parse time: {time_str}")
+                    continue
+                
+                payload = {"description": desc, "due_time": due_time.isoformat()}
+                try:
+                    response = requests.post(f"{BASE_URL}/prospective/store", json=payload)
+                    response.raise_for_status()
+                    reminder = response.json()
+                    print(f"[George] OK, I'll remind you to '{reminder['description']}' at {datetime.fromisoformat(reminder['due_time']).strftime('%Y-%m-%d %H:%M')}.")
+                except requests.exceptions.RequestException as e:
+                    print(f"[George] Error setting reminder: {e}")
+                continue
+
+
+            if cmd == "/reminders":
+                try:
+                    response = requests.get(f"{BASE_URL}/prospective/search")
+                    response.raise_for_status()
+                    reminders = response.json()
+                    if not reminders:
+                        print("[George] You have no upcoming reminders.")
+                    else:
+                        print("[George] Upcoming reminders:")
+                        for r in reminders:
+                            print(f"  - {r['description']} at {datetime.fromisoformat(r['due_time']).strftime('%Y-%m-%d %H:%M')}")
+                except requests.exceptions.RequestException as e:
+                    print(f"[George] Error fetching reminders: {e}")
+                continue
+
+            # If no command was matched, send to the agent for processing
+            payload = {"text": user_input}
+            try:
+                response = requests.post(f"{BASE_URL}/agent/process", json=payload)
+                response.raise_for_status()
+                data = response.json()
+                print(f"[George] {data.get('response')}")
+                if data.get("memory_context"):
+                    print(f"       [context: {data.get('memory_context')}]")
+
+            except requests.exceptions.RequestException as e:
+                print(f"[George] Error processing message: {e}")
+
+
+        except KeyboardInterrupt:
+            print("\n[George] Shutting down. Goodbye!")
+            break
+        except requests.exceptions.ConnectionError:
+            print("[George] Cannot connect to the API server. Is it running?")
+            break
+        except Exception as e:
+            print(f"[George] An unexpected error occurred: {e}")
+            break
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
