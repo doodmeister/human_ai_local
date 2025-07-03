@@ -18,7 +18,7 @@ client = TestClient(app)
 MEMORY_PAYLOADS = {
     "stm": {"content": "Test STM data"},
     "ltm": {"content": "Test LTM data"},
-    "episodic": {"content": {"detailed_content": "Test episodic summary"}},
+    "episodic": {"content": {"summary": "Test episodic summary", "detailed_content": "A detailed account of the test episode."}},
     "procedural": {"content": {"description": "Test procedural description", "steps": ["step 1", "step 2"]}},
     "prospective": {"content": {"description": "Test prospective reminder", "due_time": "2024-08-01T12:00:00"}},
     "semantic": {"content": {"subject": "test_subject", "predicate": "is_a", "object_val": "test_object"}}

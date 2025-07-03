@@ -91,15 +91,17 @@ def store_memory(system: str, req: StoreMemoryRequest):
         return {"memory_id": memory_id}
     
     elif system == "episodic":
-        # Episodic memory requires 'detailed_content'
-        if not isinstance(req.content, dict) or "detailed_content" not in req.content:
-            raise HTTPException(status_code=422, detail="For episodic memory, 'content' must be a dictionary with a 'detailed_content' key.")
+        # Episodic memory requires 'content' (as a summary), and optional 'detailed_content'
+        if not isinstance(req.content, dict) or "summary" not in req.content:
+            raise HTTPException(status_code=422, detail="For episodic memory, 'content' must be a dictionary with a 'summary' key.")
         
         memory_id = memsys.store(
-            detailed_content=req.content["detailed_content"],
+            summary=req.content["summary"],
+            detailed_content=req.content.get("detailed_content", ""),
             importance=req.importance if req.importance is not None else 0.5,
             emotional_valence=req.emotional_valence if req.emotional_valence is not None else 0.0,
-            associated_stm_ids=req.associations,
+            tags=req.tags,
+            associations=req.associations,
         )
         return {"memory_id": memory_id}
 
@@ -164,9 +166,7 @@ def delete_memory(system: str, memory_id: str):
     memsys = get_system(system)
     
     if system == "semantic":
-        deleted = memsys.delete(memory_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Memory not found")
+        memsys.delete_fact(memory_id)
     else:
         memsys.delete(memory_id)
         
@@ -176,14 +176,7 @@ def delete_memory(system: str, memory_id: str):
 def search_memory(system: str, req: SearchMemoryRequest):
     memsys = get_system(system)
 
-    if system == "stm":
-        if req.query and not isinstance(req.query, str):
-            raise HTTPException(status_code=422, detail="STM search query must be a string.")
-        results = memsys.search(
-            query=req.query or "",
-            max_results=req.max_results if req.max_results is not None else 5,
-        )
-    elif system == "semantic":
+    if system == "semantic":
         # Assuming the query for semantic memory is a dictionary
         if not isinstance(req.query, dict):
             raise HTTPException(status_code=422, detail="Semantic search query must be a dictionary with 'subject', 'predicate', or 'object_val'.")
@@ -193,15 +186,11 @@ def search_memory(system: str, req: SearchMemoryRequest):
             object_val=req.query.get("object_val")
         )
     elif system == "procedural":
-        if not isinstance(req.query, str):
-            raise HTTPException(status_code=422, detail="Procedural search query must be a string.")
         results = memsys.search(query=req.query)
     elif system == "prospective":
         # Prospective memory search might list all reminders or based on a query
         results = memsys.list_reminders()
     else:
-        if not isinstance(req.query, str):
-            raise HTTPException(status_code=422, detail="Search query must be a string for this memory system.")
         results = memsys.search(
             query=req.query,
             tags=req.tags,
