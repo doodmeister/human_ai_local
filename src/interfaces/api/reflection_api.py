@@ -36,14 +36,18 @@ from src.core.agent_singleton import agent
 # Import routers instead of FastAPI app for unified API registration
 from src.interfaces.api.memory_api import router as memory_router
 from src.interfaces.api.procedural_api import router as procedural_router
+from src.interfaces.api.prospective_api import router as prospective_router
+from src.interfaces.api.semantic_api import router as semantic_router
 
 
 
 
 app = FastAPI()
-# Register both memory and procedural routers under /api
+# Register all routers under /api
 app.include_router(memory_router, prefix="/api")
 app.include_router(procedural_router, prefix="/api")
+app.include_router(prospective_router, prefix="/api")
+app.include_router(semantic_router, prefix="/api")
 
 # Reflection state (for status/report endpoints)
 reflection_lock = threading.Lock()

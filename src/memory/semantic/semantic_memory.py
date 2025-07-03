@@ -133,7 +133,11 @@ class SemanticMemorySystem(BaseMemorySystem):
         Delete a fact by its unique ID (memory_id).
         Returns True if deleted, False otherwise.
         """
-        return super().delete(memory_id) if hasattr(super(), 'delete') else self.knowledge_base.pop(memory_id, None) is not None
+        if memory_id in self.knowledge_base:
+            del self.knowledge_base[memory_id]
+            self._save_kb()
+            return True
+        return False
 
     def delete_fact(self, subject: str, predicate: str, object_val: Any) -> bool:
         """

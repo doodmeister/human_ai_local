@@ -37,5 +37,14 @@ class ProspectiveMemorySystem:
             item.completed = True
             item.completed_at = datetime.now()
 
+    def retrieve(self, item_id: str) -> Optional[ProspectiveMemoryItem]:
+        return self.items.get(item_id)
+
+    def delete(self, item_id: str) -> bool:
+        if item_id in self.items:
+            del self.items[item_id]
+            return True
+        return False
+
     def list_reminders(self, include_completed: bool = False) -> List[ProspectiveMemoryItem]:
         return [item for item in self.items.values() if include_completed or not item.completed]
