@@ -52,5 +52,7 @@ htmlcov/
 *.hcl
 
 # data
+test_data/
 data/
+
 test_data/

@@ -252,7 +252,7 @@ class VectorShortTermMemory(ShortTermMemory):
         self,
         query: str,
         max_results: int = 5,
-        min_similarity: float = 0.5,
+        min_similarity: float = 0.3,  # Lowered from 0.5 to 0.3 for better recall
         min_activation: float = 0.0
     ) -> List[VectorMemoryResult]:
         """
@@ -261,7 +261,7 @@ class VectorShortTermMemory(ShortTermMemory):
         Args:
             query: Search query
             max_results: Maximum number of results
-            min_similarity: Minimum similarity threshold
+            min_similarity: Minimum similarity threshold (default 0.3)
             min_activation: Minimum activation threshold (STM-specific)
         
         Returns:
@@ -305,7 +305,6 @@ class VectorShortTermMemory(ShortTermMemory):
                     if similarity >= min_similarity:
                         # Combine similarity with STM activation for relevance
                         relevance = (similarity * 0.7) + (activation * 0.3)
-                        
                         vector_results.append(VectorMemoryResult(
                             item=item,
                             similarity_score=similarity,
