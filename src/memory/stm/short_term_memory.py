@@ -3,6 +3,7 @@ Short-Term Memory (STM) System
 Implements working memory with capacity limits and decay mechanisms
 """
 from typing import Dict, List, Optional, Any, Tuple, Sequence
+from rapidfuzz import fuzz
 from datetime import datetime
 from dataclasses import dataclass, field
 import logging
@@ -188,29 +189,24 @@ class ShortTermMemory(BaseMemorySystem):
         search_associations: bool = True
     ) -> List[Tuple[MemoryItem, float]]:
         """
-        Internal search method for STM
-        
-        Args:
-            query: Search query (basic string matching for now)
-            min_activation: Minimum activation threshold
-            max_results: Maximum number of results
-            search_associations: Whether to include associatively linked memories
-        
-        Returns:
-            List of (MemoryItem, relevance_score) tuples
+        Internal search method for STM with fuzzy matching fallback.
+        Uses rapidfuzz to match paraphrased queries if vector DB is not used.
         """
         results = []
+        query_norm = query.lower().strip()
         for memory_id, item in self.items.items():
-            # Calculate relevance score based on activation and query match
             activation = item.calculate_activation()
             if activation < min_activation:
                 continue
-            # Simple query matching (more complex logic can be added)
-            if query.lower() in str(item.content).lower():
-                relevance = activation  # Placeholder for real relevance calculation
+            content_str = str(item.content).lower().strip()
+            # Use fuzzy matching for relevance
+            fuzzy_score = fuzz.token_set_ratio(query_norm, content_str) / 100.0  # 0.0 to 1.0
+            # Combine activation and fuzzy score for relevance
+            relevance = 0.5 * activation + 0.5 * fuzzy_score
+            # Only consider if fuzzy_score is reasonably high (e.g., >0.5)
+            if fuzzy_score > 0.5:
                 results.append((item, relevance))
-        
-        # Sort results by relevance (desc) and limit to max_results
+        # Sort by relevance descending
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:max_results]
 
