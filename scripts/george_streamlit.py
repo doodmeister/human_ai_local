@@ -39,7 +39,7 @@ for user, ai, context in reversed(st.session_state['chat_history']):
 st.sidebar.header("George Controls")
 if st.sidebar.button("Clear Chat History"):
     st.session_state['chat_history'] = []
-    st.experimental_rerun()
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Project:** Human-AI Cognition\n**Agent:** George\n**API:** [localhost:8000](http://127.0.0.1:8000)")

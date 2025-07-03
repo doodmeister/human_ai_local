@@ -290,12 +290,33 @@ human_ai_local/
 
 ## Quick Start
 ```bash
-python src/core/cognitive_agent.py
+# 1. Install dependencies (in your virtualenv):
 pip install -r requirements.txt
+
+# 2. Start the backend API server (all endpoints, including agent, memory, reflection, etc.):
+c:/dev/human_ai_local/venv/Scripts/python.exe -m uvicorn src.interfaces.api.reflection_api:app --reload --port 8000
+
+# 3. (Optional) Run the CLI:
+python scripts/george_cli.py
+
+# 4. (Optional) Launch the Streamlit dashboard for George:
+streamlit run scripts/george_streamlit.py
 ```
 
+## Streamlit Dashboard (George)
+The new Streamlit interface provides a modern chat UI for interacting with George, including:
+- Real-time chat with the agent (uses the same backend API as the CLI)
+- Context display for each response
+- Sidebar controls to clear chat history
+
+To launch:
+```bash
+streamlit run scripts/george_streamlit.py
+```
+Then open [http://localhost:8501](http://localhost:8501) in your browser.
+
 ## Environment Setup
-Create `.env` file:
+Create a `.env` file in the project root:
 ```
 OPENAI_API_KEY=your_key_here
 CHROMA_PERSIST_DIR=./data/chroma_db
