@@ -73,6 +73,15 @@ def delete_procedure(procedure_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Procedure not found")
     return {"status": "deleted"}
 
+
+# List all procedural memories
+@router.get("/procedural/list")
+def list_procedures(request: Request):
+    agent = request.app.state.agent
+    memsys = agent.memory.procedural
+    procs = memsys.all_procedures()
+    return procs
+
 @router.post("/procedure/clear")
 def clear_procedures(request: Request, memory_type: str = "ltm"):
     agent = request.app.state.agent

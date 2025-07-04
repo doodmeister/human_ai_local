@@ -311,13 +311,22 @@ def main():
                 try:
                     response = requests.get(f"{BASE_URL}/prospective/search")
                     response.raise_for_status()
-                    reminders = response.json()
+                    data = response.json()
+                    reminders = data.get("results", [])
                     if not reminders:
                         print("[George] You have no upcoming reminders.")
                     else:
                         print("[George] Upcoming reminders:")
                         for r in reminders:
-                            print(f"  - {r['description']} at {datetime.fromisoformat(r['due_time']).strftime('%Y-%m-%d %H:%M')}")
+                            try:
+                                due_time = r.get('due_time')
+                                if due_time:
+                                    due_time_fmt = datetime.fromisoformat(due_time).strftime('%Y-%m-%d %H:%M')
+                                else:
+                                    due_time_fmt = 'unknown'
+                                print(f"  - {r.get('description', '[no description]')} at {due_time_fmt}")
+                            except Exception as ex:
+                                print(f"    [Error displaying reminder: {ex}]")
                 except requests.exceptions.RequestException as e:
                     print(f"[George] Error fetching reminders: {e}")
                 continue

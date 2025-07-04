@@ -266,7 +266,7 @@ class DreamProcessor:
         current_time = datetime.now()
         
         # Get all STM items
-        stm_items = list(self.memory_system.stm.items.values())
+        stm_items = self.memory_system.stm.get_all_memories()
         
         for item in stm_items:
             # Calculate various scores
@@ -458,7 +458,7 @@ class DreamProcessor:
         for candidate in candidates:
             try:
                 # Get the actual memory item from STM
-                stm_item = self.memory_system.stm.items.get(candidate.memory_id)
+                stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
                 if not stm_item:
                     continue
                 
@@ -511,8 +511,8 @@ class DreamProcessor:
                 for i, candidate1 in enumerate(cluster):
                     for candidate2 in cluster[i+1:]:
                         # Add mutual associations
-                        stm_item1 = self.memory_system.stm.items.get(candidate1.memory_id)
-                        stm_item2 = self.memory_system.stm.items.get(candidate2.memory_id)
+                        stm_item1 = self.memory_system.stm.retrieve(candidate1.memory_id)
+                        stm_item2 = self.memory_system.stm.retrieve(candidate2.memory_id)
                         
                         if stm_item1 and stm_item2:
                             if candidate2.memory_id not in stm_item1.associations:
@@ -541,8 +541,8 @@ class DreamProcessor:
             for i, candidate1 in enumerate(candidates):
                 for candidate2 in candidates[i+1:]:
                     # Check temporal proximity
-                    stm_item1 = self.memory_system.stm.items.get(candidate1.memory_id)
-                    stm_item2 = self.memory_system.stm.items.get(candidate2.memory_id)
+                    stm_item1 = self.memory_system.stm.retrieve(candidate1.memory_id)
+                    stm_item2 = self.memory_system.stm.retrieve(candidate2.memory_id)
                     
                     if stm_item1 and stm_item2:
                         time_diff = abs((stm_item1.encoding_time - stm_item2.encoding_time).total_seconds())
@@ -619,7 +619,7 @@ class DreamProcessor:
             ]
             
             for candidate in high_importance_memories:
-                stm_item = self.memory_system.stm.items.get(candidate.memory_id)
+                stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
                 if stm_item:
                     # Strengthen memory through replay
                     strength_boost = cycle_config.replay_intensity * 0.1
@@ -661,7 +661,7 @@ class DreamProcessor:
             importance_scores = []
             
             for candidate in candidates:
-                stm_item = self.memory_system.stm.items.get(candidate.memory_id)
+                stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
                 if stm_item and hasattr(stm_item, 'embedding') and stm_item.embedding is not None:
                     # Convert embedding to torch tensor
                     if isinstance(stm_item.embedding, np.ndarray):
@@ -700,7 +700,7 @@ class DreamProcessor:
                 consolidation_strength = neural_replay_results.get('consolidation_strength', 0.0)
                 if consolidation_strength > 0.1:  # Threshold for meaningful consolidation
                     for candidate in candidates:
-                        stm_item = self.memory_system.stm.items.get(candidate.memory_id)
+                        stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
                         if stm_item:
                             # Boost importance based on neural consolidation
                             neural_boost = consolidation_strength * 0.1
@@ -738,16 +738,17 @@ class DreamProcessor:
             weak_threshold = 0.1
             items_to_remove = []
             
-            for item_id, item in self.memory_system.stm.items.items():
+            all_memories = self.memory_system.stm.get_all_memories()
+            for item in all_memories:
                 if item.importance < weak_threshold and item.access_count == 0:
-                    items_to_remove.append(item_id)
+                    items_to_remove.append(item.id)
             
             for item_id in items_to_remove:
                 self.memory_system.stm.remove_item(item_id)
                 cleanup_results["weak_memories_removed"] += 1
             
             # Clean duplicate associations
-            for item in self.memory_system.stm.items.values():
+            for item in all_memories:
                 original_count = len(item.associations)
                 item.associations = list(set(item.associations))  # Remove duplicates
                 cleaned_count = original_count - len(item.associations)

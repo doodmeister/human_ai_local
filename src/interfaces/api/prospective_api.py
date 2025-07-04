@@ -31,12 +31,23 @@ def retrieve_prospective(event_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Event not found")
     return event
 
-@router.post("/prospective/search")
-def search_prospective(request: Request, query: Optional[str] = None):
+
+# New endpoint: List all reminders (for CLI `/reminders` command)
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+
+@router.get("/prospective/search")
+def list_prospective_reminders(request: Request, include_completed: bool = False):
+    """
+    List all prospective reminders (optionally include completed).
+    Returns a list of reminders as dicts.
+    """
     agent = request.app.state.agent
     memsys = agent.memory.prospective
-    results = memsys.search(query or "")
-    return {"results": results}
+    reminders = memsys.list_reminders(include_completed=include_completed)
+    # Convert dataclass objects to dicts for JSON serialization
+    reminders_dicts = [jsonable_encoder(r) for r in reminders]
+    return JSONResponse(content={"results": reminders_dicts})
 
 @router.delete("/prospective/delete/{event_id}")
 def delete_prospective(event_id: str, request: Request):

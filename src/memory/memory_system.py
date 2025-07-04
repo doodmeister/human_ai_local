@@ -57,23 +57,17 @@ class MemorySystem:
         self.use_vector_stm = use_vector_stm
         if use_vector_stm:
             self.stm = VectorShortTermMemory(
-                capacity=stm_capacity,
-                decay_threshold=stm_decay_threshold,
                 chroma_persist_dir=chroma_persist_dir,
-                embedding_model=embedding_model,
-                use_vector_db=True
+                embedding_model=embedding_model
             )
         else:
             self.stm = ShortTermMemory(capacity=stm_capacity, decay_threshold=stm_decay_threshold)
-          # Initialize LTM with vector database support
+        # Initialize LTM with vector database support
         self.use_vector_ltm = use_vector_ltm
         if use_vector_ltm:
             self.ltm = VectorLongTermMemory(
-                storage_path=ltm_storage_path,
                 chroma_persist_dir=chroma_persist_dir,
-                embedding_model=embedding_model,
-                use_vector_db=True,
-                enable_json_backup=True
+                embedding_model=embedding_model
             )
         else:
             self.ltm = LongTermMemory(storage_path=ltm_storage_path)
@@ -255,14 +249,26 @@ class MemorySystem:
                     results.append((memory, score, 'STM'))
             
             if search_ltm:
-                ltm_results = self.ltm.search_by_content(
-                    query=query,
-                    memory_types=memory_types,
-                    max_results=max_results//2
-                )
-                logger.debug(f"LTM search for '{query}' returned: {ltm_results}")
-                for memory, score in ltm_results:
-                    results.append((memory, score, 'LTM'))
+                if self.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
+                    # Vector LTM
+                    ltm_results = self.ltm.search_semantic(
+                        query=query,
+                        memory_types=memory_types,
+                        max_results=max_results//2
+                    )
+                    logger.debug(f"LTM search for '{query}' returned: {ltm_results}")
+                    for memory in ltm_results:
+                        results.append((memory, memory.get('similarity_score', 0.0), 'LTM'))
+                else:
+                    # Legacy LTM or fallback if method exists
+                    ltm_results = getattr(self.ltm, 'search_by_content', lambda **kwargs: [])(
+                        query=query,
+                        memory_types=memory_types,
+                        max_results=max_results//2
+                    )
+                    logger.debug(f"LTM search for '{query}' returned: {ltm_results}")
+                    for memory, score in ltm_results:
+                        results.append((memory, score, 'LTM'))
 
             if search_episodic:
                 try:
@@ -319,9 +325,16 @@ class MemorySystem:
         
         try:
             # Get memories ready for consolidation
-            stm_memories = self.stm.get_all_items()
+            stm_items = {}
+            if hasattr(self.stm, 'get_all_memories'):
+                # Vector STM
+                stm_memories = getattr(self.stm, 'get_all_memories')()
+                stm_items = {mem.id: mem for mem in stm_memories}
+            else:
+                # Legacy STM
+                stm_items = getattr(self.stm, 'items', {})
             
-            for memory_id, memory_item in stm_memories.items():
+            for memory_id, memory_item in stm_items.items():
                 try:
                     # Determine if memory should be consolidated
                     importance = getattr(memory_item, 'importance', 0.0)
@@ -347,7 +360,11 @@ class MemorySystem:
                         )
                         
                         if success:
-                            self.stm.delete(memory_id)
+                            if hasattr(self.stm, 'remove_item'):
+                                getattr(self.stm, 'remove_item')(memory_id)
+                            else:
+                                # Legacy STM - use delete
+                                getattr(self.stm, 'delete', lambda x: None)(memory_id)
                             stats['consolidated_count'] += 1
                         else:
                             stats['failed_count'] += 1
@@ -436,13 +453,12 @@ class MemorySystem:
             vector_results = self.stm.search_semantic(
                 query=query,
                 max_results=max_results,
-                min_similarity=min_similarity,
-                min_activation=min_activation
+                min_similarity=min_similarity
             )
             return [(result.item, result.relevance_score) for result in vector_results]
         else:
             # Fallback to regular STM search
-            results = self.stm.search(query=query, max_results=max_results, min_activation=min_activation)
+            results = self.stm.search(query=query, max_results=max_results)
             # Ensure return type is List[Tuple[Any, float]]
             out = []
             for r in results:
@@ -496,10 +512,10 @@ class MemorySystem:
                     max_results=max_ltm_context,
                     min_similarity=min_relevance
                 )
-                context["ltm"] = [result.record for result in ltm_results]
+                context["ltm"] = [result for result in ltm_results]
             else:
                 # Fallback for regular LTM
-                ltm_results = self.ltm.search_by_content(query=query, max_results=max_ltm_context)
+                ltm_results = getattr(self.ltm, 'search_by_content', lambda **kwargs: [])(query=query, max_results=max_ltm_context)
                 context["ltm"] = [record for record, score in ltm_results if score >= min_relevance]
             
             logger.debug(f"Retrieved context: {len(context['stm'])} STM + {len(context['ltm'])} LTM items")
@@ -691,9 +707,15 @@ class MemorySystem:
 
         # 2. Search LTM
         try:
-            ltm_results = self.ltm.search_by_content(query=query, max_results=max_per_system)
-            for memory, score in ltm_results:
-                all_results.append((memory, score, 'LTM'))
+            if self.use_vector_ltm:
+                ltm_results = getattr(self.ltm, 'search_semantic', lambda **kwargs: [])(query=query, max_results=max_per_system)
+                for memory in ltm_results:
+                    score = memory.get('similarity_score', 0.0)
+                    all_results.append((memory, score, 'LTM'))
+            else:
+                ltm_results = getattr(self.ltm, 'search_by_content', lambda **kwargs: [])(query=query, max_results=max_per_system)
+                for memory, score in ltm_results:
+                    all_results.append((memory, score, 'LTM'))
         except Exception as e:
             logger.error(f"Error searching LTM for query '{query}': {e}")
 

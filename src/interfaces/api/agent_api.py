@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 import sys
 import os
@@ -6,6 +6,19 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 router = APIRouter()
+
+
+# Add /api/reflect endpoint for manual reflection trigger
+@router.post("/reflect")
+async def reflect(request: Request):
+    """
+    Trigger agent-level metacognitive reflection and return the report.
+    """
+    agent = request.app.state.agent
+    if not hasattr(agent, "reflect"):
+        raise HTTPException(status_code=501, detail="Reflection not implemented in agent.")
+    report = await agent.reflect() if callable(getattr(agent.reflect, "__await__", None)) else agent.reflect()
+    return {"status": "ok", "report": report}
 
 
 class ProcessInputRequest(BaseModel):

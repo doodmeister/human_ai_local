@@ -176,15 +176,59 @@ suggestions = ltm.suggest_cross_system_associations(external_memories, "system_t
   - `/reflection start [interval]` — start scheduler (interval in minutes)
   - `/reflection stop` — stop scheduler
 
-#### Example CLI Usage
-```
-/reflect
-/reflection status
-/reflection start 5
-/reflection stop
-```
 
 ---
+
+
+## CLI Commands
+
+### Reflection & Metacognition
+- `/reflect`  
+  Trigger a manual metacognitive reflection and print a summary.
+- `/reflection status`  
+  Show the current status of the reflection scheduler.
+- `/reflection start [interval]`  
+  Start the reflection scheduler (interval in minutes, default 10).
+- `/reflection stop`  
+  Stop the reflection scheduler.
+
+### Procedural Memory
+- `/procedure add`  
+  Interactively add a new procedure (description, steps, tags).
+- `/procedure list`  
+  List all stored procedures.
+- `/procedure search <query>`  
+  Search procedures by description/steps.
+- `/procedure use <id>`  
+  Display steps for a procedure.
+- `/procedure delete <id>`  
+  Delete a procedure by ID.
+- `/procedure clear`  
+  (Not yet supported via API.)
+
+### Generic Memory (STM, LTM, etc.)
+- `/memory list <system>`  
+  List all memories in the specified system (`stm`, `ltm`, etc.).
+- `/memory store <system> <content>`  
+  Store a new memory in the specified system.
+- `/memory retrieve <system> <memory_id>`  
+  Retrieve a memory by ID from the specified system.
+- `/memory search <system> <query>`  
+  Search for memories in the specified system.
+- `/memory delete <system> <memory_id>`  
+  Delete a memory by ID from the specified system.
+
+### Prospective Memory (Reminders)
+- `/remind me to <task> at <YYYY-MM-DD HH:MM>`  
+  Set a reminder for a specific time.
+- `/remind me to <task> in <minutes> minutes`  
+  Set a reminder for a number of minutes from now.
+- `/reminders`  
+  List all upcoming reminders.
+
+### General
+- `exit` or `quit`  
+  Exit the CLI.
 
 ## Usage Example (Unified Memory API)
 ```python
