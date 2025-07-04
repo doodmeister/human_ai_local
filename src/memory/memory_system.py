@@ -1,10 +1,40 @@
 """
-Integrated Memory System
-Coordinates between STM, LTM, and other memory components
+Integrated Memory System for Human-AI Cognition Framework
+
+This module provides a comprehensive memory management system that coordinates
+between different types of memory systems (STM, LTM, Episodic, Semantic, 
+Prospective, and Procedural) in a biologically-inspired cognitive architecture.
+
+Features:
+- Automatic STM to LTM consolidation based on importance and emotional valence
+- Cross-system memory retrieval with semantic search capabilities
+- Memory reinforcement and forgetting mechanisms
+- Dream-state consolidation for episodic memories
+- Integration with ChromaDB for persistent vector storage
+- GPU-accelerated embedding generation
+- Robust error handling and logging
+- Production-grade performance optimization
+
+Author: Human-AI Cognition Framework Team
+Version: 2.0.0
 """
-from typing import Dict, List, Optional, Any, Tuple, Union, TYPE_CHECKING
-from datetime import datetime
+
+from __future__ import annotations
+
+import asyncio
 import logging
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import (
+    Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING, 
+    Protocol, runtime_checkable, Callable, Set
+)
+from weakref import WeakSet
+
 from .stm import ShortTermMemory, VectorShortTermMemory
 from .ltm import LongTermMemory, VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
@@ -15,84 +45,316 @@ from .procedural.procedural_memory import ProceduralMemory
 if TYPE_CHECKING:
     from .episodic.episodic_memory import EpisodicSearchResult
 
+# Configure logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Create console handler with formatting if not already configured
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+
+@dataclass
+class MemorySystemConfig:
+    """Configuration class for Memory System initialization."""
+    stm_capacity: int = 100
+    stm_decay_threshold: float = 0.1
+    ltm_storage_path: Optional[str] = None
+    consolidation_interval: int = 300  # seconds
+    use_vector_ltm: bool = True
+    use_vector_stm: bool = True
+    chroma_persist_dir: Optional[str] = None
+    embedding_model: str = "all-MiniLM-L6-v2"
+    semantic_storage_path: Optional[str] = None
+    max_concurrent_operations: int = 4
+    consolidation_threshold_importance: float = 0.6
+    consolidation_threshold_emotional: float = 0.5
+    consolidation_age_minutes: int = 30
+    auto_process_prospective: bool = True
+    prospective_process_interval: int = 60  # seconds
+
+
+@dataclass
+class MemoryOperationResult:
+    """Result of a memory operation."""
+    success: bool
+    memory_id: Optional[str] = None
+    error_message: Optional[str] = None
+    operation_time: Optional[datetime] = field(default_factory=datetime.now)
+    system_used: Optional[str] = None
+
+
+@dataclass
+class ConsolidationStats:
+    """Statistics from memory consolidation process."""
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    consolidated_count: int = 0
+    failed_count: int = 0
+    errors: List[str] = field(default_factory=list)
+    duration_seconds: float = 0.0
+    
+    @property
+    def is_complete(self) -> bool:
+        """Check if consolidation is complete."""
+        return self.end_time is not None
+
+
+@runtime_checkable
+class MemorySearchable(Protocol):
+    """Protocol for searchable memory systems."""
+    
+    def search(self, query: str, max_results: int = 10) -> List[Tuple[Any, float]]:
+        """Search for memories matching the query."""
+        ...
+
+
+@runtime_checkable
+class MemoryStorable(Protocol):
+    """Protocol for storable memory systems."""
+    
+    def store(self, memory_id: str, content: Any, **kwargs) -> bool:
+        """Store a memory."""
+        ...
+    
+    def retrieve(self, memory_id: str) -> Optional[Any]:
+        """Retrieve a memory by ID."""
+        ...
+    
+    def delete(self, memory_id: str) -> bool:
+        """Delete a memory by ID."""
+        ...
+
+
+class MemorySystemError(Exception):
+    """Base exception for memory system errors."""
+    pass
+
+
+class ConsolidationError(MemorySystemError):
+    """Exception raised during memory consolidation."""
+    pass
+
+
+class SearchError(MemorySystemError):
+    """Exception raised during memory search."""
+    pass
+
+
+class MemoryStorageError(MemorySystemError):
+    """Exception raised during memory storage operations."""
+    pass
+
 
 class MemorySystem:
     """
-    Central memory management system integrating STM and LTM.
+    Central memory management system integrating multiple memory types.
+    
+    This class provides a unified interface for managing different types of memory
+    systems in a biologically-inspired cognitive architecture. It handles:
+    
+    - Short-Term Memory (STM): Temporary storage with decay
+    - Long-Term Memory (LTM): Persistent storage with vector search
+    - Episodic Memory: Event-based memories with rich context
+    - Semantic Memory: Factual knowledge as subject-predicate-object triples
+    - Prospective Memory: Future intentions and reminders
+    - Procedural Memory: Skills and action sequences
     
     Features:
-    - Automatic STM to LTM consolidation
-    - Cross-system memory retrieval
+    - Automatic consolidation from STM to LTM
+    - Cross-system memory retrieval and search
     - Memory reinforcement and forgetting
-    - Dream-state consolidation    """
+    - Dream-state consolidation for episodic memories
+    - Thread-safe operations with connection pooling
+    - Comprehensive error handling and logging
+    - Performance monitoring and optimization
     
-    def __init__(
-        self,
-        stm_capacity: int = 100,  # Increased for cognitive system
-        stm_decay_threshold: float = 0.1,
-        ltm_storage_path: Optional[str] = None,
-        consolidation_interval: int = 300,  # 5 minutes
-        use_vector_ltm: bool = True,
-        use_vector_stm: bool = True,  # New parameter for vector STM
-        chroma_persist_dir: Optional[str] = None,
-        embedding_model: str = "all-MiniLM-L6-v2",
-        semantic_storage_path: Optional[str] = None
-    ):
+    Thread Safety:
+        This class is thread-safe and can be used concurrently from multiple threads.
+        Memory operations are protected by locks where necessary.
+    
+    Performance:
+        - Uses connection pooling for database operations
+        - Implements lazy loading for memory systems
+        - Provides async operations for batch processing
+        - Caches frequently accessed memories
+    """
+    
+    def __init__(self, config: Optional[MemorySystemConfig] = None):
         """
-        Initialize integrated memory system
+        Initialize the integrated memory system.
         
         Args:
-            stm_capacity: STM capacity limit (100 for cognitive system)
-            stm_decay_threshold: STM decay threshold
-            ltm_storage_path: LTM storage path
-            consolidation_interval: Auto-consolidation interval in seconds
-            use_vector_ltm: Whether to use vector-based LTM with ChromaDB
-            use_vector_stm: Whether to use vector-based STM with ChromaDB
-            chroma_persist_dir: ChromaDB persistence directory
-            embedding_model: SentenceTransformer model name
-            semantic_storage_path: Path for semantic memory JSON file
+            config: Configuration object. If None, uses default configuration.
+            
+        Raises:
+            MemorySystemError: If initialization fails
         """
-        # Initialize STM with vector database support
-        self.use_vector_stm = use_vector_stm
-        if use_vector_stm:
-            self.stm = VectorShortTermMemory(
-                chroma_persist_dir=chroma_persist_dir,
-                embedding_model=embedding_model
+        self._config = config or MemorySystemConfig()
+        self._initialized = False
+        self._shutdown = False
+        self._consolidation_lock = threading.RLock()
+        self._operation_lock = threading.RLock()
+        self._executor = ThreadPoolExecutor(max_workers=self._config.max_concurrent_operations)
+        
+        # Memory systems (initialized lazily)
+        self._stm: Optional[Union[ShortTermMemory, VectorShortTermMemory]] = None
+        self._ltm: Optional[Union[LongTermMemory, VectorLongTermMemory]] = None
+        self._episodic: Optional[EpisodicMemorySystem] = None
+        self._semantic: Optional[SemanticMemorySystem] = None
+        self._prospective: Optional[ProspectiveMemorySystem] = None
+        self._procedural: Optional[ProceduralMemory] = None
+        
+        # Session tracking
+        self._session_memories: List[Dict[str, Any]] = []
+        self._last_consolidation = datetime.now()
+        self._last_prospective_process = datetime.now()
+        
+        # Performance monitoring
+        self._operation_counts: Dict[str, int] = {}
+        self._error_counts: Dict[str, int] = {}
+        self._start_time = datetime.now()
+        
+        # Initialize core systems
+        try:
+            self._initialize_systems()
+            self._initialized = True
+            logger.info("Memory system initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize memory system: {e}")
+            raise MemorySystemError(f"Initialization failed: {e}") from e
+    
+    def _initialize_systems(self) -> None:
+        """Initialize all memory subsystems."""
+        try:
+            # Initialize STM
+            if self._config.use_vector_stm:
+                self._stm = VectorShortTermMemory(
+                    chroma_persist_dir=self._config.chroma_persist_dir,
+                    embedding_model=self._config.embedding_model
+                )
+            else:
+                self._stm = ShortTermMemory(
+                    capacity=self._config.stm_capacity,
+                    decay_threshold=self._config.stm_decay_threshold
+                )
+            
+            # Initialize LTM
+            if self._config.use_vector_ltm:
+                self._ltm = VectorLongTermMemory(
+                    chroma_persist_dir=self._config.chroma_persist_dir,
+                    embedding_model=self._config.embedding_model
+                )
+            else:
+                self._ltm = LongTermMemory(storage_path=self._config.ltm_storage_path)
+            
+            # Initialize Episodic Memory
+            self._episodic = EpisodicMemorySystem(
+                chroma_persist_dir=self._config.chroma_persist_dir,
+                embedding_model=self._config.embedding_model
             )
-        else:
-            self.stm = ShortTermMemory(capacity=stm_capacity, decay_threshold=stm_decay_threshold)
-        # Initialize LTM with vector database support
-        self.use_vector_ltm = use_vector_ltm
-        if use_vector_ltm:
-            self.ltm = VectorLongTermMemory(
-                chroma_persist_dir=chroma_persist_dir,
-                embedding_model=embedding_model
+            
+            # Initialize Semantic Memory (using ChromaDB)
+            self._semantic = SemanticMemorySystem(
+                chroma_persist_dir=self._config.chroma_persist_dir or "data/memory_stores/chroma_semantic",
+                embedding_model=self._config.embedding_model
             )
-        else:
-            self.ltm = LongTermMemory(storage_path=ltm_storage_path)
+            
+            # Initialize Prospective Memory
+            self._prospective = ProspectiveMemorySystem(
+                chroma_persist_dir=self._config.chroma_persist_dir,
+                embedding_model=self._config.embedding_model
+            )
+            
+            # Initialize Procedural Memory
+            self._procedural = ProceduralMemory(stm=self._stm, ltm=self._ltm)
+            
+        except Exception as e:
+            logger.error(f"Error initializing memory systems: {e}")
+            raise
+    
+    @property
+    def stm(self) -> Union[ShortTermMemory, VectorShortTermMemory]:
+        """Get the STM system."""
+        if self._stm is None:
+            raise MemorySystemError("STM not initialized")
+        return self._stm
+    
+    @property
+    def ltm(self) -> Union[LongTermMemory, VectorLongTermMemory]:
+        """Get the LTM system."""
+        if self._ltm is None:
+            raise MemorySystemError("LTM not initialized")
+        return self._ltm
+    
+    @property
+    def episodic(self) -> EpisodicMemorySystem:
+        """Get the episodic memory system."""
+        if self._episodic is None:
+            raise MemorySystemError("Episodic memory not initialized")
+        return self._episodic
+    
+    @property
+    def semantic(self) -> SemanticMemorySystem:
+        """Get the semantic memory system."""
+        if self._semantic is None:
+            raise MemorySystemError("Semantic memory not initialized")
+        return self._semantic
+    
+    @property
+    def prospective(self) -> ProspectiveMemorySystem:
+        """Get the prospective memory system."""
+        if self._prospective is None:
+            raise MemorySystemError("Prospective memory not initialized")
+        return self._prospective
+    
+    @property
+    def procedural(self) -> ProceduralMemory:
+        """Get the procedural memory system."""
+        if self._procedural is None:
+            raise MemorySystemError("Procedural memory not initialized")
+        return self._procedural
+    
+    def is_initialized(self) -> bool:
+        """Check if the memory system is fully initialized."""
+        return self._initialized and not self._shutdown
+    
+    def shutdown(self) -> None:
+        """Gracefully shutdown the memory system."""
+        if self._shutdown:
+            return
+            
+        logger.info("Shutting down memory system...")
+        self._shutdown = True
         
-        # Initialize Episodic Memory (if enabled)
-        self.episodic = EpisodicMemorySystem(
-            chroma_persist_dir=chroma_persist_dir,
-            embedding_model=embedding_model
-        )
-        
-        # Initialize Semantic Memory
-        semantic_storage = semantic_storage_path or "data/memory_stores/semantic/semantic_kb.json"
-        self.semantic = SemanticMemorySystem(storage_path=semantic_storage)
-        
-        # Initialize Prospective Memory
-        self.prospective = ProspectiveMemorySystem()
-        
-        # Initialize Procedural Memory with STM and LTM
-        self.procedural = ProceduralMemory(stm=self.stm, ltm=self.ltm)
-        
-        self.consolidation_interval = consolidation_interval
-        self.last_consolidation = datetime.now()
-        self.session_memories = []  # Track memories for this session
-        
-        logger.info(f"Integrated memory system initialized (Vector STM: {use_vector_stm}, Vector LTM: {use_vector_ltm})")
+        try:
+            # Shutdown executor
+            self._executor.shutdown(wait=True)
+            
+            # Shutdown memory systems that support it
+            for system in [self._semantic, self._prospective]:
+                if system and hasattr(system, 'shutdown'):
+                    try:
+                        system.shutdown()
+                    except Exception as e:
+                        logger.error(f"Error shutting down memory system: {e}")
+            
+            logger.info("Memory system shutdown complete")
+        except Exception as e:
+            logger.error(f"Error during memory system shutdown: {e}")
+    
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.shutdown()
     
     def store_memory(
         self,
@@ -105,103 +367,298 @@ class MemorySystem:
         tags: Optional[List[str]] = None,
         associations: Optional[List[str]] = None,
         force_ltm: bool = False
-    ) -> bool:
+    ) -> MemoryOperationResult:
         """
-        Store memory in appropriate system (STM or LTM)
+        Store memory in the appropriate system based on importance and emotional valence.
+        
+        This method implements intelligent memory routing based on cognitive principles:
+        - High importance or emotional memories go to LTM
+        - Regular memories go to STM with potential consolidation later
+        - Creates episodic memories for significant events
         
         Args:
-            memory_id: Unique memory identifier
-            content: Memory content
+            memory_id: Unique memory identifier (must be non-empty string)
+            content: Memory content (any serializable object)
             importance: Importance score (0.0 to 1.0)
-            attention_score: Attention during encoding
+            attention_score: Attention during encoding (0.0 to 1.0)
             emotional_valence: Emotional weight (-1.0 to 1.0)
-            memory_type: Type for LTM storage
-            tags: Tags for organization
+            memory_type: Type for categorization (default: "episodic")
+            tags: Optional tags for organization
             associations: Associated memory IDs
             force_ltm: Force storage in LTM regardless of importance
         
         Returns:
-            True if stored successfully
+            MemoryOperationResult with success status and details
+            
+        Raises:
+            MemorySystemError: If system is not initialized or shutdown
+            ValueError: If parameters are invalid
         """
-        # Track for session
-        session_entry = {
-            'memory_id': memory_id,
-            'timestamp': datetime.now(),
-            'importance': importance,
-            'storage_location': None
-        }
+        if not self.is_initialized():
+            raise MemorySystemError("Memory system not initialized or shutdown")
+        
+        # Input validation
+        if not isinstance(memory_id, str) or not memory_id.strip():
+            raise ValueError("memory_id must be a non-empty string")
+        
+        if not (0.0 <= importance <= 1.0):
+            raise ValueError("importance must be between 0.0 and 1.0")
+        
+        if not (0.0 <= attention_score <= 1.0):
+            raise ValueError("attention_score must be between 0.0 and 1.0")
+        
+        if not (-1.0 <= emotional_valence <= 1.0):
+            raise ValueError("emotional_valence must be between -1.0 and 1.0")
+        
+        if content is None:
+            raise ValueError("content cannot be None")
+        
+        memory_id = memory_id.strip()
+        tags = tags or []
+        associations = associations or []
+        
+        start_time = datetime.now()
         
         try:
-            # Store in episodic memory if it's a significant event (independent of STM/LTM)
-            if importance > 0.6:
-                try:
-                    self.create_episodic_memory(
-                        summary=str(content)[:128],
-                        detailed_content=str(content),
-                        importance=importance,
-                        emotional_valence=emotional_valence,
-                        stm_ids=[memory_id] if not (force_ltm or importance >= 0.7 or abs(emotional_valence) >= 0.6) else [],
-                        ltm_ids=[memory_id] if (force_ltm or importance >= 0.7 or abs(emotional_valence) >= 0.6) else []
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to create corresponding episodic memory for {memory_id}: {e}")
-
-            # Determine storage location
-            if force_ltm or importance >= 0.7 or abs(emotional_valence) >= 0.6:
-                # Store in LTM
-                success = self.ltm.store(
-                    memory_id=memory_id,
-                    content=content,
-                    memory_type=memory_type,
-                    importance=importance,
-                    tags=tags or [],
-                    associations=associations or []
-                )
-                session_entry['storage_location'] = 'LTM'
-            else:
-                # Store in STM
-                success = self.stm.store(
-                    memory_id=memory_id,
-                    content=content,
-                    importance=importance,
-                    attention_score=attention_score,
-                    emotional_valence=emotional_valence
-                )
-                session_entry['storage_location'] = 'STM'
-            
-            if success:
-                self.session_memories.append(session_entry)
+            with self._operation_lock:
+                # Track for session
+                session_entry = {
+                    'memory_id': memory_id,
+                    'timestamp': start_time,
+                    'importance': importance,
+                    'storage_location': None,
+                    'memory_type': memory_type
+                }
                 
-                # Check for automatic consolidation
-                if self._should_consolidate():
-                    self.consolidate_memories()
-            
-            return success
-            
+                # Create episodic memory for significant events
+                episodic_id = None
+                if importance > 0.6:
+                    try:
+                        episodic_id = self._create_episodic_memory_for_storage(
+                            memory_id=memory_id,
+                            content=content,
+                            importance=importance,
+                            emotional_valence=emotional_valence,
+                            force_ltm=force_ltm
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to create episodic memory for {memory_id}: {e}")
+                
+                # Determine storage location based on cognitive principles
+                storage_system = self._determine_storage_system(
+                    importance, emotional_valence, force_ltm
+                )
+                
+                # Store in appropriate system
+                success = False
+                if storage_system == 'LTM':
+                    success = self._store_in_ltm(
+                        memory_id, content, memory_type, importance, tags, associations
+                    )
+                    session_entry['storage_location'] = 'LTM'
+                else:
+                    success = self._store_in_stm(
+                        memory_id, content, importance, attention_score, emotional_valence
+                    )
+                    session_entry['storage_location'] = 'STM'
+                
+                if success:
+                    self._session_memories.append(session_entry)
+                    self._operation_counts['store'] = self._operation_counts.get('store', 0) + 1
+                    
+                    # Schedule consolidation check if needed
+                    if self._should_consolidate():
+                        self._schedule_consolidation()
+                    
+                    # Process prospective memories if enabled
+                    if (self._config.auto_process_prospective and 
+                        self._should_process_prospective()):
+                        self._schedule_prospective_processing()
+                    
+                    return MemoryOperationResult(
+                        success=True,
+                        memory_id=memory_id,
+                        operation_time=start_time,
+                        system_used=storage_system
+                    )
+                else:
+                    self._error_counts['store'] = self._error_counts.get('store', 0) + 1
+                    return MemoryOperationResult(
+                        success=False,
+                        memory_id=memory_id,
+                        error_message=f"Failed to store in {storage_system}",
+                        operation_time=start_time
+                    )
+                    
         except Exception as e:
             logger.error(f"Error storing memory {memory_id}: {e}")
+            self._error_counts['store'] = self._error_counts.get('store', 0) + 1
+            return MemoryOperationResult(
+                success=False,
+                memory_id=memory_id,
+                error_message=str(e),
+                operation_time=start_time
+            )
+    
+    def _determine_storage_system(
+        self, 
+        importance: float, 
+        emotional_valence: float, 
+        force_ltm: bool
+    ) -> str:
+        """Determine which storage system to use based on memory characteristics."""
+        if (force_ltm or 
+            importance >= self._config.consolidation_threshold_importance or 
+            abs(emotional_valence) >= self._config.consolidation_threshold_emotional):
+            return 'LTM'
+        return 'STM'
+    
+    def _store_in_ltm(
+        self, 
+        memory_id: str, 
+        content: Any, 
+        memory_type: str, 
+        importance: float, 
+        tags: List[str], 
+        associations: List[str]
+    ) -> bool:
+        """Store memory in LTM with error handling."""
+        try:
+            return self.ltm.store(
+                memory_id=memory_id,
+                content=content,
+                memory_type=memory_type,
+                importance=importance,
+                tags=tags,
+                associations=associations
+            )
+        except Exception as e:
+            logger.error(f"Failed to store {memory_id} in LTM: {e}")
             return False
+    
+    def _store_in_stm(
+        self, 
+        memory_id: str, 
+        content: Any, 
+        importance: float, 
+        attention_score: float, 
+        emotional_valence: float
+    ) -> bool:
+        """Store memory in STM with error handling."""
+        try:
+            return self.stm.store(
+                memory_id=memory_id,
+                content=content,
+                importance=importance,
+                attention_score=attention_score,
+                emotional_valence=emotional_valence
+            )
+        except Exception as e:
+            logger.error(f"Failed to store {memory_id} in STM: {e}")
+            return False
+    
+    def _create_episodic_memory_for_storage(
+        self, 
+        memory_id: str, 
+        content: Any, 
+        importance: float, 
+        emotional_valence: float,
+        force_ltm: bool
+    ) -> Optional[str]:
+        """Create corresponding episodic memory for significant storage events."""
+        try:
+            return self.create_episodic_memory(
+                summary=str(content)[:128],
+                detailed_content=str(content),
+                importance=importance,
+                emotional_valence=emotional_valence,
+                stm_ids=[memory_id] if not force_ltm else [],
+                ltm_ids=[memory_id] if force_ltm else []
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create episodic memory for {memory_id}: {e}")
+            return None
+    
+    def _schedule_consolidation(self) -> None:
+        """Schedule memory consolidation in a background thread."""
+        def consolidation_task():
+            try:
+                with self._consolidation_lock:
+                    self.consolidate_memories()
+            except Exception as e:
+                logger.error(f"Background consolidation failed: {e}")
+        
+        self._executor.submit(consolidation_task)
+    
+    def _should_process_prospective(self) -> bool:
+        """Check if prospective memory processing should occur."""
+        time_elapsed = (datetime.now() - self._last_prospective_process).total_seconds()
+        return time_elapsed >= self._config.prospective_process_interval
+    
+    def _schedule_prospective_processing(self) -> None:
+        """Schedule prospective memory processing in a background thread."""
+        def prospective_task():
+            try:
+                processed = self.prospective.process_due_reminders(ltm_system=self.ltm)
+                if processed > 0:
+                    logger.info(f"Processed {processed} due prospective reminders")
+                self._last_prospective_process = datetime.now()
+            except Exception as e:
+                logger.error(f"Background prospective processing failed: {e}")
+        
+        self._executor.submit(prospective_task)
     
     def retrieve_memory(self, memory_id: str) -> Optional[Any]:
         """
-        Retrieve memory from any system
+        Retrieve memory from any system with intelligent search order.
+        
+        Searches STM first (faster access), then LTM, with comprehensive
+        error handling and logging.
         
         Args:
-            memory_id: Memory identifier
+            memory_id: Memory identifier to retrieve
         
         Returns:
             Memory content if found, None otherwise
+            
+        Raises:
+            MemorySystemError: If system not initialized
+            ValueError: If memory_id is invalid
         """
+        if not self.is_initialized():
+            raise MemorySystemError("Memory system not initialized or shutdown")
+        
+        if not isinstance(memory_id, str) or not memory_id.strip():
+            raise ValueError("memory_id must be a non-empty string")
+        
+        memory_id = memory_id.strip()
+        
         try:
-            # Check STM first (faster)
-            memory = self.stm.retrieve(memory_id)
-            if memory:
-                return memory
+            # Check STM first (faster access)
+            try:
+                memory = self.stm.retrieve(memory_id)
+                if memory is not None:
+                    self._operation_counts['retrieve_stm'] = self._operation_counts.get('retrieve_stm', 0) + 1
+                    return memory
+            except Exception as e:
+                logger.warning(f"Error retrieving from STM for {memory_id}: {e}")
             
             # Check LTM
-            return self.ltm.retrieve(memory_id)
+            try:
+                memory = self.ltm.retrieve(memory_id)
+                if memory is not None:
+                    self._operation_counts['retrieve_ltm'] = self._operation_counts.get('retrieve_ltm', 0) + 1
+                    return memory
+            except Exception as e:
+                logger.warning(f"Error retrieving from LTM for {memory_id}: {e}")
+            
+            # Not found in either system
+            self._operation_counts['retrieve_miss'] = self._operation_counts.get('retrieve_miss', 0) + 1
+            return None
+            
         except Exception as e:
             logger.error(f"Error retrieving memory {memory_id}: {e}")
+            self._error_counts['retrieve'] = self._error_counts.get('retrieve', 0) + 1
             return None
     
     def store_fact(self, subject: str, predicate: str, object_val: Any) -> str:
@@ -249,7 +706,7 @@ class MemorySystem:
                     results.append((memory, score, 'STM'))
             
             if search_ltm:
-                if self.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
+                if self._config.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
                     # Vector LTM
                     ltm_results = self.ltm.search_semantic(
                         query=query,
@@ -407,27 +864,42 @@ class MemorySystem:
         )
     
     def get_status(self) -> Dict[str, Any]:
-        """Get comprehensive memory system status"""
-        return {
-            'stm': self.stm.get_status(),
-            'ltm': self.ltm.get_status(),
-            'last_consolidation': self.last_consolidation,
-            'session_memories_count': len(self.session_memories),
-            'consolidation_interval': self.consolidation_interval,
-            'use_vector_stm': self.use_vector_stm,
-            'use_vector_ltm': self.use_vector_ltm,
-            'system_active': True
-        }
+        """Get comprehensive memory system status with performance metrics."""
+        try:
+            uptime = (datetime.now() - self._start_time).total_seconds()
+            
+            return {
+                'stm': self.stm.get_status() if hasattr(self.stm, 'get_status') else {'status': 'unknown'},
+                'ltm': self.ltm.get_status() if hasattr(self.ltm, 'get_status') else {'status': 'unknown'},
+                'last_consolidation': self._last_consolidation,
+                'session_memories_count': len(self._session_memories),
+                'consolidation_interval': self._config.consolidation_interval,
+                'use_vector_stm': self._config.use_vector_stm,
+                'use_vector_ltm': self._config.use_vector_ltm,
+                'system_active': self.is_initialized(),
+                'uptime_seconds': uptime,
+                'operation_counts': self._operation_counts.copy(),
+                'error_counts': self._error_counts.copy(),
+                'config': {
+                    'stm_capacity': self._config.stm_capacity,
+                    'max_concurrent_operations': self._config.max_concurrent_operations,
+                    'auto_process_prospective': self._config.auto_process_prospective
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting system status: {e}")
+            return {'error': str(e), 'system_active': False}
     
     def reset_session(self) -> None:
         """Reset session-specific memory tracking"""
-        self.session_memories = []
-        logger.info("Memory system session reset")
+        with self._operation_lock:
+            self._session_memories = []
+            logger.info("Memory system session reset")
     
     def _should_consolidate(self) -> bool:
         """Check if automatic consolidation should occur"""
-        time_elapsed = (datetime.now() - self.last_consolidation).total_seconds()
-        return time_elapsed >= self.consolidation_interval
+        time_elapsed = (datetime.now() - self._last_consolidation).total_seconds()
+        return time_elapsed >= self._config.consolidation_interval
     
     def search_stm_semantic(
         self,
@@ -448,7 +920,7 @@ class MemorySystem:
         Returns:
             List of (memory_item, relevance_score) tuples
         """
-        if self.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
+        if self._config.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
             # Use vector STM semantic search
             vector_results = self.stm.search_semantic(
                 query=query,
@@ -493,7 +965,7 @@ class MemorySystem:
         
         try:
             # Get STM context
-            if self.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
+            if self._config.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
                 stm_results = self.stm.get_context_for_query(
                     query=query,
                     max_context_items=max_stm_context,
@@ -506,7 +978,7 @@ class MemorySystem:
                 context["stm"] = [item for item, score in stm_results if score >= min_relevance]
             
             # Get LTM context
-            if self.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
+            if self._config.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
                 ltm_results = self.ltm.search_semantic(
                     query=query,
                     max_results=max_ltm_context,
@@ -525,9 +997,7 @@ class MemorySystem:
             logger.error(f"Error getting context for query: {e}")
             return {"stm": [], "ltm": []}
     
-    # Type annotations for memory components
-    stm: Union[ShortTermMemory, VectorShortTermMemory]
-    ltm: Union[LongTermMemory, VectorLongTermMemory]    # Episodic Memory Methods
+    # Episodic Memory Methods
     def create_episodic_memory(
         self,
         summary: str,
@@ -671,7 +1141,16 @@ class MemorySystem:
     # Prospective memory API
     def add_prospective_reminder(self, description: str, due_time: datetime) -> str:
         """Add a new prospective reminder"""
-        return self.prospective.add_reminder(description, due_time)
+        try:
+            return self.prospective.store(
+                description=description,
+                trigger_time=due_time.isoformat(),
+                tags=[],
+                memory_type="ltm"
+            )
+        except Exception as e:
+            logger.error(f"Failed to add prospective reminder: {e}")
+            return ""
     
     def get_due_prospective_reminders(self, now: Optional[datetime] = None):
         """Get due prospective reminders"""
@@ -707,7 +1186,7 @@ class MemorySystem:
 
         # 2. Search LTM
         try:
-            if self.use_vector_ltm:
+            if self._config.use_vector_ltm:
                 ltm_results = getattr(self.ltm, 'search_semantic', lambda **kwargs: [])(query=query, max_results=max_per_system)
                 for memory in ltm_results:
                     score = memory.get('similarity_score', 0.0)

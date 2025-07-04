@@ -20,7 +20,6 @@ def format_time(ts):
     return ts.strftime('%Y-%m-%d %H:%M:%S')
 
 def main():
-    # agent = CognitiveAgent() # No longer needed for most memory operations
     print("[George] Hello! I am George, your virtual cognitive agent. Type 'exit' to quit.")
     while True:
         try:
@@ -29,6 +28,17 @@ def main():
             if cmd in {"exit", "quit"}:
                 print("[George] Goodbye!")
                 break
+
+            # Prospective memory: process due reminders
+            if cmd == "/reminders process":
+                try:
+                    response = requests.post(f"{BASE_URL}/prospective/process_due")
+                    response.raise_for_status()
+                    data = response.json()
+                    print(f"[George] Processed {data.get('processed', 0)} due reminders (migrated to LTM).")
+                except requests.exceptions.RequestException as e:
+                    print(f"[George] Error processing due reminders: {e}")
+                continue
 
             # Non-API commands (for now)
             if cmd in {"/dream", "/dream-batch", "/memories", "/remember"} or any(kw in cmd for kw in ["what did i ask you to remember", "what do you remember", "recall", "remind me"]):

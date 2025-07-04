@@ -4,6 +4,23 @@ from typing import Optional, List, Any
 
 router = APIRouter()
 
+@router.post("/prospective/process_due")
+def process_due_reminders(request: Request):
+    """
+    Process all due reminders: remove from prospective memory and convert to LTM.
+    Returns the number of reminders processed.
+    """
+    agent = request.app.state.agent
+    memsys = agent.memory.prospective
+    ltm = agent.memory.ltm
+    count = memsys.process_due_reminders(ltm_system=ltm)
+    return {"processed": count}
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+from typing import Optional, List, Any
+
+router = APIRouter()
+
 class ProspectiveRequest(BaseModel):
     description: str
     trigger_time: Optional[str] = None  # ISO datetime or cron

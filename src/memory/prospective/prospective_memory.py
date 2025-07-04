@@ -27,6 +27,45 @@ except ImportError as e:
     ) from e
 
 class ProspectiveMemorySystem:
+    def process_due_reminders(self, ltm_system=None, now: Optional[datetime] = None) -> int:
+        """
+        Process all due reminders:
+        - Remove them from the prospective memory store
+        - Convert them to LTM entries (if ltm_system is provided)
+        - Include completion status and timestamps in the LTM record
+        Returns the number of reminders processed.
+        """
+        due = self.get_due_reminders(now=now)
+        processed = 0
+        for reminder in due:
+            reminder_id = reminder.get('reminder_id')
+            if not isinstance(reminder_id, str) or not reminder_id:
+                continue
+            # Prepare LTM record
+            ltm_record = {
+                "type": "prospective_memory",
+                "description": reminder.get("description"),
+                "trigger_time": reminder.get("trigger_time"),
+                "created_at": reminder.get("created_at"),
+                "completed": reminder.get("completed", False),
+                "completed_at": reminder.get("completed_at"),
+                "outcome_note": "Action completed" if reminder.get("completed", False) else "No action taken (missed or expired)",
+                "tags": reminder.get("tags", []),
+            }
+            # Remove from prospective memory
+            self.delete(reminder_id)
+            processed += 1
+            # Store in LTM if provided
+            if ltm_system is not None:
+                try:
+                    ltm_system.store(
+                        content=ltm_record,
+                        memory_type="prospective_memory",
+                        tags=ltm_record["tags"]
+                    )
+                except Exception:
+                    continue
+        return processed
     """
     Prospective Memory System using ChromaDB vector store.
     Stores and manages future intentions, reminders, and scheduled tasks persistently.
