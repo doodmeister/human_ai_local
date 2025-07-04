@@ -1,0 +1,407 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.0, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\dev\human_ai_local
+configfile: pytest.ini
+plugins: anyio-4.9.0, langsmith-0.4.4, asyncio-1.0.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 6 items
+
+tests\unit\test_semantic_memory.py FFFEFEFF                              [100%]
+
+=================================== ERRORS ====================================
+__ ERROR at teardown of TestSemanticMemorySystem.test_find_facts_by_subject ___
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_find_facts_by_subject>
+
+    def tearDown(self):
+        """Clean up the temporary storage directory and file."""
+        if os.path.exists(self.test_dir):
+>           shutil.rmtree(self.test_dir)
+
+tests\unit\test_semantic_memory.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:796: in rmtree
+    return _rmtree_unsafe(path, onexc)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:636: in _rmtree_unsafe
+    onexc(os.unlink, fullname, err)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4'
+onexc = <function rmtree.<locals>.onexc at 0x0000022D04C618A0>
+
+    def _rmtree_unsafe(path, onexc):
+        try:
+            with os.scandir(path) as scandir_it:
+                entries = list(scandir_it)
+        except OSError as err:
+            onexc(os.scandir, path, err)
+            entries = []
+        for entry in entries:
+            fullname = entry.path
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+    
+            if is_dir and not entry.is_junction():
+                try:
+                    if entry.is_symlink():
+                        # This can only happen if someone replaces
+                        # a directory with a symlink after the call to
+                        # os.scandir or entry.is_dir above.
+                        raise OSError("Cannot call rmtree on a symbolic link")
+                except OSError as err:
+                    onexc(os.path.islink, fullname, err)
+                    continue
+                _rmtree_unsafe(fullname, onexc)
+            else:
+                try:
+>                   os.unlink(fullname)
+E                   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4\\data_level0.bin'
+
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:634: PermissionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+_ ERROR at teardown of TestSemanticMemorySystem.test_find_facts_by_subject_and_predicate _
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_find_facts_by_subject_and_predicate>
+
+    def tearDown(self):
+        """Clean up the temporary storage directory and file."""
+        if os.path.exists(self.test_dir):
+>           shutil.rmtree(self.test_dir)
+
+tests\unit\test_semantic_memory.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:796: in rmtree
+    return _rmtree_unsafe(path, onexc)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:636: in _rmtree_unsafe
+    onexc(os.unlink, fullname, err)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4'
+onexc = <function rmtree.<locals>.onexc at 0x0000022D03D58B80>
+
+    def _rmtree_unsafe(path, onexc):
+        try:
+            with os.scandir(path) as scandir_it:
+                entries = list(scandir_it)
+        except OSError as err:
+            onexc(os.scandir, path, err)
+            entries = []
+        for entry in entries:
+            fullname = entry.path
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+    
+            if is_dir and not entry.is_junction():
+                try:
+                    if entry.is_symlink():
+                        # This can only happen if someone replaces
+                        # a directory with a symlink after the call to
+                        # os.scandir or entry.is_dir above.
+                        raise OSError("Cannot call rmtree on a symbolic link")
+                except OSError as err:
+                    onexc(os.path.islink, fullname, err)
+                    continue
+                _rmtree_unsafe(fullname, onexc)
+            else:
+                try:
+>                   os.unlink(fullname)
+E                   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4\\data_level0.bin'
+
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:634: PermissionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+================================== FAILURES ===================================
+__________________ TestSemanticMemorySystem.test_delete_fact __________________
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_delete_fact>
+
+    def tearDown(self):
+        """Clean up the temporary storage directory and file."""
+        if os.path.exists(self.test_dir):
+>           shutil.rmtree(self.test_dir)
+
+tests\unit\test_semantic_memory.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:796: in rmtree
+    return _rmtree_unsafe(path, onexc)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:636: in _rmtree_unsafe
+    onexc(os.unlink, fullname, err)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4'
+onexc = <function rmtree.<locals>.onexc at 0x0000022D04C605E0>
+
+    def _rmtree_unsafe(path, onexc):
+        try:
+            with os.scandir(path) as scandir_it:
+                entries = list(scandir_it)
+        except OSError as err:
+            onexc(os.scandir, path, err)
+            entries = []
+        for entry in entries:
+            fullname = entry.path
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+    
+            if is_dir and not entry.is_junction():
+                try:
+                    if entry.is_symlink():
+                        # This can only happen if someone replaces
+                        # a directory with a symlink after the call to
+                        # os.scandir or entry.is_dir above.
+                        raise OSError("Cannot call rmtree on a symbolic link")
+                except OSError as err:
+                    onexc(os.path.islink, fullname, err)
+                    continue
+                _rmtree_unsafe(fullname, onexc)
+            else:
+                try:
+>                   os.unlink(fullname)
+E                   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4\\data_level0.bin'
+
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:634: PermissionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientCreateCollectionEvent: capture() takes 1 positional argument but 3 were given
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event CollectionGetEvent: capture() takes 1 positional argument but 3 were given
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event CollectionDeleteEvent: capture() takes 1 positional argument but 3 were given
+____________ TestSemanticMemorySystem.test_find_facts_by_predicate ____________
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_find_facts_by_predicate>
+
+    def tearDown(self):
+        """Clean up the temporary storage directory and file."""
+        if os.path.exists(self.test_dir):
+>           shutil.rmtree(self.test_dir)
+
+tests\unit\test_semantic_memory.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:796: in rmtree
+    return _rmtree_unsafe(path, onexc)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:636: in _rmtree_unsafe
+    onexc(os.unlink, fullname, err)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4'
+onexc = <function rmtree.<locals>.onexc at 0x0000022D04C61120>
+
+    def _rmtree_unsafe(path, onexc):
+        try:
+            with os.scandir(path) as scandir_it:
+                entries = list(scandir_it)
+        except OSError as err:
+            onexc(os.scandir, path, err)
+            entries = []
+        for entry in entries:
+            fullname = entry.path
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+    
+            if is_dir and not entry.is_junction():
+                try:
+                    if entry.is_symlink():
+                        # This can only happen if someone replaces
+                        # a directory with a symlink after the call to
+                        # os.scandir or entry.is_dir above.
+                        raise OSError("Cannot call rmtree on a symbolic link")
+                except OSError as err:
+                    onexc(os.path.islink, fullname, err)
+                    continue
+                _rmtree_unsafe(fullname, onexc)
+            else:
+                try:
+>                   os.unlink(fullname)
+E                   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4\\data_level0.bin'
+
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:634: PermissionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+_____________ TestSemanticMemorySystem.test_find_facts_by_subject _____________
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_find_facts_by_subject>
+
+    def test_find_facts_by_subject(self):
+        """Test finding facts that match a specific subject."""
+        self.sms.store_fact("Paris", "is_capital_of", "France")
+        self.sms.store_fact("Paris", "has_population", 2141000)
+        self.sms.store_fact("Berlin", "is_capital_of", "Germany")
+    
+        paris_facts = self.sms.find_facts(subject="Paris")
+>       self.assertEqual(len(paris_facts), 2)
+E       AssertionError: 3 != 2
+
+tests\unit\test_semantic_memory.py:38: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+______ TestSemanticMemorySystem.test_find_facts_by_subject_and_predicate ______
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_find_facts_by_subject_and_predicate>
+
+    def test_find_facts_by_subject_and_predicate(self):
+        """Test finding facts that match both a subject and a predicate."""
+        self.sms.store_fact("Paris", "is_capital_of", "France")
+        self.sms.store_fact("Paris", "has_population", 2141000)
+    
+        fact = self.sms.find_facts(subject="Paris", predicate="is_capital_of")
+>       self.assertEqual(len(fact), 1)
+E       AssertionError: 3 != 1
+
+tests\unit\test_semantic_memory.py:59: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+__________________ TestSemanticMemorySystem.test_persistence __________________
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_persistence>
+
+    def tearDown(self):
+        """Clean up the temporary storage directory and file."""
+        if os.path.exists(self.test_dir):
+>           shutil.rmtree(self.test_dir)
+
+tests\unit\test_semantic_memory.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:796: in rmtree
+    return _rmtree_unsafe(path, onexc)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:636: in _rmtree_unsafe
+    onexc(os.unlink, fullname, err)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4'
+onexc = <function rmtree.<locals>.onexc at 0x0000022D04C8ADE0>
+
+    def _rmtree_unsafe(path, onexc):
+        try:
+            with os.scandir(path) as scandir_it:
+                entries = list(scandir_it)
+        except OSError as err:
+            onexc(os.scandir, path, err)
+            entries = []
+        for entry in entries:
+            fullname = entry.path
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+    
+            if is_dir and not entry.is_junction():
+                try:
+                    if entry.is_symlink():
+                        # This can only happen if someone replaces
+                        # a directory with a symlink after the call to
+                        # os.scandir or entry.is_dir above.
+                        raise OSError("Cannot call rmtree on a symbolic link")
+                except OSError as err:
+                    onexc(os.path.islink, fullname, err)
+                    continue
+                _rmtree_unsafe(fullname, onexc)
+            else:
+                try:
+>                   os.unlink(fullname)
+E                   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4\\data_level0.bin'
+
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:634: PermissionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+____________ TestSemanticMemorySystem.test_store_and_retrieve_fact ____________
+
+self = <test_semantic_memory.TestSemanticMemorySystem testMethod=test_store_and_retrieve_fact>
+
+    def tearDown(self):
+        """Clean up the temporary storage directory and file."""
+        if os.path.exists(self.test_dir):
+>           shutil.rmtree(self.test_dir)
+
+tests\unit\test_semantic_memory.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:796: in rmtree
+    return _rmtree_unsafe(path, onexc)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:631: in _rmtree_unsafe
+    _rmtree_unsafe(fullname, onexc)
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:636: in _rmtree_unsafe
+    onexc(os.unlink, fullname, err)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4'
+onexc = <function rmtree.<locals>.onexc at 0x0000022D03D58B80>
+
+    def _rmtree_unsafe(path, onexc):
+        try:
+            with os.scandir(path) as scandir_it:
+                entries = list(scandir_it)
+        except OSError as err:
+            onexc(os.scandir, path, err)
+            entries = []
+        for entry in entries:
+            fullname = entry.path
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+    
+            if is_dir and not entry.is_junction():
+                try:
+                    if entry.is_symlink():
+                        # This can only happen if someone replaces
+                        # a directory with a symlink after the call to
+                        # os.scandir or entry.is_dir above.
+                        raise OSError("Cannot call rmtree on a symbolic link")
+                except OSError as err:
+                    onexc(os.path.islink, fullname, err)
+                    continue
+                _rmtree_unsafe(fullname, onexc)
+            else:
+                try:
+>                   os.unlink(fullname)
+E                   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'temp_test_semantic_memory\\chroma_semantic\\429da409-7da6-42be-a554-f06e951139a4\\data_level0.bin'
+
+C:\Users\kswai\AppData\Local\Programs\Python\Python312\Lib\shutil.py:634: PermissionError
+------------------------------ Captured log call ------------------------------
+ERROR    chromadb.telemetry.product.posthog:posthog.py:61 Failed to send telemetry event ClientStartEvent: capture() takes 1 positional argument but 3 were given
+=========================== short test summary info ===========================
+FAILED tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_delete_fact
+FAILED tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_find_facts_by_predicate
+FAILED tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_find_facts_by_subject
+FAILED tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_find_facts_by_subject_and_predicate
+FAILED tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_persistence
+FAILED tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_store_and_retrieve_fact
+ERROR tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_find_facts_by_subject
+ERROR tests/unit/test_semantic_memory.py::TestSemanticMemorySystem::test_find_facts_by_subject_and_predicate
+======================== 6 failed, 2 errors in 26.36s =========================

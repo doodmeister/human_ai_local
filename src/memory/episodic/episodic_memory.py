@@ -272,8 +272,11 @@ class EpisodicMemorySystem(BaseMemorySystem):
         self.embedding_model = None
         if SENTENCE_TRANSFORMERS_AVAILABLE and SentenceTransformer is not None:
             try:
+                import torch
                 self.embedding_model = SentenceTransformer(embedding_model)
-                logger.info(f"Loaded embedding model: {embedding_model}")
+                if torch.cuda.is_available():
+                    self.embedding_model = self.embedding_model.to("cuda")
+                logger.info(f"Loaded embedding model: {embedding_model} (GPU: {torch.cuda.is_available()})")
             except Exception as e:
                 logger.warning(f"Failed to load embedding model: {e}")
         

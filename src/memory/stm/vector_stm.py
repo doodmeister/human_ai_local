@@ -56,10 +56,13 @@ class VectorShortTermMemory:
         self.max_decay_hours = max_decay_hours
         self.embedding_model: Optional[Any] = None
         
-        # Initialize embedding model (required for vector-only STM)
+        # Initialize embedding model with GPU support if available
         try:
+            import torch
             self.embedding_model = SentenceTransformer(embedding_model)
-            logger.info(f"STM loaded embedding model: {embedding_model}")
+            if torch.cuda.is_available():
+                self.embedding_model = self.embedding_model.to("cuda")
+            logger.info(f"STM loaded embedding model: {embedding_model} (GPU: {torch.cuda.is_available()})")
         except Exception as e:
             logger.error(f"STM failed to load embedding model {embedding_model}: {e}")
             raise RuntimeError(f"Vector STM requires a working embedding model: {e}") from e

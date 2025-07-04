@@ -57,8 +57,11 @@ class VectorLongTermMemory(BaseMemorySystem):
         self.embedding_model = None
         if SENTENCE_TRANSFORMERS_AVAILABLE and SentenceTransformer:
             try:
+                import torch
                 self.embedding_model = SentenceTransformer(embedding_model)
-                logger.info(f"LTM loaded embedding model: {embedding_model}")
+                if torch.cuda.is_available():
+                    self.embedding_model = self.embedding_model.to("cuda")
+                logger.info(f"LTM loaded embedding model: {embedding_model} (GPU: {torch.cuda.is_available()})")
             except Exception as e:
                 logger.warning(f"LTM failed to load embedding model {embedding_model}: {e}")
                 self.embedding_model = None

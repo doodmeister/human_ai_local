@@ -1,116 +1,186 @@
-import json
-import os
+
 from typing import Dict, Any, Optional, List, Sequence
 import uuid
 from ..base import BaseMemorySystem
 
+# Import ChromaDB and embedding model
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError as e:
+    raise ImportError(
+        "sentence-transformers is required for vector semantic memory. "
+        "Install it with: pip install sentence-transformers"
+    ) from e
+
+try:
+    import chromadb
+    from chromadb.config import Settings
+except ImportError as e:
+    raise ImportError(
+        "chromadb is required for vector semantic memory. "
+        "Install it with: pip install chromadb"
+    ) from e
+
+
 class SemanticMemorySystem(BaseMemorySystem):
+
+    def shutdown(self):
+        """Shutdown ChromaDB client to release file handles (for test cleanup)."""
+        # ChromaDB does not have an explicit close, but dereferencing helps
+        self.collection = None
+        self.chroma_client = None
     """
-    Semantic memory system implementing the unified memory interface.
+    Semantic memory system using ChromaDB vector store.
     Stores and retrieves factual knowledge as triples (subject, predicate, object).
     """
 
-    def __init__(self, storage_path: str):
+    def __init__(self, chroma_persist_dir: Optional[str] = None, collection_name: str = "semantic_facts", embedding_model: str = "all-MiniLM-L6-v2"):
         """
-        Initializes the SemanticMemorySystem.
-
+        Initializes the SemanticMemorySystem with ChromaDB.
         Args:
-            storage_path (str): The path to the JSON file for storing the knowledge base.
+            chroma_persist_dir (str): Directory for ChromaDB persistence.
+            collection_name (str): ChromaDB collection name.
+            embedding_model (str): SentenceTransformer model name.
         """
-        self.storage_path = storage_path
-        self.knowledge_base: Dict[str, Dict[str, Any]] = self._load_kb()
+        from pathlib import Path
+        self.chroma_persist_dir = Path(chroma_persist_dir or "data/memory_stores/chroma_semantic")
+        self.collection_name = collection_name
+        self.embedding_model: Optional[Any] = None
 
-    def _load_kb(self) -> Dict[str, Dict[str, Any]]:
-        """Loads the knowledge base from the JSON file."""
-        if os.path.exists(self.storage_path):
-            with open(self.storage_path, 'r', encoding='utf-8') as f:
-                try:
-                    return json.load(f)
-                except json.JSONDecodeError:
-                    return {}
-        return {}
+        # Initialize embedding model with GPU support if available
+        try:
+            import torch
+            self.embedding_model = SentenceTransformer(embedding_model)
+            if torch.cuda.is_available():
+                self.embedding_model = self.embedding_model.to("cuda")
+        except Exception as e:
+            raise RuntimeError(f"SemanticMemorySystem failed to load embedding model: {e}") from e
 
-    def _save_kb(self):
-        """Saves the knowledge base to the JSON file."""
-        os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
-        with open(self.storage_path, 'w', encoding='utf-8') as f:
-            json.dump(self.knowledge_base, f, indent=4)
+        # Initialize ChromaDB
+        self.chroma_client = None
+        self.collection = None
+        self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
+        self._initialize_chromadb()
+
+
+    def _initialize_chromadb(self):
+        """Initialize ChromaDB client and collection for semantic memory."""
+        try:
+            settings = Settings(
+                allow_reset=True,
+                anonymized_telemetry=False,
+                persist_directory=str(self.chroma_persist_dir)
+            )
+            self.chroma_client = chromadb.PersistentClient(
+                path=str(self.chroma_persist_dir),
+                settings=settings
+            )
+            try:
+                self.collection = self.chroma_client.get_collection(name=self.collection_name)
+            except Exception:
+                self.collection = self.chroma_client.create_collection(
+                    name=self.collection_name,
+                    metadata={"description": "Semantic memory facts (triples)"}
+                )
+        except Exception as e:
+            raise RuntimeError(f"SemanticMemorySystem failed to initialize ChromaDB: {e}") from e
+
+
+    def _generate_embedding(self, text: str) -> Optional[List[float]]:
+        if not self.embedding_model or not text:
+            return None
+        try:
+            content_str = str(text)
+            embedding = self.embedding_model.encode(content_str)
+            if hasattr(embedding, 'tolist'):
+                return embedding.tolist()
+            elif hasattr(embedding, '__iter__'):
+                return [float(x) for x in embedding]
+            else:
+                return None
+        except Exception:
+            return None
 
     def store_fact(self, subject: str, predicate: str, object_val: Any) -> str:
         """
-        Stores a new fact in the knowledge base.
-
-        Args:
-            subject (str): The subject of the fact.
-            predicate (str): The predicate or relationship.
-            object_val (Any): The object or value of the fact.
-
-        Returns:
-            str: The unique ID of the stored fact.
+        Stores a new fact in the vector store.
+        Returns the unique fact ID.
         """
+        if not self.collection or not self.embedding_model:
+            return ""
         fact_id = str(uuid.uuid4())
-        self.knowledge_base[fact_id] = {
+        fact_text = f"{subject} {predicate} {object_val}"
+        embedding = self._generate_embedding(fact_text)
+        if not embedding:
+            return ""
+        metadata = {
             "subject": subject.lower(),
             "predicate": predicate.lower(),
-            "object": object_val
+            "object": str(object_val)
         }
-        self._save_kb()
+        self.collection.upsert(
+            ids=[fact_id],
+            embeddings=[embedding],
+            documents=[fact_text],
+            metadatas=[metadata]
+        )
         return fact_id
 
+
     def retrieve_fact(self, fact_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieves a fact by its unique ID.
+        """Retrieves a fact by its unique ID from ChromaDB."""
+        if not self.collection:
+            return None
+        result = self.collection.get(ids=[fact_id])
+        ids = result.get('ids') or []
+        metadatas = result.get('metadatas') or []
+        documents = result.get('documents') or []
+        if ids and len(ids) > 0:
+            meta = dict(metadatas[0]) if metadatas and len(metadatas) > 0 and metadatas[0] is not None else {}
+            doc = str(documents[0]) if documents and len(documents) > 0 and documents[0] is not None else ""
+            meta['fact_id'] = fact_id
+            meta['fact_text'] = doc
+            return meta
+        return None
 
-        Args:
-            fact_id (str): The ID of the fact to retrieve.
-
-        Returns:
-            Optional[Dict[str, Any]]: The fact dictionary or None if not found.
-        """
-        return self.knowledge_base.get(fact_id)
 
     def find_facts(self, subject: Optional[str] = None, predicate: Optional[str] = None, object_val: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
-        Finds all facts matching a given subject, predicate, and/or object.
-
-        Args:
-            subject (Optional[str]): The subject to search for.
-            predicate (Optional[str]): The predicate to search for.
-            object_val (Optional[Any]): The object to search for.
-
-        Returns:
-            List[Dict[str, Any]]: A list of matching facts.
+        Finds all facts matching a given subject, predicate, and/or object in ChromaDB.
+        Normalizes subject and predicate to lowercase, and object_val to string for comparison.
         """
-        results = []
-        
-        # Normalize search terms to lowercase for comparison
-        search_subject = subject.lower() if subject else None
-        search_predicate = predicate.lower() if predicate else None
-        
-        for fact_id, fact in self.knowledge_base.items():
+        if not self.collection:
+            return []
+        # Normalize query values
+        norm_subject = subject.lower() if subject else None
+        norm_predicate = predicate.lower() if predicate else None
+        norm_object = str(object_val) if object_val is not None else None
+        result = self.collection.get()
+        ids = result.get('ids') or []
+        metadatas = result.get('metadatas') or []
+        documents = result.get('documents') or []
+        facts = []
+        for i, fact_id in enumerate(ids):
+            meta = dict(metadatas[i]) if metadatas and len(metadatas) > i and metadatas[i] is not None else {}
+            doc = str(documents[i]) if documents and len(documents) > i and documents[i] is not None else ""
             match = True
-            
-            if search_subject and fact.get("subject") != search_subject:
+            if norm_subject and meta.get("subject") != norm_subject:
                 match = False
-            if search_predicate and fact.get("predicate") != search_predicate:
+            if norm_predicate and meta.get("predicate") != norm_predicate:
                 match = False
-            if object_val is not None and fact.get("object") != object_val:
+            if norm_object is not None and meta.get("object") != norm_object:
                 match = False
-            
             if match:
-                # Include the fact_id in the result
-                result = fact.copy()
-                result["fact_id"] = fact_id
-                results.append(result)
-        
-        return results
+                meta['fact_id'] = fact_id
+                meta['fact_text'] = doc
+                facts.append(meta)
+        return facts
+
 
     def store(self, *args, **kwargs) -> str:
         """
-        Store a new fact (triple) in the knowledge base.
-        Returns the unique fact ID.
+        Store a new fact (triple) in the vector store. Returns the unique fact ID.
         """
-        # Accepts (subject, predicate, object_val) as positional or keyword args
         if args and len(args) == 3:
             subject, predicate, object_val = args
         else:
@@ -121,86 +191,84 @@ class SemanticMemorySystem(BaseMemorySystem):
             raise ValueError("Both subject and predicate are required to store a fact.")
         return self.store_fact(subject, predicate, object_val)
 
+
     def retrieve(self, memory_id: str) -> Optional[dict]:
         """
-        Retrieve a fact by its unique ID (memory_id).
-        Returns the fact dict or None if not found.
+        Retrieve a fact by its unique ID (memory_id) from ChromaDB.
         """
         return self.retrieve_fact(memory_id)
 
+
     def delete(self, memory_id: str) -> bool:
         """
-        Delete a fact by its unique ID (memory_id).
+        Delete a fact by its unique ID (memory_id) from ChromaDB.
         Returns True if deleted, False otherwise.
         """
-        if memory_id in self.knowledge_base:
-            del self.knowledge_base[memory_id]
-            self._save_kb()
+        if not self.collection:
+            return False
+        try:
+            self.collection.delete(ids=[memory_id])
             return True
-        return False
+        except Exception:
+            return False
+
 
     def delete_fact(self, subject: str, predicate: str, object_val: Any) -> bool:
         """
-        Delete a fact from the semantic memory system
-    
-        Args:
-            subject: The subject of the fact
-            predicate: The predicate/relationship
-            object_val: The object value
-    
-        Returns:
-            True if fact was found and deleted, False otherwise
+        Delete a fact from the semantic memory system by triple.
+        Returns True if fact was found and deleted, False otherwise.
         """
-        try:
-            # Find matching facts
-            matching_facts = []
-            for fact_id, fact in self.knowledge_base.items():
-                if (fact["subject"] == subject and 
-                    fact["predicate"] == predicate and 
-                    fact["object"] == object_val):
-                    matching_facts.append(fact_id)
-        
-            # Delete matching facts
-            deleted_count = 0
-            for fact_id in matching_facts:
-                del self.knowledge_base[fact_id]
-                deleted_count += 1
-        
-            # Save changes if any facts were deleted
-            if deleted_count > 0:
-                self._save_kb()
-                return True
-            else:
-                return False
-            
-        except Exception:
-            return False
+        # Find matching facts and delete them
+        facts = self.find_facts(subject, predicate, object_val)
+        deleted = False
+        for fact in facts:
+            fact_id = fact.get('fact_id')
+            if fact_id:
+                self.delete(fact_id)
+                deleted = True
+        return deleted
+
 
     def search(self, query: Optional[str] = None, **kwargs) -> Sequence[dict | tuple]:
         """
         Search for facts. If query is None, use kwargs for subject/predicate/object_val.
         Returns a sequence of matching fact dicts.
         """
+        if not self.collection:
+            return []
         if query:
-            # Text-based search across all fact content
-            results = []
-            query_lower = query.lower()
-            for fact_id, fact in self.knowledge_base.items():
-                subject_match = query_lower in str(fact.get("subject", "")).lower()
-                predicate_match = query_lower in str(fact.get("predicate", "")).lower()
-                object_match = query_lower in str(fact.get("object", "")).lower()
-                if subject_match or predicate_match or object_match:
-                    result = fact.copy()
-                    result["fact_id"] = fact_id
-                    results.append(result)
-            return results
+            # Semantic search using embedding
+            embedding = self._generate_embedding(query)
+            if not embedding:
+                return []
+            results = self.collection.query(
+                query_embeddings=[embedding],
+                n_results=10,
+                include=["documents", "metadatas"]
+            )
+            found = []
+            ids = results.get('ids', [[]])
+            metadatas = results.get('metadatas', [[]])
+            documents = results.get('documents', [[]])
+            if ids and ids[0]:
+                for i, fact_id in enumerate(ids[0]):
+                    meta = dict(metadatas[0][i]) if metadatas and len(metadatas[0]) > i and metadatas[0][i] is not None else {}
+                    doc = str(documents[0][i]) if documents and len(documents[0]) > i and documents[0][i] is not None else ""
+                    meta['fact_id'] = fact_id
+                    meta['fact_text'] = doc
+                    found.append(meta)
+            return found
         else:
             subject = kwargs.get('subject')
             predicate = kwargs.get('predicate')
             object_val = kwargs.get('object_val')
             return self.find_facts(subject, predicate, object_val)
 
+
     def clear(self):
-        """Clears the entire knowledge base (for testing)."""
-        self.knowledge_base = {}
-        self._save_kb()
+        """Clears the entire semantic memory collection (for testing)."""
+        if not self.collection:
+            return
+        result = self.collection.get()
+        if result.get('ids'):
+            self.collection.delete(ids=result['ids'])
