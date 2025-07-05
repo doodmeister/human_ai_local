@@ -39,6 +39,339 @@ class VectorSearchResult:
     distance: float
 
 class VectorLongTermMemory(BaseMemorySystem):
+    def suggest_cross_system_associations(self, external_memories: List[Dict[str, Any]], system_type: str) -> List[Dict[str, Any]]:
+        """Suggest potential associations between LTM and external system memories."""
+        if not self.collection:
+            return []
+        suggestions = []
+        try:
+            result = self.collection.get()
+            for ext_memory in external_memories:
+                ext_id = ext_memory.get("id", "")
+                ext_content = str(ext_memory.get("content", "")).lower()
+                ext_tags = ext_memory.get("tags", [])
+                for i, memory_id in enumerate(result['ids']):
+                    meta = result['metadatas'][i]
+                    doc = result['documents'][i]
+                    ltm_content = str(doc).lower()
+                    similarity_score = 0.0
+                    ext_words = set(ext_content.split())
+                    ltm_words = set(ltm_content.split())
+                    word_overlap = 0
+                    if ext_words and ltm_words:
+                        word_overlap = len(ext_words.intersection(ltm_words))
+                        similarity_score += word_overlap / max(len(ext_words), len(ltm_words))
+                    tag_overlap = len(set(ext_tags).intersection(set(meta.get('tags', '').split(','))))
+                    if tag_overlap > 0:
+                        similarity_score += tag_overlap * 0.3
+                    valence_similarity = 0
+                    if "emotional_valence" in ext_memory:
+                        valence_diff = abs(float(ext_memory["emotional_valence"]) - float(meta.get("emotional_valence", 0.0)))
+                        valence_similarity = 1 - valence_diff
+                        similarity_score += valence_similarity * 0.2
+                    if similarity_score > 0.3:
+                        suggestions.append({
+                            "ltm_memory_id": memory_id,
+                            "external_memory_id": ext_id,
+                            "system_type": system_type,
+                            "confidence": min(similarity_score, 1.0),
+                            "similarity_factors": {
+                                "content_overlap": word_overlap,
+                                "tag_overlap": tag_overlap,
+                                "emotional_similarity": valence_similarity
+                            }
+                        })
+            suggestions.sort(key=lambda x: x["confidence"], reverse=True)
+            return suggestions[:20]
+        except Exception as e:
+            logger.error(f"LTM cross-system association suggestion failed: {e}")
+            return []
+    def get_semantic_clusters(self, min_cluster_size: int = 2) -> Dict[str, List[str]]:
+        """Identify semantic clusters by tags and content keywords."""
+        if not self.collection:
+            return {}
+        try:
+            result = self.collection.get()
+            tag_clusters = {}
+            content_clusters = {}
+            for i, memory_id in enumerate(result['ids']):
+                meta = result['metadatas'][i]
+                tags = meta.get('tags', '').split(',') if meta.get('tags') else []
+                for tag in tags:
+                    if tag:
+                        tag_clusters.setdefault(tag, []).append(memory_id)
+                doc = result['documents'][i]
+                content_words = str(doc).lower().split()
+                keywords = [word for word in content_words if len(word) > 3]
+                for keyword in keywords:
+                    content_clusters.setdefault(keyword, []).append(memory_id)
+            significant_clusters = {}
+            for tag, memory_ids in tag_clusters.items():
+                if len(memory_ids) >= min_cluster_size:
+                    significant_clusters[f"tag:{tag}"] = memory_ids
+            for keyword, memory_ids in content_clusters.items():
+                if len(memory_ids) >= min_cluster_size:
+                    significant_clusters[f"content:{keyword}"] = memory_ids
+            return significant_clusters
+        except Exception as e:
+            logger.error(f"LTM semantic clustering failed: {e}")
+            return {}
+    def decay_memories(self, decay_rate: float = 0.01, half_life_days: float = 30.0, min_importance: float = 0.05, min_confidence: float = 0.1) -> int:
+        """Decay importance and confidence for old, rarely accessed memories in ChromaDB."""
+        if not self.collection:
+            return 0
+        from datetime import datetime
+        now = datetime.now()
+        decayed = 0
+        half_life_seconds = half_life_days * 86400
+        try:
+            result = self.collection.get()
+            for i, memory_id in enumerate(result['ids']):
+                meta = result['metadatas'][i]
+                last_access = meta.get('last_access')
+                if last_access:
+                    seconds_since_access = (now - datetime.fromisoformat(last_access)).total_seconds()
+                else:
+                    seconds_since_access = 0
+                if seconds_since_access > 86400:
+                    decay_factor = 0.5 ** (seconds_since_access / half_life_seconds)
+                    old_importance = float(meta.get('importance', 0.5))
+                    old_confidence = float(meta.get('confidence', 1.0))
+                    new_importance = max(min_importance, old_importance * (1 - decay_rate) * decay_factor)
+                    new_confidence = max(min_confidence, old_confidence * (1 - decay_rate/2) * decay_factor)
+                    if new_importance < old_importance or new_confidence < old_confidence:
+                        meta['importance'] = new_importance
+                        meta['confidence'] = new_confidence
+                        self.collection.update(ids=[memory_id], metadatas=[meta])
+                        decayed += 1
+            logger.info(f"Decayed {decayed} LTM memories (rate={decay_rate}, half_life_days={half_life_days})")
+            return decayed
+        except Exception as e:
+            logger.error(f"LTM decay failed: {e}")
+            return 0
+    def get_memory_health_report(self) -> dict:
+        """Generate a memory health report using ChromaDB metadata."""
+        if not self.collection:
+            return {}
+        try:
+            result = self.collection.get()
+            now = datetime.now()
+            never_accessed = []
+            rarely_accessed = []
+            frequently_accessed = []
+            stale_memories = []
+            low_confidence = []
+            type_distribution = {}
+            for i, memory_id in enumerate(result['ids']):
+                meta = result['metadatas'][i]
+                access_count = float(meta.get('access_count', 0))
+                confidence = float(meta.get('confidence', 1.0))
+                last_access = meta.get('last_access')
+                if last_access:
+                    days_since_access = (now - datetime.fromisoformat(last_access)).days
+                else:
+                    days_since_access = 0
+                if access_count == 0:
+                    never_accessed.append(memory_id)
+                elif access_count < 3:
+                    rarely_accessed.append(memory_id)
+                elif access_count >= 10:
+                    frequently_accessed.append(memory_id)
+                if days_since_access >= 30:
+                    stale_memories.append(memory_id)
+                if confidence < 0.3:
+                    low_confidence.append(memory_id)
+                mtype = meta.get('memory_type', 'unknown')
+                type_distribution[mtype] = type_distribution.get(mtype, 0) + 1
+            total = len(result['ids'])
+            return {
+                "memory_categories": {
+                    "never_accessed": len(never_accessed),
+                    "rarely_accessed": len(rarely_accessed),
+                    "frequently_accessed": len(frequently_accessed),
+                    "stale_memories": len(stale_memories),
+                    "low_confidence": len(low_confidence)
+                },
+                "memory_type_distribution": type_distribution,
+                "potential_issues": {
+                    "high_stale_ratio": len(stale_memories) / max(1, total) > 0.5,
+                    "low_utilization": sum(float(result['metadatas'][i].get('access_count', 0)) for i in range(total)) / max(1, total) < 2,
+                    "confidence_degradation": len(low_confidence) / max(1, total) > 0.3
+                },
+                "recommendations": []
+            }
+        except Exception as e:
+            logger.error(f"LTM health report failed: {e}")
+            return {}
+    def create_cross_system_link(self, ltm_memory_id: str, external_memory_id: str, link_type: str = "association") -> bool:
+        """Create a link between an LTM memory and external system memory (association in metadata)."""
+        if not self.collection:
+            return False
+        rec = self.retrieve(ltm_memory_id)
+        if not rec:
+            return False
+        associations = rec.get("associations", [])
+        if external_memory_id not in associations:
+            associations.append(external_memory_id)
+            meta = rec.copy()
+            meta["associations"] = associations
+            self.collection.update(
+                ids=[ltm_memory_id],
+                metadatas=[meta]
+            )
+            logger.debug(f"Created {link_type} link: LTM {ltm_memory_id} -> {external_memory_id}")
+            return True
+        return False
+
+    def find_cross_system_links(self, external_memory_id: str, system_type: str = "any") -> List[dict]:
+        """Find LTM records linked to memories from other systems (by association or content)."""
+        if not self.collection:
+            return []
+        # Search for associations
+        where = {"associations": {"$in": [external_memory_id]}}
+        results = self.collection.query(
+            query_embeddings=None,
+            n_results=100,
+            where=where,
+            include=["documents", "metadatas"]
+        )
+        matches = []
+        if results['ids'] and results['ids'][0]:
+            for i, memory_id in enumerate(results['ids'][0]):
+                meta = results['metadatas'][0][i]
+                doc = results['documents'][0][i]
+                matches.append({
+                    "id": meta.get("memory_id", memory_id),
+                    "content": doc,
+                    "memory_type": meta.get("memory_type", "episodic"),
+                    "encoding_time": meta.get("encoding_time"),
+                    "last_access": meta.get("last_access"),
+                    "importance": float(meta.get("importance", 0.5)),
+                    "emotional_valence": float(meta.get("emotional_valence", 0.0)),
+                    "source": meta.get("source", "unknown"),
+                    "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
+                    "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
+                })
+        return matches
+    def add_feedback(self, memory_id: str, feedback_type: str, value: Any, comment: Optional[str] = None, user_id: Optional[str] = None):
+        """Add user feedback to a memory record (stored in ChromaDB metadata as JSON list)."""
+        if not self.collection:
+            return
+        rec = self.retrieve(memory_id)
+        if not rec:
+            return
+        feedback = rec.get("feedback", [])
+        from datetime import datetime
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "type": feedback_type,
+            "value": value,
+            "comment": comment,
+            "user_id": user_id
+        }
+        feedback.append(event)
+        # Update memory with new feedback (store as JSON string in metadata)
+        meta = rec.copy()
+        meta["feedback"] = feedback
+        # Re-store with updated metadata
+        self.collection.update(
+            ids=[memory_id],
+            metadatas=[meta]
+        )
+
+    def get_feedback(self, memory_id: str) -> list:
+        """Return all feedback events for a memory."""
+        rec = self.retrieve(memory_id)
+        if not rec:
+            return []
+        return rec.get("feedback", [])
+
+    def get_feedback_summary(self, memory_id: str) -> dict:
+        """Return summary statistics for feedback on a memory."""
+        rec = self.retrieve(memory_id)
+        if not rec:
+            return {}
+        summary = {}
+        for event in rec.get("feedback", []):
+            t = event["type"]
+            summary.setdefault(t, []).append(event["value"])
+        stats = {k: (sum(map(float, v))/len(v) if v else 0) for k, v in summary.items()}
+        stats["count"] = len(rec.get("feedback", []))
+        return stats
+    def search_by_tags(self, tags: List[str], operator: str = "OR") -> List[dict]:
+        """
+        Search memories by tags using ChromaDB metadata filtering.
+        Args:
+            tags: List of tags to search for
+            operator: "OR" (any tag) or "AND" (all tags)
+        Returns:
+            List of matching memory dicts
+        """
+        if not self.collection:
+            return []
+        try:
+            if operator == "OR":
+                where = {"tags": {"$in": tags}}
+            else:  # AND
+                where = {"tags": {"$all": tags}}
+            results = self.collection.query(
+                query_embeddings=None,
+                n_results=100,
+                where=where,
+                include=["documents", "metadatas"]
+            )
+            matches = []
+            if results['ids'] and results['ids'][0]:
+                for i, memory_id in enumerate(results['ids'][0]):
+                    meta = results['metadatas'][0][i]
+                    doc = results['documents'][0][i]
+                    matches.append({
+                        "id": meta.get("memory_id", memory_id),
+                        "content": doc,
+                        "memory_type": meta.get("memory_type", "episodic"),
+                        "encoding_time": meta.get("encoding_time"),
+                        "last_access": meta.get("last_access"),
+                        "importance": float(meta.get("importance", 0.5)),
+                        "emotional_valence": float(meta.get("emotional_valence", 0.0)),
+                        "source": meta.get("source", "unknown"),
+                        "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
+                        "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
+                    })
+            return matches
+        except Exception as e:
+            logger.error(f"LTM tag search failed: {e}")
+            return []
+
+    def get_associations(self, memory_id: str, depth: int = 1) -> List[dict]:
+        """
+        Traverse associations for a memory up to a given depth.
+        Args:
+            memory_id: Starting memory ID
+            depth: Depth of association traversal
+        Returns:
+            List of associated memory dicts
+        """
+        if not self.collection:
+            return []
+        visited = set()
+        to_visit = [(memory_id, 0)]
+        associated = []
+        while to_visit:
+            current_id, current_depth = to_visit.pop(0)
+            if current_id in visited or current_depth > depth:
+                continue
+            visited.add(current_id)
+            if current_depth > 0:
+                rec = self.retrieve(current_id)
+                if rec:
+                    associated.append(rec)
+            # Get associations for this memory
+            rec = self.retrieve(current_id)
+            if rec and rec.get("associations"):
+                for assoc_id in rec["associations"]:
+                    if assoc_id and assoc_id not in visited:
+                        to_visit.append((assoc_id, current_depth + 1))
+        return associated
     """
     Vector-only Long-Term Memory using ChromaDB
     All store, retrieve, and search operations are performed directly on ChromaDB.

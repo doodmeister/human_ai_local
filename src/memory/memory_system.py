@@ -36,7 +36,7 @@ from typing import (
 from weakref import WeakSet
 
 from .stm import ShortTermMemory, VectorShortTermMemory
-from .ltm import LongTermMemory, VectorLongTermMemory
+from .ltm import VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .semantic.semantic_memory import SemanticMemorySystem
 from .prospective.prospective_memory import ProspectiveMemorySystem
@@ -204,7 +204,7 @@ class MemorySystem:
         
         # Memory systems (initialized lazily)
         self._stm: Optional[Union[ShortTermMemory, VectorShortTermMemory]] = None
-        self._ltm: Optional[Union[LongTermMemory, VectorLongTermMemory]] = None
+        self._ltm: Optional[VectorLongTermMemory] = None
         self._episodic: Optional[EpisodicMemorySystem] = None
         self._semantic: Optional[SemanticMemorySystem] = None
         self._prospective: Optional[ProspectiveMemorySystem] = None
@@ -251,7 +251,7 @@ class MemorySystem:
                     embedding_model=self._config.embedding_model
                 )
             else:
-                self._ltm = LongTermMemory(storage_path=self._config.ltm_storage_path)
+                raise MemorySystemError("LTM initialization failed: VectorLTM must be used")
             
             # Initialize Episodic Memory
             self._episodic = EpisodicMemorySystem(
@@ -286,7 +286,7 @@ class MemorySystem:
         return self._stm
     
     @property
-    def ltm(self) -> Union[LongTermMemory, VectorLongTermMemory]:
+    def ltm(self) -> VectorLongTermMemory:
         """Get the LTM system."""
         if self._ltm is None:
             raise MemorySystemError("LTM not initialized")
