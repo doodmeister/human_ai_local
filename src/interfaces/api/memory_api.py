@@ -1,4 +1,16 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request
+"""
+REST API for STM and LTM Memory Systems
+
+Endpoints:
+- POST /memory/{system}/store: Store a new memory (returns memory ID)
+- GET /memory/{system}/retrieve/{memory_id}: Retrieve a memory by ID
+- DELETE /memory/{system}/delete/{memory_id}: Delete a memory by ID
+- POST /memory/{system}/search: Search for memories (by content/tags)
+- POST /memory/{system}/feedback/{memory_id}: Add feedback to a memory (LTM only)
+
+Where {system} is either 'stm' or 'ltm'.
+"""
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Any, Dict, Optional, Union
 from src.core.cognitive_agent import CognitiveAgent

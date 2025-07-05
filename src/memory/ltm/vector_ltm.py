@@ -254,13 +254,22 @@ class VectorLongTermMemory(BaseMemorySystem):
                 })
         return matches
     def add_feedback(self, memory_id: str, feedback_type: str, value: Any, comment: Optional[str] = None, user_id: Optional[str] = None):
-        """Add user feedback to a memory record (stored in ChromaDB metadata as JSON list)."""
+        """Add user feedback to a memory record (stored in ChromaDB metadata as JSON string)."""
         if not self.collection:
             return
         rec = self.retrieve(memory_id)
         if not rec:
             return
+        import json
         feedback = rec.get("feedback", [])
+        # Defensive: always ensure feedback is a list
+        if isinstance(feedback, str):
+            try:
+                feedback = json.loads(feedback)
+            except Exception:
+                feedback = []
+        elif not isinstance(feedback, list):
+            feedback = []
         from datetime import datetime
         event = {
             "timestamp": datetime.now().isoformat(),
@@ -270,10 +279,17 @@ class VectorLongTermMemory(BaseMemorySystem):
             "user_id": user_id
         }
         feedback.append(event)
-        # Update memory with new feedback (store as JSON string in metadata)
+        # Defensive: always store feedback as a JSON string (never as a list or None)
         meta = rec.copy()
-        meta["feedback"] = feedback
-        # Re-store with updated metadata
+        meta["feedback"] = json.dumps(feedback) if feedback else "[]"
+        # Sanitize all metadata fields to allowed types for ChromaDB
+        for key in list(meta.keys()):
+            value = meta[key]
+            if isinstance(value, list):
+                # Convert lists to comma-separated strings (or empty string)
+                meta[key] = ",".join(str(v) for v in value) if value else ""
+            elif not isinstance(value, (str, int, float, bool)) and value is not None:
+                meta[key] = str(value)
         self.collection.update(
             ids=[memory_id],
             metadatas=[meta]
@@ -529,7 +545,7 @@ class VectorLongTermMemory(BaseMemorySystem):
             return False
     
     def retrieve(self, memory_id: str) -> Optional[dict]:
-        """Retrieve memory from ChromaDB only"""
+        """Retrieve memory from ChromaDB only, parse feedback JSON if present."""
         if not self.collection:
             return None
         try:
@@ -537,6 +553,18 @@ class VectorLongTermMemory(BaseMemorySystem):
             if result['ids'] and len(result['ids']) > 0:
                 meta = result['metadatas'][0]
                 doc = result['documents'][0]
+                import json
+                feedback = meta.get("feedback", None)
+                if feedback is not None:
+                    if isinstance(feedback, str):
+                        try:
+                            feedback = json.loads(feedback)
+                        except Exception:
+                            feedback = []
+                    elif not isinstance(feedback, list):
+                        feedback = []
+                else:
+                    feedback = []
                 return {
                     "id": meta.get("memory_id", memory_id),
                     "content": doc,
@@ -547,7 +575,8 @@ class VectorLongTermMemory(BaseMemorySystem):
                     "emotional_valence": float(meta.get("emotional_valence", 0.0)),
                     "source": meta.get("source", "unknown"),
                     "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
-                    "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
+                    "associations": meta.get("associations", "").split(",") if meta.get("associations") else [],
+                    "feedback": feedback
                 }
             return None
         except Exception as e:
