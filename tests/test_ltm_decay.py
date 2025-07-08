@@ -14,8 +14,16 @@ def test_ltm_decay():
     if rec and getattr(ltm, 'collection', None):
         old_time = (datetime.now() - timedelta(days=40)).isoformat()
         rec["last_access"] = old_time
+        # Sanitize metadata: convert lists to comma-separated strings, ensure allowed types
+        meta = rec.copy()
+        for key in list(meta.keys()):
+            v = meta[key]
+            if isinstance(v, list):
+                meta[key] = ",".join(str(x) for x in v) if v else ""
+            elif not isinstance(v, (str, int, float, bool)) and v is not None:
+                meta[key] = str(v)
         if ltm.collection is not None:
-            ltm.collection.update(ids=["decay1"], metadatas=[rec])
+            ltm.collection.update(ids=["decay1"], metadatas=[meta])
     # Decay
     decayed = ltm.decay_memories()
     assert decayed >= 1

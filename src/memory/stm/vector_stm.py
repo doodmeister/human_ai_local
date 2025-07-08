@@ -1,35 +1,111 @@
 """
 Enhanced Short-Term Memory (STM) System with Vector Database Integration
-Implements ChromaDB for semantic memory storage and retrieval while maintaining STM characteristics
+
+This module provides a production-grade implementation of short-term memory using ChromaDB
+for semantic storage and retrieval while maintaining STM characteristics like capacity
+limits, activation-based decay, and LRU eviction.
+
+Key Features:
+- Vector-based semantic storage and retrieval
+- Capacity-limited STM with LRU eviction
+- Activation-based forgetting mechanism
+- Associative retrieval capabilities
+- Comprehensive error handling and logging
+- Type-safe implementation with full validation
+- Performance optimizations and resource management
+
+Author: AI Code Team
+Version: 2.0.0
 """
-from typing import Dict, List, Optional, Any, Tuple, Union
-from dataclasses import dataclass
+
 import json
 import logging
+import threading
+from datetime import datetime
 from pathlib import Path
-import types
+from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 
-# Import required dependencies for vector-only memory
+# Type imports
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer as SentenceTransformerType
+    from chromadb import PersistentClient as ChromaClient
+    from chromadb.config import Settings as ChromaSettings
+else:
+    SentenceTransformerType = None
+    ChromaClient = None
+    ChromaSettings = None
+
+# Third-party imports with proper error handling
 try:
+    import torch
     from sentence_transformers import SentenceTransformer
-except ImportError as e:
-    raise ImportError(
-        "sentence-transformers is required for vector memory systems. "
-        "Install it with: pip install sentence-transformers"
-    ) from e
+    HAS_SENTENCE_TRANSFORMERS = True
+except ImportError:
+    HAS_SENTENCE_TRANSFORMERS = False
+    torch = None
+    SentenceTransformer = None
 
 try:
     import chromadb
     from chromadb.config import Settings
-except ImportError as e:
-    raise ImportError(
-        "chromadb is required for vector memory systems. "
-        "Install it with: pip install chromadb"
-    ) from e
+    HAS_CHROMADB = True
+except ImportError:
+    HAS_CHROMADB = False
+    chromadb = None
+    Settings = None
 
-from .short_term_memory import MemoryItem
+# Local imports - Define MemoryItem here since we removed short_term_memory.py
+@dataclass
+class MemoryItem:
+    """Represents a memory item with metadata"""
+    id: str
+    content: str
+    encoding_time: datetime
+    last_access: datetime
+    access_count: int = 0
+    importance: float = 0.5
+    attention_score: float = 0.0
+    emotional_valence: float = 0.0
+    decay_rate: float = 0.1
+    associations: List[str] = field(default_factory=list)
+    
+    def __post_init__(self):
+        """Validate the memory item after initialization"""
+        if not self.id:
+            raise ValueError("Memory ID cannot be empty")
+        if not isinstance(self.encoding_time, datetime):
+            raise ValueError("Encoding time must be a datetime object")
+        if not isinstance(self.last_access, datetime):
+            raise ValueError("Last access must be a datetime object")
 
+# Configure logging
 logger = logging.getLogger(__name__)
+
+
+class VectorSTMError(Exception):
+    """Base exception for Vector STM operations"""
+    pass
+
+
+class VectorSTMConfigError(VectorSTMError):
+    """Configuration-related errors"""
+    pass
+
+
+class VectorSTMStorageError(VectorSTMError):
+    """Storage operation errors"""
+    pass
+
+
+class VectorSTMRetrievalError(VectorSTMError):
+    """Retrieval operation errors"""
+    pass
+
 
 @dataclass
 class VectorMemoryResult:
@@ -39,107 +115,386 @@ class VectorMemoryResult:
     relevance_score: float
     distance: float = 0.0
 
-class VectorShortTermMemory:
-    """
-    Short-Term Memory using only ChromaDB vector store (no flat file or in-memory fallback).
-    All store, retrieve, and search operations are performed directly on ChromaDB.
-    """
-    def __init__(
-        self,
-        chroma_persist_dir: Optional[str] = None,
-        collection_name: str = "stm_memories",
-        embedding_model: str = "all-MiniLM-L6-v2",
-        max_decay_hours: int = 1
-    ):
-        self.chroma_persist_dir = Path(chroma_persist_dir or "data/memory_stores/chroma_stm")
-        self.collection_name = collection_name
-        self.max_decay_hours = max_decay_hours
-        self.embedding_model: Optional[Any] = None
-        
-        # Initialize embedding model with GPU support if available
-        try:
-            import torch
-            self.embedding_model = SentenceTransformer(embedding_model)
-            if torch.cuda.is_available():
-                self.embedding_model = self.embedding_model.to("cuda")
-            logger.info(f"STM loaded embedding model: {embedding_model} (GPU: {torch.cuda.is_available()})")
-        except Exception as e:
-            logger.error(f"STM failed to load embedding model {embedding_model}: {e}")
-            raise RuntimeError(f"Vector STM requires a working embedding model: {e}") from e
-        
-        # Initialize ChromaDB (required for vector-only STM)
-        self.chroma_client = None
-        self.collection = None
-        self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
-        self._initialize_chromadb()
-        
-        logger.info(f"Vector STM initialized (vector-only, no fallback)")
+
+@dataclass
+class STMConfiguration:
+    """Configuration for Vector STM system"""
+    chroma_persist_dir: Optional[str] = None
+    collection_name: str = "stm_memories"
+    embedding_model: str = "all-MiniLM-L6-v2"
+    max_decay_hours: int = 1
+    capacity: int = 7
+    min_activation_threshold: float = 0.2
+    decay_rate: float = 0.1
+    enable_gpu: bool = True
+    max_concurrent_operations: int = 4
+    connection_timeout: int = 30
+    retry_attempts: int = 3
     
-    def _initialize_chromadb(self):
-        """Initialize ChromaDB client and collection for STM"""
+    def __post_init__(self):
+        """Validate configuration parameters"""
+        if self.capacity <= 0:
+            raise VectorSTMConfigError("Capacity must be positive")
+        if self.max_decay_hours <= 0:
+            raise VectorSTMConfigError("Max decay hours must be positive")
+        if not (0.0 <= self.min_activation_threshold <= 1.0):
+            raise VectorSTMConfigError("Min activation threshold must be between 0 and 1")
+        if not (0.0 <= self.decay_rate <= 1.0):
+            raise VectorSTMConfigError("Decay rate must be between 0 and 1")
+
+
+class EmbeddingManager:
+    """Manages embedding model lifecycle and operations"""
+    
+    def __init__(self, model_name: str, enable_gpu: bool = True):
+        self.model_name = model_name
+        self.enable_gpu = enable_gpu
+        self._model: Optional[Any] = None
+        self._lock = threading.Lock()
+        self._device = None
+        self._initialize_model()
+    
+    def _initialize_model(self):
+        """Initialize the embedding model with error handling"""
+        if not HAS_SENTENCE_TRANSFORMERS:
+            raise VectorSTMConfigError(
+                "sentence-transformers is required for vector memory systems. "
+                "Install it with: pip install sentence-transformers"
+            )
+        
         try:
-            # Build settings for ChromaDB
+            # Import at runtime to avoid type checking issues
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer(self.model_name)
+            
+            # Configure device
+            if self.enable_gpu and torch and torch.cuda.is_available():
+                self._device = "cuda"
+                self._model = self._model.to(self._device)
+                logger.info(f"Embedding model '{self.model_name}' loaded on GPU")
+            else:
+                self._device = "cpu"
+                logger.info(f"Embedding model '{self.model_name}' loaded on CPU")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize embedding model '{self.model_name}': {e}")
+            raise VectorSTMConfigError(f"Failed to initialize embedding model: {e}") from e
+    
+    def encode(self, text: str) -> Optional[List[float]]:
+        """Generate embedding for text with error handling"""
+        if not self._model or not text:
+            return None
+        
+        try:
+            with self._lock:
+                embedding = self._model.encode(text.strip())
+                
+                if hasattr(embedding, 'tolist'):
+                    return embedding.tolist()
+                elif hasattr(embedding, '__iter__'):
+                    return [float(x) for x in embedding]
+                else:
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Failed to generate embedding for text: {e}")
+            return None
+    
+    def get_device(self) -> str:
+        """Get the device the model is running on"""
+        return self._device or "cpu"
+    
+    def get_model_name(self) -> str:
+        """Get the model name"""
+        return self.model_name
+
+
+class ChromaDBManager:
+    """Manages ChromaDB client and collection operations"""
+    
+    def __init__(self, persist_dir: Path, collection_name: str, timeout: int = 30):
+        self.persist_dir = persist_dir
+        self.collection_name = collection_name
+        self.timeout = timeout
+        self._client = None
+        self._collection = None
+        self._lock = threading.Lock()
+        self._initialize_client()
+    
+    def _initialize_client(self):
+        """Initialize ChromaDB client and collection"""
+        if not HAS_CHROMADB:
+            raise VectorSTMConfigError(
+                "chromadb is required for vector memory systems. "
+                "Install it with: pip install chromadb"
+            )
+        
+        try:
+            # Ensure directory exists
+            self.persist_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Import at runtime to avoid type checking issues
+            import chromadb
+            from chromadb.config import Settings
+            
+            # Configure ChromaDB settings
             settings = Settings(
                 allow_reset=True,
                 anonymized_telemetry=False,
-                persist_directory=str(self.chroma_persist_dir)
+                persist_directory=str(self.persist_dir)
             )
             
             # Initialize persistent client
-            self.chroma_client = chromadb.PersistentClient(
-                path=str(self.chroma_persist_dir),
+            self._client = chromadb.PersistentClient(
+                path=str(self.persist_dir),
                 settings=settings
             )
             
             # Get or create collection
-            try:
-                self.collection = self.chroma_client.get_collection(name=self.collection_name)
-                logger.debug(f"STM using existing ChromaDB collection: {self.collection_name}")
-            except Exception:
-                # Create new collection
-                self.collection = self.chroma_client.create_collection(
-                    name=self.collection_name,
-                    metadata={"description": "Short-term memory vector storage"}
-                )
-                logger.info(f"STM created new ChromaDB collection: {self.collection_name}")
+            self._initialize_collection()
             
         except Exception as e:
-            logger.error(f"STM failed to initialize ChromaDB: {e}")
-            raise RuntimeError(f"Vector STM requires ChromaDB to be properly initialized: {e}") from e
+            logger.error(f"Failed to initialize ChromaDB: {e}")
+            raise VectorSTMConfigError(f"Failed to initialize ChromaDB: {e}") from e
     
-    def _generate_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding for text content"""
-        if not self.embedding_model or not text:
-            return None
+    def _initialize_collection(self):
+        """Initialize or get existing collection"""
+        if not self._client:
+            raise VectorSTMConfigError("ChromaDB client not initialized")
+            
+        try:
+            self._collection = self._client.get_collection(name=self.collection_name)
+            logger.debug(f"Using existing ChromaDB collection: {self.collection_name}")
+        except Exception:
+            # Create new collection
+            self._collection = self._client.create_collection(
+                name=self.collection_name,
+                metadata={"description": "Short-term memory vector storage"}
+            )
+            logger.info(f"Created new ChromaDB collection: {self.collection_name}")
+    
+    @contextmanager
+    def get_collection(self):
+        """Context manager for collection operations"""
+        with self._lock:
+            if not self._collection:
+                raise VectorSTMStorageError("Collection not initialized")
+            yield self._collection
+    
+    def reset_collection(self):
+        """Reset the collection (for testing purposes)"""
+        with self._lock:
+            if self._client and self._collection:
+                try:
+                    self._client.delete_collection(name=self.collection_name)
+                    self._initialize_collection()
+                except Exception as e:
+                    logger.error(f"Failed to reset collection: {e}")
+                    raise VectorSTMStorageError(f"Failed to reset collection: {e}") from e
+
+
+class MetadataValidator:
+    """Validates and sanitizes metadata for ChromaDB storage"""
+    
+    @staticmethod
+    def validate_memory_id(memory_id: str) -> str:
+        """Validate and sanitize memory ID"""
+        if not memory_id or not isinstance(memory_id, str):
+            raise ValueError("Memory ID must be a non-empty string")
+        
+        # Remove invalid characters and limit length
+        sanitized = ''.join(c for c in memory_id if c.isalnum() or c in '-_')
+        if len(sanitized) > 255:
+            sanitized = sanitized[:255]
+        
+        if not sanitized:
+            raise ValueError("Memory ID contains no valid characters")
+        
+        return sanitized
+    
+    @staticmethod
+    def validate_content(content: Any) -> str:
+        """Validate and convert content to string"""
+        if content is None:
+            return ""
+        
+        if isinstance(content, str):
+            return content.strip()
+        elif isinstance(content, dict):
+            return json.dumps(content, default=str, ensure_ascii=False)
+        else:
+            return str(content).strip()
+    
+    @staticmethod
+    def validate_numeric_field(value: Any, field_name: str, min_val: float = 0.0, max_val: float = 1.0) -> float:
+        """Validate numeric fields with bounds checking"""
+        try:
+            num_val = float(value) if value is not None else 0.0
+            return max(min_val, min(max_val, num_val))
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid {field_name} value: {value}, using default 0.0")
+            return 0.0
+    
+    @staticmethod
+    def validate_int_field(value: Any, field_name: str, default: int = 0) -> int:
+        """Validate integer fields with safe conversion"""
+        try:
+            if value is None:
+                return default
+            return int(value)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid {field_name} value: {value}, using default {default}")
+            return default
+    
+    @staticmethod
+    def validate_associations(associations: Any) -> List[str]:
+        """Validate and sanitize associations"""
+        if not associations:
+            return []
+        
+        if isinstance(associations, str):
+            return [item.strip() for item in associations.split(',') if item.strip()]
+        elif isinstance(associations, list):
+            return [str(item).strip() for item in associations if item]
+        else:
+            return []
+    
+    @staticmethod
+    def safe_metadata_to_dict(metadata: Any) -> Dict[str, Any]:
+        """Safely convert ChromaDB metadata to Dict[str, Any]"""
+        if metadata is None:
+            return {}
+        
+        if isinstance(metadata, dict):
+            return dict(metadata)
         
         try:
-            content_str = str(text)
-            embedding = self.embedding_model.encode(content_str)
-            if hasattr(embedding, 'tolist'):
-                return embedding.tolist()
-            elif hasattr(embedding, '__iter__'):
-                return [float(x) for x in embedding]
+            # Handle ChromaDB Metadata type
+            if hasattr(metadata, 'items'):
+                return {str(k): v for k, v in metadata.items()}
+            elif hasattr(metadata, '__dict__'):
+                return dict(metadata.__dict__)
             else:
-                return None
+                return {}
         except Exception as e:
-            logger.error(f"STM failed to generate embedding: {e}")
-            return None
+            logger.warning(f"Failed to convert metadata to dict: {e}")
+            return {}
     
-    def _content_to_text(self, content: Any) -> str:
-        """Convert content to searchable text"""
-        if isinstance(content, str):
-            return content
-        elif isinstance(content, dict):
-            return json.dumps(content, default=str)
-        else:
-            return str(content)
+    @staticmethod
+    def safe_list_access(items: Any, index: int, default: Any = None) -> Any:
+        """Safely access list items with None checking"""
+        if items is None:
+            return default
+        
+        try:
+            if hasattr(items, '__getitem__') and hasattr(items, '__len__'):
+                if 0 <= index < len(items):
+                    return items[index]
+            return default
+        except (IndexError, TypeError):
+            return default
+
+
+class VectorShortTermMemory:
+    """
+    Production-grade Short-Term Memory implementation using ChromaDB vector store.
     
-    def _safe_metadata(self, item: MemoryItem) -> Dict[str, Any]:
+    This implementation provides:
+    - Vector-based semantic storage and retrieval
+    - Capacity-limited STM with LRU eviction
+    - Activation-based forgetting mechanism
+    - Associative retrieval capabilities
+    - Comprehensive error handling and logging
+    - Type-safe implementation with full validation
+    - Performance optimizations and resource management
+    """
+    
+    def __init__(self, config: Optional[STMConfiguration] = None):
+        """
+        Initialize Vector STM with configuration.
+        
+        Args:
+            config: STM configuration object. If None, uses default configuration.
+        """
+        self.config = config or STMConfiguration()
+        self._validate_dependencies()
+        
+        # Initialize components
+        self.persist_dir = Path(self.config.chroma_persist_dir or "data/memory_stores/chroma_stm")
+        self.embedding_manager = EmbeddingManager(
+            self.config.embedding_model,
+            self.config.enable_gpu
+        )
+        self.chroma_manager = ChromaDBManager(
+            self.persist_dir,
+            self.config.collection_name,
+            self.config.connection_timeout
+        )
+        
+        # Thread pool for concurrent operations
+        self.executor = ThreadPoolExecutor(max_workers=self.config.max_concurrent_operations)
+        
+        # Performance metrics
+        self._operation_count = 0
+        self._error_count = 0
+        
+        logger.info(f"Vector STM initialized successfully (capacity={self.config.capacity})")
+    
+    def _validate_dependencies(self):
+        """Validate that required dependencies are available"""
+        if not HAS_SENTENCE_TRANSFORMERS:
+            raise VectorSTMConfigError(
+                "sentence-transformers is required. Install with: pip install sentence-transformers"
+            )
+        
+        if not HAS_CHROMADB:
+            raise VectorSTMConfigError(
+                "chromadb is required. Install with: pip install chromadb"
+            )
+    
+    def _safe_metadata_to_memory_item(self, memory_id: str, metadata: Dict[str, Any], content: str = "") -> MemoryItem:
+        """Convert ChromaDB metadata to MemoryItem with comprehensive validation"""
+        try:
+            # Handle datetime fields with validation
+            now = datetime.now()
+            
+            encoding_time = now
+            if metadata.get('encoding_time'):
+                try:
+                    encoding_time = datetime.fromisoformat(str(metadata['encoding_time']))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid encoding_time in metadata: {e}")
+            
+            last_access = encoding_time
+            if metadata.get('last_access'):
+                try:
+                    last_access = datetime.fromisoformat(str(metadata['last_access']))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid last_access in metadata: {e}")
+            
+            return MemoryItem(
+                id=MetadataValidator.validate_memory_id(metadata.get('memory_id', memory_id)),
+                content=content or MetadataValidator.validate_content(metadata.get('content', '')),
+                encoding_time=encoding_time,
+                last_access=last_access,
+                access_count=max(0, int(metadata.get('access_count', 0))),
+                importance=MetadataValidator.validate_numeric_field(metadata.get('importance', 0.5), 'importance'),
+                attention_score=MetadataValidator.validate_numeric_field(metadata.get('attention_score', 0.0), 'attention_score'),
+                emotional_valence=MetadataValidator.validate_numeric_field(metadata.get('emotional_valence', 0.0), 'emotional_valence', -1.0, 1.0),
+                decay_rate=MetadataValidator.validate_numeric_field(metadata.get('decay_rate', self.config.decay_rate), 'decay_rate'),
+                associations=MetadataValidator.validate_associations(metadata.get('associations'))
+            )
+        except Exception as e:
+            logger.error(f"Failed to convert metadata to MemoryItem: {e}")
+            raise VectorSTMRetrievalError(f"Failed to convert metadata: {e}") from e
+    
+    def _memory_item_to_metadata(self, item: MemoryItem) -> Dict[str, Any]:
         """Convert MemoryItem to ChromaDB-safe metadata"""
         return {
             "memory_id": item.id,
+            "content": item.content,
             "encoding_time": item.encoding_time.isoformat(),
-            "last_access": item.last_access.isoformat(), 
+            "last_access": item.last_access.isoformat(),
             "access_count": int(item.access_count),
             "importance": float(item.importance),
             "attention_score": float(item.attention_score),
@@ -148,76 +503,93 @@ class VectorShortTermMemory:
             "associations": ",".join(item.associations) if item.associations else ""
         }
     
-    def _safe_str(self, value: Any, default: str = "") -> str:
-        """Safely convert value to string"""
-        if value is None:
-            return default
-        return str(value)
-    
-    def _safe_int(self, value: Any, default: int = 0) -> int:
-        """Safely convert value to int"""
-        if value is None:
-            return default
+    def _calculate_activation(self, metadata: Dict[str, Any]) -> float:
+        """Calculate activation score based on recency, frequency, and salience"""
         try:
-            return int(value)
-        except (ValueError, TypeError):
-            return default
+            now = datetime.now()
+            
+            # Parse timestamps safely
+            encoding_time = now
+            if metadata.get('encoding_time'):
+                try:
+                    encoding_time = datetime.fromisoformat(str(metadata['encoding_time']))
+                except (ValueError, TypeError):
+                    pass
+            
+            # Calculate recency component
+            age_hours = (now - encoding_time).total_seconds() / 3600
+            decay_rate = MetadataValidator.validate_numeric_field(metadata.get('decay_rate', self.config.decay_rate), 'decay_rate')
+            recency = max(0.0, 1.0 - (age_hours * decay_rate))
+            
+            # Calculate frequency component
+            access_count = max(0, int(metadata.get('access_count', 0)))
+            frequency = min(1.0, access_count / 10.0)
+            
+            # Calculate salience component
+            importance = MetadataValidator.validate_numeric_field(metadata.get('importance', 0.5), 'importance')
+            attention = MetadataValidator.validate_numeric_field(metadata.get('attention_score', 0.0), 'attention_score')
+            salience = (importance + attention) / 2.0
+            
+            # Weighted combination
+            activation = (recency * 0.4) + (frequency * 0.3) + (salience * 0.3)
+            
+            return max(0.0, min(1.0, activation))
+        except Exception as e:
+            logger.error(f"Failed to calculate activation: {e}")
+            return 0.0
     
-    def _safe_float(self, value: Any, default: float = 0.0) -> float:
-        """Safely convert value to float"""
-        if value is None:
-            return default
+    def _enforce_capacity_limit(self) -> List[str]:
+        """Enforce capacity limit by removing least recently used items"""
+        evicted_ids = []
+        
         try:
-            return float(value)
-        except (ValueError, TypeError):
-            return default
-    
-    def _safe_associations(self, value: Any) -> List[str]:
-        """Safely convert associations value to list of strings"""
-        if value is None or value == "":
-            return []
-        if isinstance(value, list):
-            return [str(item) for item in value if item]
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(',') if item.strip()]
-        return []
-    
-    def _metadata_to_memory_item(self, memory_id: str, meta: Any, content: str = "") -> MemoryItem:
-        """Convert ChromaDB metadata to MemoryItem with type safety"""
-        from datetime import datetime
-        
-        # Convert meta to dict safely
-        if not isinstance(meta, dict):
-            meta = {}
-        
-        # Handle datetime fields safely
-        encoding_time = datetime.now()
-        last_access = datetime.now()
-        
-        if meta.get('encoding_time'):
-            try:
-                encoding_time = datetime.fromisoformat(self._safe_str(meta['encoding_time']))
-            except (ValueError, TypeError):
-                pass
+            with self.chroma_manager.get_collection() as collection:
+                result = collection.get()
                 
-        if meta.get('last_access'):
-            try:
-                last_access = datetime.fromisoformat(self._safe_str(meta['last_access']))
-            except (ValueError, TypeError):
-                pass
+                if not result.get('ids'):
+                    return evicted_ids
+                
+                current_count = len(result['ids'])
+                
+                if current_count < self.config.capacity:
+                    return evicted_ids
+                
+                # Find LRU items to evict
+                items_to_evict = current_count - self.config.capacity + 1
+                
+                # Sort by last_access timestamp (oldest first)
+                items_with_access = []
+                for i, memory_id in enumerate(result['ids']):
+                    metadatas = result.get('metadatas', [])
+                    if metadatas and i < len(metadatas):
+                        metadata = MetadataValidator.safe_metadata_to_dict(metadatas[i])
+                    else:
+                        metadata = {}
+                    
+                    try:
+                        last_access_str = metadata.get('last_access', datetime.now().isoformat())
+                        last_access = datetime.fromisoformat(str(last_access_str))
+                    except (ValueError, TypeError):
+                        last_access = datetime.now()
+                    
+                    items_with_access.append((memory_id, last_access))
+                
+                # Sort by last_access (oldest first)
+                items_with_access.sort(key=lambda x: x[1])
+                
+                # Evict oldest items
+                for memory_id, _ in items_with_access[:items_to_evict]:
+                    evicted_ids.append(memory_id)
+                
+                if evicted_ids:
+                    collection.delete(ids=evicted_ids)
+                    logger.info(f"Evicted {len(evicted_ids)} items due to capacity limit")
+                
+        except Exception as e:
+            logger.error(f"Failed to enforce capacity limit: {e}")
+            raise VectorSTMStorageError(f"Failed to enforce capacity limit: {e}") from e
         
-        return MemoryItem(
-            id=self._safe_str(meta.get('memory_id', memory_id)),
-            content=content or self._safe_str(meta.get('content', '')),
-            encoding_time=encoding_time,
-            last_access=last_access,
-            access_count=self._safe_int(meta.get('access_count', 0)),
-            importance=self._safe_float(meta.get('importance', 0.5)),
-            attention_score=self._safe_float(meta.get('attention_score', 0.0)),
-            emotional_valence=self._safe_float(meta.get('emotional_valence', 0.0)),
-            decay_rate=self._safe_float(meta.get('decay_rate', 0.1)),
-            associations=self._safe_associations(meta.get('associations'))
-        )
+        return evicted_ids
     
     def store(
         self,
@@ -229,43 +601,144 @@ class VectorShortTermMemory:
         associations: Optional[List[str]] = None
     ) -> bool:
         """
-        Store new item in STM (vector store only)
+        Store a new memory item in the vector STM.
+        
+        Args:
+            memory_id: Unique identifier for the memory
+            content: Content to store
+            importance: Importance score (0.0-1.0)
+            attention_score: Attention score (0.0-1.0)
+            emotional_valence: Emotional valence (-1.0-1.0)
+            associations: List of associated terms
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
-        if not self.collection or not self.embedding_model:
-            logger.error("ChromaDB or embedding model not available for STM store.")
-            return False
         try:
-            from datetime import datetime
-            text_content = self._content_to_text(content)
-            embedding = self._generate_embedding(text_content)
-            if not embedding:
-                logger.error("Failed to generate embedding for STM store.")
+            # Validate inputs
+            memory_id = MetadataValidator.validate_memory_id(memory_id)
+            content_str = MetadataValidator.validate_content(content)
+            
+            if not content_str:
+                logger.warning(f"Empty content for memory {memory_id}")
                 return False
             
-            # Store comprehensive metadata
+            # Generate embedding
+            embedding = self.embedding_manager.encode(content_str)
+            if not embedding:
+                logger.error(f"Failed to generate embedding for memory {memory_id}")
+                return False
+            
+            # Enforce capacity limit before storing
+            self._enforce_capacity_limit()
+            
+            # Prepare metadata
             now = datetime.now()
+            
+            # Check if memory already exists to preserve access count
+            access_count = 0
+            try:
+                with self.chroma_manager.get_collection() as collection:
+                    existing = collection.get(ids=[memory_id])
+                    if existing.get('ids') and existing.get('metadatas'):
+                        metadatas = existing.get('metadatas', [])
+                        existing_meta = MetadataValidator.safe_metadata_to_dict(
+                            MetadataValidator.safe_list_access(metadatas, 0, {})
+                        )
+                        access_count = MetadataValidator.validate_int_field(
+                            existing_meta.get('access_count', 0), 'access_count', 0
+                        )
+            except Exception:
+                pass  # New memory, access_count stays 0
+            
             metadata = {
                 "memory_id": memory_id,
-                "content": str(content),  # Store content in metadata too
+                "content": content_str,
                 "encoding_time": now.isoformat(),
                 "last_access": now.isoformat(),
-                "access_count": 0,
-                "importance": float(importance),
-                "attention_score": float(attention_score),
-                "emotional_valence": float(emotional_valence),
-                "associations": ",".join(associations) if associations else ""
+                "access_count": access_count,
+                "importance": MetadataValidator.validate_numeric_field(importance, 'importance'),
+                "attention_score": MetadataValidator.validate_numeric_field(attention_score, 'attention_score'),
+                "emotional_valence": MetadataValidator.validate_numeric_field(emotional_valence, 'emotional_valence', -1.0, 1.0),
+                "decay_rate": self.config.decay_rate,
+                "associations": ",".join(MetadataValidator.validate_associations(associations))
             }
-            self.collection.upsert(
-                ids=[memory_id],
-                embeddings=[embedding],
-                documents=[text_content],
-                metadatas=[metadata]
-            )
-            logger.debug(f"STM stored {memory_id} in vector database")
+            
+            # Store in ChromaDB
+            with self.chroma_manager.get_collection() as collection:
+                collection.upsert(
+                    ids=[memory_id],
+                    embeddings=[embedding],
+                    documents=[content_str],
+                    metadatas=[metadata]
+                )
+            
+            self._operation_count += 1
+            logger.debug(f"Successfully stored memory {memory_id}")
             return True
+            
         except Exception as e:
-            logger.error(f"STM failed to store {memory_id} in vector database: {e}")
+            self._error_count += 1
+            logger.error(f"Failed to store memory {memory_id}: {e}")
             return False
+    
+    def retrieve(self, memory_id: str) -> Optional[MemoryItem]:
+        """
+        Retrieve a specific memory by ID and update access tracking.
+        
+        Args:
+            memory_id: Memory identifier
+            
+        Returns:
+            MemoryItem if found, None otherwise
+        """
+        try:
+            memory_id = MetadataValidator.validate_memory_id(memory_id)
+            
+            with self.chroma_manager.get_collection() as collection:
+                result = collection.get(ids=[memory_id])
+                
+                if not result.get('ids'):
+                    return None
+                
+                # Get metadata and content
+                metadatas = result.get('metadatas', [])
+                documents = result.get('documents', [])
+                
+                metadata = MetadataValidator.safe_metadata_to_dict(
+                    MetadataValidator.safe_list_access(metadatas, 0, {})
+                )
+                content = MetadataValidator.safe_list_access(documents, 0, "")
+                
+                # Update access tracking
+                now = datetime.now()
+                access_count = MetadataValidator.validate_int_field(
+                    metadata.get('access_count', 0), 'access_count', 0
+                ) + 1
+                
+                metadata['last_access'] = now.isoformat()
+                metadata['access_count'] = access_count
+                
+                # Re-upsert to update metadata
+                embedding = self.embedding_manager.encode(content)
+                if embedding:
+                    collection.upsert(
+                        ids=[memory_id],
+                        embeddings=[embedding],
+                        documents=[content],
+                        metadatas=[metadata]
+                    )
+                
+                # Convert to MemoryItem
+                memory_item = self._safe_metadata_to_memory_item(memory_id, metadata, content)
+                
+                self._operation_count += 1
+                return memory_item
+                
+        except Exception as e:
+            self._error_count += 1
+            logger.error(f"Failed to retrieve memory {memory_id}: {e}")
+            return None
     
     def search_semantic(
         self,
@@ -274,65 +747,152 @@ class VectorShortTermMemory:
         min_similarity: float = 0.3
     ) -> List[VectorMemoryResult]:
         """
-        Semantic search in STM using vector similarity (ChromaDB only)
+        Perform semantic search using vector similarity.
+        
+        Args:
+            query: Search query
+            max_results: Maximum number of results
+            min_similarity: Minimum similarity threshold
+            
+        Returns:
+            List of VectorMemoryResult objects
         """
-        if not self.collection or not self.embedding_model or not query:
-            return []
         try:
-            query_embedding = self._generate_embedding(query)
-            if not query_embedding:
+            if not query.strip():
                 return []
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=min(max_results * 2, 50),
-                include=["documents", "distances", "metadatas"]
-            )
+            
+            # Generate query embedding
+            query_embedding = self.embedding_manager.encode(query.strip())
+            if not query_embedding:
+                logger.warning(f"Failed to generate embedding for query: {query}")
+                return []
+            
+            # Search in ChromaDB
+            with self.chroma_manager.get_collection() as collection:
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=min(max_results * 2, 50),  # Get more results for filtering
+                    include=["documents", "distances", "metadatas"]
+                )
+            
             vector_results = []
             
-            # Check if we have valid results
-            if (results.get('ids') and results['ids'] and len(results['ids'][0]) > 0 and
+            # Process results
+            if (results.get('ids') and results['ids'] and 
                 results.get('distances') and results.get('metadatas') and results.get('documents')):
                 
                 for i, memory_id in enumerate(results['ids'][0]):
-                    # Safely get distance
-                    distance = 0.0
-                    if results['distances'] and len(results['distances'][0]) > i:
-                        distance = float(results['distances'][0][i])
-                    
-                    similarity = max(0.0, 1.0 - distance)
-                    if similarity >= min_similarity:
-                        # Safely get metadata and content
-                        meta = {}
-                        if results['metadatas'] and len(results['metadatas'][0]) > i:
-                            meta = results['metadatas'][0][i] or {}
+                    try:
+                        # Calculate similarity from distance
+                        distances = results.get('distances', [])
+                        distance = float(MetadataValidator.safe_list_access(
+                            MetadataValidator.safe_list_access(distances, 0, []), i, 1.0))
+                        similarity = max(0.0, 1.0 - distance)
                         
-                        content = ""
-                        if results['documents'] and len(results['documents'][0]) > i:
-                            content = str(results['documents'][0][i] or "")
-                        
-                        # Use safe metadata conversion
-                        item = self._metadata_to_memory_item(memory_id, meta, content)
-                        vector_results.append(VectorMemoryResult(
-                            item=item,
-                            similarity_score=similarity,
-                            relevance_score=similarity,
-                            distance=distance
-                        ))
+                        if similarity >= min_similarity:
+                            # Get metadata and content
+                            metadatas = results.get('metadatas', [])
+                            documents = results.get('documents', [])
+                            
+                            metadata = MetadataValidator.safe_metadata_to_dict(
+                                MetadataValidator.safe_list_access(
+                                    MetadataValidator.safe_list_access(metadatas, 0, []), i, {})
+                            )
+                            content = MetadataValidator.safe_list_access(
+                                MetadataValidator.safe_list_access(documents, 0, []), i, "")
+                            
+                            # Convert to MemoryItem
+                            item = self._safe_metadata_to_memory_item(memory_id, metadata, content)
+                            
+                            # Calculate relevance score (combine similarity with activation)
+                            activation = self._calculate_activation(metadata)
+                            relevance = (similarity * 0.7) + (activation * 0.3)
+                            
+                            vector_results.append(VectorMemoryResult(
+                                item=item,
+                                similarity_score=similarity,
+                                relevance_score=relevance,
+                                distance=distance
+                            ))
+                    except Exception as e:
+                        logger.warning(f"Failed to process search result {i}: {e}")
+                        continue
             
+            # Sort by relevance score
             vector_results.sort(key=lambda x: x.relevance_score, reverse=True)
+            
+            self._operation_count += 1
             return vector_results[:max_results]
+            
         except Exception as e:
-            logger.error(f"STM semantic search failed: {e}")
+            self._error_count += 1
+            logger.error(f"Semantic search failed for query '{query}': {e}")
             return []
     
-    def _fallback_semantic_search(
+    def search_associative(
         self,
-        query: str,
-        max_results: int,
-        min_activation: float
+        association: str,
+        max_results: int = 5
     ) -> List[VectorMemoryResult]:
-        # Fallback search is not supported in vector-only STM
-        return []
+        """
+        Search for memories with direct associations.
+        
+        Args:
+            association: Association term to search for
+            max_results: Maximum number of results
+            
+        Returns:
+            List of VectorMemoryResult objects
+        """
+        try:
+            if not association.strip():
+                return []
+            
+            association_lower = association.strip().lower()
+            matches = []
+            
+            with self.chroma_manager.get_collection() as collection:
+                result = collection.get()
+                
+                if not result.get('ids'):
+                    return []
+                
+                for i, memory_id in enumerate(result['ids']):
+                    try:
+                        metadatas = result.get('metadatas', [])
+                        documents = result.get('documents', [])
+                        
+                        metadata = MetadataValidator.safe_metadata_to_dict(
+                            MetadataValidator.safe_list_access(metadatas, i, {})
+                        )
+                        content = MetadataValidator.safe_list_access(documents, i, "")
+                        
+                        # Check associations
+                        associations = MetadataValidator.validate_associations(metadata.get('associations'))
+                        
+                        if any(association_lower == assoc.lower() for assoc in associations):
+                            item = self._safe_metadata_to_memory_item(memory_id, metadata, content)
+                            
+                            matches.append(VectorMemoryResult(
+                                item=item,
+                                similarity_score=1.0,
+                                relevance_score=1.0,
+                                distance=0.0
+                            ))
+                    except Exception as e:
+                        logger.warning(f"Failed to process associative search result {i}: {e}")
+                        continue
+            
+            # Sort by last access (most recent first)
+            matches.sort(key=lambda x: x.item.last_access, reverse=True)
+            
+            self._operation_count += 1
+            return matches[:max_results]
+            
+        except Exception as e:
+            self._error_count += 1
+            logger.error(f"Associative search failed for '{association}': {e}")
+            return []
     
     def search(
         self,
@@ -340,45 +900,166 @@ class VectorShortTermMemory:
         max_results: int = 5
     ) -> List[Tuple[MemoryItem, float]]:
         """
-        Search STM using only ChromaDB vector store.
+        General search interface for backward compatibility.
+        
+        Args:
+            query: Search query
+            max_results: Maximum number of results
+            
+        Returns:
+            List of (MemoryItem, relevance_score) tuples
         """
-        if not query:
+        if not query.strip():
             return []
-        vector_results = self.search_semantic(query=query, max_results=max_results)
+        
+        vector_results = self.search_semantic(query, max_results)
         return [(result.item, result.relevance_score) for result in vector_results]
     
-    def decay_memories(self) -> List[str]:
+    def decay_memories(self, min_activation: Optional[float] = None) -> List[str]:
         """
-        Decay logic is not supported in vector-only STM (no in-memory state).
+        Remove memories with low activation scores.
+        
+        Args:
+            min_activation: Minimum activation threshold (uses config default if None)
+            
+        Returns:
+            List of evicted memory IDs
         """
-        logger.info("STM decay_memories: not supported in vector-only mode.")
-        return []
+        if min_activation is None:
+            min_activation = self.config.min_activation_threshold
+        
+        try:
+            evicted_ids = []
+            
+            with self.chroma_manager.get_collection() as collection:
+                result = collection.get()
+                
+                if not result.get('ids'):
+                    return evicted_ids
+                
+                for i, memory_id in enumerate(result['ids']):
+                    try:
+                        metadatas = result.get('metadatas', [])
+                        metadata = MetadataValidator.safe_metadata_to_dict(
+                            MetadataValidator.safe_list_access(metadatas, i, {})
+                        )
+                        
+                        activation = self._calculate_activation(metadata)
+                        
+                        if activation < min_activation:
+                            evicted_ids.append(memory_id)
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to process decay for memory {memory_id}: {e}")
+                        continue
+                
+                # Remove low-activation memories
+                if evicted_ids:
+                    collection.delete(ids=evicted_ids)
+                    logger.info(f"Decay process evicted {len(evicted_ids)} low-activation memories")
+            
+            self._operation_count += 1
+            return evicted_ids
+            
+        except Exception as e:
+            self._error_count += 1
+            logger.error(f"Memory decay process failed: {e}")
+            return []
     
     def remove_item(self, memory_id: str) -> bool:
         """
-        Remove item from ChromaDB vector store.
+        Remove a specific memory item.
+        
+        Args:
+            memory_id: Memory identifier
+            
+        Returns:
+            bool: True if successful, False if item doesn't exist or other error
         """
-        if not self.collection:
-            return False
         try:
-            self.collection.delete(ids=[memory_id])
-            logger.debug(f"STM removed {memory_id} from vector database")
+            memory_id = MetadataValidator.validate_memory_id(memory_id)
+            
+            with self.chroma_manager.get_collection() as collection:
+                # First check if the item exists
+                existing = collection.get(ids=[memory_id])
+                if not existing or not existing['ids']:
+                    logger.debug(f"Memory {memory_id} not found for removal")
+                    return False
+                
+                # Item exists, proceed with deletion
+                collection.delete(ids=[memory_id])
+            
+            self._operation_count += 1
+            logger.debug(f"Successfully removed memory {memory_id}")
             return True
+            
         except Exception as e:
-            logger.error(f"STM failed to remove {memory_id} from vector database: {e}")
+            self._error_count += 1
+            logger.error(f"Failed to remove memory {memory_id}: {e}")
             return False
     
-    def clear(self):
-        """Clear all memories from ChromaDB vector store."""
-        if not self.collection:
-            return
+    def clear(self) -> bool:
+        """
+        Clear all memories from the STM.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
-            result = self.collection.get()
-            if result['ids']:
-                self.collection.delete(ids=result['ids'])
-            logger.debug("STM cleared vector database")
+            with self.chroma_manager.get_collection() as collection:
+                result = collection.get()
+                if result.get('ids'):
+                    collection.delete(ids=result['ids'])
+            
+            self._operation_count += 1
+            logger.info("Successfully cleared all memories")
+            return True
+            
         except Exception as e:
-            logger.error(f"STM failed to clear vector database: {e}")
+            self._error_count += 1
+            logger.error(f"Failed to clear memories: {e}")
+            return False
+    
+    def get_all_memories(self) -> List[MemoryItem]:
+        """
+        Get all memories from the STM.
+        
+        Returns:
+            List of MemoryItem objects
+        """
+        try:
+            memories = []
+            
+            with self.chroma_manager.get_collection() as collection:
+                result = collection.get()
+                
+                if not result.get('ids'):
+                    return memories
+                
+                for i, memory_id in enumerate(result['ids']):
+                    try:
+                        metadatas = result.get('metadatas', [])
+                        documents = result.get('documents', [])
+                        
+                        metadata = MetadataValidator.safe_metadata_to_dict(
+                            MetadataValidator.safe_list_access(metadatas, i, {})
+                        )
+                        content = MetadataValidator.safe_list_access(documents, i, "")
+                        
+                        memory_item = self._safe_metadata_to_memory_item(memory_id, metadata, content)
+                        memories.append(memory_item)
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to process memory {memory_id}: {e}")
+                        continue
+            
+            self._operation_count += 1
+            return memories
+            
+        except Exception as e:
+            self._error_count += 1
+            logger.error(f"Failed to get all memories: {e}")
+            return []
     
     def get_context_for_query(
         self,
@@ -387,97 +1068,109 @@ class VectorShortTermMemory:
         min_relevance: float = 0.3
     ) -> List[VectorMemoryResult]:
         """
-        Get relevant context memories for a query (vector store only)
+        Get relevant context memories for a query.
+        
+        Args:
+            query: Query string
+            max_context_items: Maximum number of context items
+            min_relevance: Minimum relevance threshold
+            
+        Returns:
+            List of VectorMemoryResult objects
         """
         results = self.search_semantic(
             query=query,
             max_results=max_context_items,
             min_similarity=min_relevance
         )
+        
         context_results = [r for r in results if r.relevance_score >= min_relevance]
-        logger.debug(f"STM found {len(context_results)} context items for query: {query[:50]}...")
+        
+        logger.debug(f"Found {len(context_results)} context items for query: {query[:50]}...")
         return context_results
     
-    def get_all_memories(self) -> List[MemoryItem]:
-        """Get all memories from the vector store as MemoryItem objects"""
-        if not self.collection:
-            return []
-            
-        try:
-            # Get all items from the collection
-            result = self.collection.get()
-            memories = []
-            
-            if result.get('ids'):
-                for i, memory_id in enumerate(result['ids']):
-                    # Safely get metadata
-                    meta = {}
-                    if (result.get('metadatas') and 
-                        result['metadatas'] is not None and 
-                        len(result['metadatas']) > i):
-                        meta = result['metadatas'][i] or {}
-                    
-                    # Use safe metadata conversion
-                    memory_item = self._metadata_to_memory_item(memory_id, meta)
-                    memories.append(memory_item)
-            
-            return memories
-            
-        except Exception as e:
-            logger.error(f"Error retrieving all memories from STM: {e}")
-            return []
-    
-    def retrieve(self, memory_id: str) -> Optional[MemoryItem]:
-        """Retrieve a specific memory by ID"""
-        if not self.collection:
-            return None
-            
-        try:
-            result = self.collection.get(ids=[memory_id])
-            
-            if result.get('ids') and len(result['ids']) > 0:
-                # Safely get metadata
-                meta = {}
-                if (result.get('metadatas') and 
-                    result['metadatas'] is not None and 
-                    len(result['metadatas']) > 0):
-                    meta = result['metadatas'][0] or {}
-                
-                # Use safe metadata conversion
-                memory_item = self._metadata_to_memory_item(memory_id, meta)
-                return memory_item
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error retrieving memory {memory_id} from STM: {e}")
-            return None
-
     def get_status(self) -> Dict[str, Any]:
-        """Get STM status (vector store only)"""
-        # Get embedding model info
-        embedding_model_info = None
-        if self.embedding_model:
-            # Try to get model name from various possible attributes
-            try:
-                embedding_model_info = (
-                    getattr(self.embedding_model, '_model_name', None) or
-                    getattr(self.embedding_model, 'model_name', None) or
-                    "all-MiniLM-L6-v2"  # Default fallback since we know this is what we load
-                )
-            except Exception:
-                embedding_model_info = "all-MiniLM-L6-v2"
+        """
+        Get comprehensive status information about the STM.
         
-        status = {
-            "vector_db_enabled": True,
-            "collection_name": self.collection_name,
-            "embedding_model": embedding_model_info,
-            "chroma_persist_dir": str(self.chroma_persist_dir)
-        }
-        if self.collection:
+        Returns:
+            Dict with status information
+        """
+        try:
+            status = {
+                "vector_db_enabled": True,
+                "collection_name": self.config.collection_name,
+                "embedding_model": self.embedding_manager.get_model_name(),
+                "embedding_device": self.embedding_manager.get_device(),
+                "chroma_persist_dir": str(self.persist_dir),
+                "capacity": self.config.capacity,
+                "max_decay_hours": self.config.max_decay_hours,
+                "min_activation_threshold": self.config.min_activation_threshold,
+                "operation_count": self._operation_count,
+                "error_count": self._error_count,
+                "error_rate": self._error_count / max(1, self._operation_count)
+            }
+            
+            # Get collection statistics
             try:
-                collection_info = self.collection.get()
-                status["vector_db_count"] = len(collection_info['ids']) if collection_info['ids'] else 0
+                with self.chroma_manager.get_collection() as collection:
+                    result = collection.get()
+                    
+                    if result.get('ids'):
+                        count = len(result['ids'])
+                        status["vector_db_count"] = count
+                        
+                        if count > 0:
+                            # Calculate statistics
+                            activations = []
+                            importances = []
+                            attentions = []
+                            
+                            metadatas = result.get('metadatas', [])
+                            for i, _ in enumerate(metadatas or []):
+                                metadata = MetadataValidator.safe_metadata_to_dict(
+                                    MetadataValidator.safe_list_access(metadatas, i, {})
+                                )
+                                if metadata:
+                                    activations.append(self._calculate_activation(metadata))
+                                    importances.append(MetadataValidator.validate_numeric_field(metadata.get('importance', 0.5), 'importance'))
+                                    attentions.append(MetadataValidator.validate_numeric_field(metadata.get('attention_score', 0.0), 'attention_score'))
+                            
+                            if activations:
+                                status["avg_activation"] = sum(activations) / len(activations)
+                                status["min_activation"] = min(activations)
+                                status["max_activation"] = max(activations)
+                            
+                            if importances:
+                                status["avg_importance"] = sum(importances) / len(importances)
+                                
+                            if attentions:
+                                status["avg_attention"] = sum(attentions) / len(attentions)
+                    else:
+                        status["vector_db_count"] = 0
+                        
             except Exception as e:
                 status["vector_db_error"] = str(e)
-        return status
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"Failed to get status: {e}")
+            return {"error": str(e)}
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with cleanup"""
+        self.shutdown()
+    
+    def shutdown(self):
+        """Shutdown the STM system and cleanup resources"""
+        try:
+            if hasattr(self, 'executor'):
+                self.executor.shutdown(wait=True)
+            logger.info("Vector STM shut down successfully")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")

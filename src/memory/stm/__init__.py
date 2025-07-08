@@ -1,12 +1,24 @@
 """
 Short-Term Memory (STM) system components
 """
-from .short_term_memory import ShortTermMemory, MemoryItem
-from .vector_stm import VectorShortTermMemory, VectorMemoryResult
+from .vector_stm import (
+    VectorShortTermMemory, 
+    VectorMemoryResult,
+    MemoryItem,
+    STMConfiguration,
+    VectorSTMError,
+    VectorSTMConfigError,
+    VectorSTMStorageError,
+    VectorSTMRetrievalError
+)
 
 __all__ = [
-    "ShortTermMemory",
+    "VectorShortTermMemory",
+    "VectorMemoryResult", 
     "MemoryItem",
-    "VectorShortTermMemory", 
-    "VectorMemoryResult"
+    "STMConfiguration",
+    "VectorSTMError",
+    "VectorSTMConfigError",
+    "VectorSTMStorageError",
+    "VectorSTMRetrievalError"
 ]

@@ -831,6 +831,9 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
+# Copy example environment variables
+cp .env.example .env
+
 # Run tests
 pytest tests/ -v
 

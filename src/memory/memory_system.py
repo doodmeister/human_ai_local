@@ -35,7 +35,7 @@ from typing import (
 )
 from weakref import WeakSet
 
-from .stm import ShortTermMemory, VectorShortTermMemory
+from .stm import VectorShortTermMemory, STMConfiguration
 from .ltm import VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .semantic.semantic_memory import SemanticMemorySystem
@@ -203,7 +203,7 @@ class MemorySystem:
         self._executor = ThreadPoolExecutor(max_workers=self._config.max_concurrent_operations)
         
         # Memory systems (initialized lazily)
-        self._stm: Optional[Union[ShortTermMemory, VectorShortTermMemory]] = None
+        self._stm: Optional[VectorShortTermMemory] = None
         self._ltm: Optional[VectorLongTermMemory] = None
         self._episodic: Optional[EpisodicMemorySystem] = None
         self._semantic: Optional[SemanticMemorySystem] = None
@@ -232,17 +232,14 @@ class MemorySystem:
     def _initialize_systems(self) -> None:
         """Initialize all memory subsystems."""
         try:
-            # Initialize STM
-            if self._config.use_vector_stm:
-                self._stm = VectorShortTermMemory(
-                    chroma_persist_dir=self._config.chroma_persist_dir,
-                    embedding_model=self._config.embedding_model
-                )
-            else:
-                self._stm = ShortTermMemory(
-                    capacity=self._config.stm_capacity,
-                    decay_threshold=self._config.stm_decay_threshold
-                )
+            # Initialize STM - always use VectorShortTermMemory
+            stm_config = STMConfiguration(
+                chroma_persist_dir=self._config.chroma_persist_dir,
+                embedding_model=self._config.embedding_model,
+                capacity=self._config.stm_capacity,
+                enable_gpu=getattr(self._config, 'enable_gpu', True)
+            )
+            self._stm = VectorShortTermMemory(stm_config)
             
             # Initialize LTM
             if self._config.use_vector_ltm:
@@ -279,7 +276,7 @@ class MemorySystem:
             raise
     
     @property
-    def stm(self) -> Union[ShortTermMemory, VectorShortTermMemory]:
+    def stm(self) -> VectorShortTermMemory:
         """Get the STM system."""
         if self._stm is None:
             raise MemorySystemError("STM not initialized")

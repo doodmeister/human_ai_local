@@ -1,12 +1,20 @@
 from src.memory.procedural.procedural_memory import ProceduralMemory
-from src.memory.stm.short_term_memory import ShortTermMemory
+from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration
 from src.memory.ltm.vector_ltm import VectorLongTermMemory
+import tempfile
+import os
 
 def make_pm():
-    stm = ShortTermMemory()
-    ltm = VectorLongTermMemory()
-    pm = ProceduralMemory(stm=stm, ltm=ltm)
-    return pm
+    with tempfile.TemporaryDirectory() as temp_dir:
+        config = STMConfiguration(
+            chroma_persist_dir=os.path.join(temp_dir, "proc_stm"),
+            collection_name="procedural_test",
+            capacity=10
+        )
+        stm = VectorShortTermMemory(config)
+        ltm = VectorLongTermMemory()
+        pm = ProceduralMemory(stm=stm, ltm=ltm)
+        return pm
 
 def test_store_and_retrieve():
     pm = make_pm()

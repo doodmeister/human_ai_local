@@ -5,8 +5,7 @@ Quick test for vector-only memory systems
 import sys
 sys.path.append('.')
 
-from src.memory.stm.vector_stm import VectorShortTermMemory
-from src.memory.stm.short_term_memory import MemoryItem
+from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration, MemoryItem
 from datetime import datetime
 import tempfile
 
@@ -15,12 +14,14 @@ def main():
     
     # Create temporary directory for testing
     with tempfile.TemporaryDirectory() as temp_dir:
+        stm = None  # Ensure stm is always defined
         try:
             # Test STM
-            stm = VectorShortTermMemory(
+            config = STMConfiguration(
                 chroma_persist_dir=temp_dir + "/stm_test",
                 collection_name="quick_test"
             )
+            stm = VectorShortTermMemory(config)
             
             print("✓ STM initialized")
             
@@ -44,11 +45,18 @@ def main():
                     print("❌ Retrieve failed")
             else:
                 print("❌ Store failed")
-                
+            
         except Exception as e:
             print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
+        finally:
+            # Properly shutdown STM to release file locks
+            if stm is not None:
+                try:
+                    stm.shutdown()
+                except Exception:
+                    pass  # Ignore shutdown errors
 
 if __name__ == "__main__":
     main()

@@ -97,27 +97,22 @@ def test_stm_direct():
             return item
     
     # Test the classes
-    try:
-        print("Testing isolated STM...")
-        stm = ShortTermMemory(capacity=3)
-        print("✓ STM created successfully")
-        
-        # Test storing
-        success = stm.store("test1", "Hello world", importance=0.8)
-        print(f"✓ Storage successful: {success}")
-        
-        # Test retrieval
-        item = stm.retrieve("test1")
-        print(f"✓ Retrieved: {item.content if item else 'None'}")
-        
-        print("🎉 Isolated STM test passed!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error in isolated test: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    print("Testing isolated STM...")
+    stm = ShortTermMemory(capacity=3)
+    print("✓ STM created successfully")
+    
+    # Test storing
+    success = stm.store("test1", "Hello world", importance=0.8)
+    assert success, "Storage should be successful"
+    print(f"✓ Storage successful: {success}")
+    
+    # Test retrieval
+    item = stm.retrieve("test1")
+    assert item is not None, "Item should be retrieved"
+    assert item.content == "Hello world", "Content should match"
+    print(f"✓ Retrieved: {item.content if item else 'None'}")
+    
+    print("🎉 Isolated STM test passed!")
 
 if __name__ == "__main__":
     test_stm_direct()

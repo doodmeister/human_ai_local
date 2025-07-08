@@ -16,7 +16,7 @@ ruff is our linter
 Biologically-inspired cognitive architecture simulating human-like memory, attention, and reasoning. Persistent memory structures and modular, explainable processing patterns.
 
 ## Core Architecture
-- Short-Term Memory (STM): In-memory, time-decayed
+- Short-Term Memory (STM): ChromaDB vector database
 - Long-Term Memory (LTM): ChromaDB vector database
 - Prospective/Procedural Memory: Scheduling and skills
 - Sensory Processing: Multimodal, entropy/salience scoring

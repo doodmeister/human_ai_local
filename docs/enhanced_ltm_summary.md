@@ -107,7 +107,7 @@ health = ltm.get_memory_health_report()
 
 ### Consolidation with Emotional Weighting
 ```python
-from src.memory.stm.short_term_memory import MemoryItem
+from src.memory.stm.vector_stm import MemoryItem
 
 # Emotional memory gets prioritized
 emotional_memory = MemoryItem(

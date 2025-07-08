@@ -211,10 +211,19 @@ class VectorLongTermMemory(BaseMemorySystem):
         if not rec:
             return False
         associations = rec.get("associations", [])
+        if isinstance(associations, str):
+            associations = [a for a in associations.split(",") if a]
         if external_memory_id not in associations:
             associations.append(external_memory_id)
             meta = rec.copy()
-            meta["associations"] = associations
+            # Sanitize all metadata fields to allowed types for ChromaDB
+            for key in list(meta.keys()):
+                v = meta[key]
+                if isinstance(v, list):
+                    meta[key] = ",".join(str(x) for x in v) if v else ""
+                elif not isinstance(v, (str, int, float, bool)) and v is not None:
+                    meta[key] = str(v)
+            meta["associations"] = ",".join(str(x) for x in associations if x)
             self.collection.update(
                 ids=[ltm_memory_id],
                 metadatas=[meta]
@@ -227,19 +236,14 @@ class VectorLongTermMemory(BaseMemorySystem):
         """Find LTM records linked to memories from other systems (by association or content)."""
         if not self.collection:
             return []
-        # Search for associations
+        # Use get() with where clause for metadata-only filtering
         where = {"associations": {"$in": [external_memory_id]}}
-        results = self.collection.query(
-            query_embeddings=None,
-            n_results=100,
-            where=where,
-            include=["documents", "metadatas"]
-        )
+        results = self.collection.get(where=where)
         matches = []
-        if results['ids'] and results['ids'][0]:
-            for i, memory_id in enumerate(results['ids'][0]):
-                meta = results['metadatas'][0][i]
-                doc = results['documents'][0][i]
+        if results['ids']:
+            for i, memory_id in enumerate(results['ids']):
+                meta = results['metadatas'][i]
+                doc = results['documents'][i]
                 matches.append({
                     "id": meta.get("memory_id", memory_id),
                     "content": doc,
@@ -279,17 +283,28 @@ class VectorLongTermMemory(BaseMemorySystem):
             "user_id": user_id
         }
         feedback.append(event)
-        # Defensive: always store feedback as a JSON string (never as a list or None)
         meta = rec.copy()
         meta["feedback"] = json.dumps(feedback) if feedback else "[]"
+        # Update confidence, importance, or emotional_valence if feedback_type matches
+        if feedback_type in ("confidence", "emotion"):
+            try:
+                meta["confidence"] = float(value)
+            except Exception:
+                pass
+        if feedback_type == "emotion":
+            try:
+                meta["emotional_valence"] = float(value)
+            except Exception:
+                pass
+        if feedback_type == "importance":
+            meta["importance"] = 1.0
         # Sanitize all metadata fields to allowed types for ChromaDB
         for key in list(meta.keys()):
-            value = meta[key]
-            if isinstance(value, list):
-                # Convert lists to comma-separated strings (or empty string)
-                meta[key] = ",".join(str(v) for v in value) if value else ""
-            elif not isinstance(value, (str, int, float, bool)) and value is not None:
-                meta[key] = str(value)
+            v = meta[key]
+            if isinstance(v, list):
+                meta[key] = ",".join(str(x) for x in v) if v else ""
+            elif not isinstance(v, (str, int, float, bool)) and v is not None:
+                meta[key] = str(v)
         self.collection.update(
             ids=[memory_id],
             metadatas=[meta]
@@ -326,33 +341,41 @@ class VectorLongTermMemory(BaseMemorySystem):
         if not self.collection:
             return []
         try:
-            if operator == "OR":
-                where = {"tags": {"$in": tags}}
-            else:  # AND
-                where = {"tags": {"$all": tags}}
-            results = self.collection.query(
-                query_embeddings=None,
-                n_results=100,
-                where=where,
-                include=["documents", "metadatas"]
-            )
+            # Fetch all records (could be optimized with a where clause if ChromaDB supports substring search)
+            results = self.collection.get()
             matches = []
-            if results['ids'] and results['ids'][0]:
-                for i, memory_id in enumerate(results['ids'][0]):
-                    meta = results['metadatas'][0][i]
-                    doc = results['documents'][0][i]
-                    matches.append({
-                        "id": meta.get("memory_id", memory_id),
-                        "content": doc,
-                        "memory_type": meta.get("memory_type", "episodic"),
-                        "encoding_time": meta.get("encoding_time"),
-                        "last_access": meta.get("last_access"),
-                        "importance": float(meta.get("importance", 0.5)),
-                        "emotional_valence": float(meta.get("emotional_valence", 0.0)),
-                        "source": meta.get("source", "unknown"),
-                        "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
-                        "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
-                    })
+            for i, memory_id in enumerate(results['ids']):
+                meta = results['metadatas'][i]
+                doc = results['documents'][i]
+                tag_list = meta.get("tags", "").split(",") if meta.get("tags") else []
+                if operator == "OR":
+                    if any(tag in tag_list for tag in tags):
+                        matches.append({
+                            "id": meta.get("memory_id", memory_id),
+                            "content": doc,
+                            "memory_type": meta.get("memory_type", "episodic"),
+                            "encoding_time": meta.get("encoding_time"),
+                            "last_access": meta.get("last_access"),
+                            "importance": float(meta.get("importance", 0.5)),
+                            "emotional_valence": float(meta.get("emotional_valence", 0.0)),
+                            "source": meta.get("source", "unknown"),
+                            "tags": tag_list,
+                            "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
+                        })
+                else:  # AND
+                    if all(tag in tag_list for tag in tags):
+                        matches.append({
+                            "id": meta.get("memory_id", memory_id),
+                            "content": doc,
+                            "memory_type": meta.get("memory_type", "episodic"),
+                            "encoding_time": meta.get("encoding_time"),
+                            "last_access": meta.get("last_access"),
+                            "importance": float(meta.get("importance", 0.5)),
+                            "emotional_valence": float(meta.get("emotional_valence", 0.0)),
+                            "source": meta.get("source", "unknown"),
+                            "tags": tag_list,
+                            "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
+                        })
             return matches
         except Exception as e:
             logger.error(f"LTM tag search failed: {e}")
@@ -521,6 +544,9 @@ class VectorLongTermMemory(BaseMemorySystem):
             if not embedding:
                 logger.error("Failed to generate embedding for LTM store.")
                 return False
+            # Always store tags and associations as comma-separated strings
+            tags_str = ",".join(tags) if tags else ""
+            associations_str = ",".join(associations) if associations else ""
             metadata = {
                 "memory_id": memory_id,
                 "memory_type": memory_type,
@@ -529,9 +555,16 @@ class VectorLongTermMemory(BaseMemorySystem):
                 "source": source,
                 "encoding_time": datetime.now().isoformat(),
                 "last_access": datetime.now().isoformat(),
-                "tags": ",".join(tags) if tags else "",
-                "associations": ",".join(associations) if associations else ""
+                "tags": tags_str,
+                "associations": associations_str
             }
+            # Sanitize all metadata fields to allowed types for ChromaDB
+            for key in list(metadata.keys()):
+                v = metadata[key]
+                if isinstance(v, list):
+                    metadata[key] = ",".join(str(x) for x in v) if v else ""
+                elif not isinstance(v, (str, int, float, bool)) and v is not None:
+                    metadata[key] = str(v)
             self.collection.upsert(
                 ids=[memory_id],
                 embeddings=[embedding],
@@ -573,6 +606,7 @@ class VectorLongTermMemory(BaseMemorySystem):
                     "last_access": meta.get("last_access"),
                     "importance": float(meta.get("importance", 0.5)),
                     "emotional_valence": float(meta.get("emotional_valence", 0.0)),
+                    "confidence": float(meta["confidence"]) if "confidence" in meta and meta["confidence"] is not None else None,
                     "source": meta.get("source", "unknown"),
                     "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
                     "associations": meta.get("associations", "").split(",") if meta.get("associations") else [],
