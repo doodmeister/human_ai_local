@@ -51,8 +51,25 @@ htmlcov/
 .pytest_cache/
 *.hcl
 
-# data
+# Database files and ChromaDB persistence
+*.sqlite3
+*.db
+*.bin
+chroma_*/
+*.lock
+
+# Test and temporary data
 test_data/
 data/
+temp_*/
+*_temp/
 
-test_data/
+# Temporary scripts and debugging files
+debug_*.py
+cleanup_*.py
+test_*.py
+
+# Memory store data
+memory_stores/
+embeddings/
+models/

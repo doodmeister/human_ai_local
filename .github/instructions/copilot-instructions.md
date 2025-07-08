@@ -16,13 +16,13 @@ ruff is our linter
 Biologically-inspired cognitive architecture simulating human-like memory, attention, and reasoning. Persistent memory structures and modular, explainable processing patterns.
 
 ## Core Architecture
-- Short-Term Memory (STM): ChromaDB vector database
-- Long-Term Memory (LTM): ChromaDB vector database
-- Prospective/Procedural Memory: Scheduling and skills
-- Sensory Processing: Multimodal, entropy/salience scoring
-- Attention Mechanism: Salience/relevance weighting
-- Meta-Cognition: Self-reflection, memory management
-- Dream-State: Background memory consolidation
+- Short-Term Memory (STM): VectorShortTermMemory with ChromaDB vector database, 7-item capacity, LRU eviction
+- Long-Term Memory (LTM): VectorLongTermMemory with ChromaDB vector database, semantic clustering
+- Attention Mechanism: AttentionMechanism with neural enhancement (DPAD), cognitive load tracking, fatigue modeling
+- Prospective/Procedural Memory: Scheduling and skills with vector storage
+- Sensory Processing: Multimodal, entropy/salience scoring with attention allocation
+- Meta-Cognition: Self-reflection, memory management, STM/LTM health monitoring
+- Dream-State: Background memory consolidation with neural integration
 
 ## Technology Stack
 - Python 3.12
@@ -33,30 +33,34 @@ Biologically-inspired cognitive architecture simulating human-like memory, atten
 - schedule/apscheduler
 
 ## Cognitive Processing Flow
-- Wake: Sensory → Memory → Attention → Context → LLM → STM Write
-- Dream: STM Review → Meta-Cognition → Clustering → LTM Transfer → Noise Removal
+- **Wake State**: Sensory → Memory Retrieval (STM/LTM) → Attention Allocation → Neural Enhancement → Context Building → LLM Response → Memory Consolidation → Cognitive State Update
+- **Dream State**: STM Review → Meta-Cognition → Clustering → LTM Transfer → Neural Processing → Noise Removal
+- **Attention Flow**: Stimulus Processing → Salience Calculation → Neural Enhancement (DPAD +0.200) → Focus Allocation → Cognitive Load Update → Fatigue Tracking
 
 ## Project Structure
 ```
 human_ai_local/
 ├── src/                          # Main source code
 │   ├── core/                     # Core cognitive architecture
-│   │   ├── config.py            # Configuration management
-│   │   └── cognitive_agent.py   # Main cognitive orchestrator
+│   │   ├── config.py            # Configuration management with MemorySystemConfig
+│   │   └── cognitive_agent.py   # Main cognitive orchestrator with STM/attention integration
 │   ├── memory/                   # Memory systems
-│   │   ├── memory_system.py     # Integrated memory coordinator
+│   │   ├── memory_system.py     # Integrated memory coordinator with dependency injection
 │   │   ├── stm/                 # Short-term memory implementation
+│   │   │   ├── vector_stm.py    # VectorShortTermMemory with ChromaDB integration
+│   │   │   └── __init__.py      # STM exports: VectorShortTermMemory, MemoryItem, STMConfiguration
 │   │   ├── ltm/                 # Long-term memory with ChromaDB
+│   │   │   └── vector_ltm.py    # VectorLongTermMemory with health monitoring
 │   │   ├── prospective/         # Future-oriented memory
 │   │   ├── procedural/          # Skills and procedures
 │   │   └── consolidation/       # Memory consolidation pipeline
 │   ├── attention/               # Attention mechanisms
-│   │   └── attention_mechanism.py # Advanced attention with fatigue modeling
+│   │   └── attention_mechanism.py # AttentionMechanism with fatigue modeling, focus tracking
 │   ├── processing/              # Cognitive processing layers
-│   │   ├── sensory/            # Sensory input processing with entropy scoring
+│   │   ├── sensory/            # Sensory input processing with entropy scoring, attention integration
 │   │   ├── neural/             # Neural network components
 │   │   │   ├── lshn_network.py  # Latent Structured Hopfield Networks
-│   │   │   ├── dpad_network.py  # Dual-Path Attention Dynamics
+│   │   │   ├── dpad_network.py  # Dual-Path Attention Dynamics (neural enhancement)
 │   │   │   └── neural_integration.py # Neural integration manager
 │   │   ├── dream/              # Dream-state consolidation processor
 │   │   ├── embeddings/         # Text embedding generation
@@ -111,21 +115,88 @@ human_ai_local/
 
 ## Quick Start
 ```bash
-python src/core/cognitive_agent.py
+# Initialize and test the cognitive agent with STM and attention
+python -c "
+import asyncio
+from src.core.cognitive_agent import CognitiveAgent
+
+async def test_system():
+    agent = CognitiveAgent()
+    response = await agent.process_input('Hello, I am a software engineer')
+    status = agent.get_cognitive_status()
+    print(f'STM memories: {status[\"memory_status\"][\"stm\"][\"vector_db_count\"]}')
+    print(f'Attention load: {status[\"attention_status\"][\"cognitive_load\"]:.3f}')
+    await agent.shutdown()
+
+asyncio.run(test_system())
+"
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Run comprehensive tests
+python -m pytest tests/test_memory_integration.py -v
+python -m pytest tests/test_attention_integration.py -v
 ```
 
 ## Environment Setup
 Create `.env` file:
 ```
 OPENAI_API_KEY=your_key_here
-CHROMA_PERSIST_DIR=./data/chroma_db
-STM_COLLECTION=short_term_memory
-LTM_COLLECTION=long_term_memory
+CHROMA_PERSIST_DIR=./data/memory_stores
+STM_COLLECTION=stm_memories
+LTM_COLLECTION=ltm_memories
+STM_CAPACITY=7
+ATTENTION_MAX_ITEMS=7
+ATTENTION_SALIENCE_THRESHOLD=0.5
+FATIGUE_DECAY_RATE=0.01
+ATTENTION_RECOVERY_RATE=0.05
+```
+
+## STM & Attention Integration Examples
+```python
+# Complete cognitive processing with STM and attention
+from src.core.cognitive_agent import CognitiveAgent
+
+agent = CognitiveAgent()
+
+# Process input through complete pipeline
+response = await agent.process_input("I love programming in Python")
+
+# Check cognitive state including STM and attention
+status = agent.get_cognitive_status()
+print(f"STM Status: {status['memory_status']['stm']}")
+print(f"Attention Status: {status['attention_status']}")
+print(f"Cognitive Integration: {status['cognitive_integration']}")
+
+# Direct STM operations
+stm_memories = agent.memory.stm.get_all_memories()
+search_results = agent.memory.stm.search_semantic("programming", max_results=3)
+
+# Attention management
+break_results = agent.take_cognitive_break(duration_minutes=1.0)
+print(f"Cognitive load reduced: {break_results['cognitive_load_reduction']:.3f}")
+print(f"Recovery effective: {break_results['recovery_effective']}")
+
+# Reflection with STM analysis
+reflection = agent.reflect()
+stm_stats = reflection['stm_metacognitive_stats']
+print(f"STM Capacity Utilization: {stm_stats['capacity_utilization']:.1%}")
 ```
 
 ## Unique Features
-- Sleep Cycles, Forgetting Curves, Attention Fatigue, Meta-Cognition, DPAD, LSHN
+- **Biologically-Inspired STM**: 7-item capacity with LRU eviction and activation-based decay
+- **Vector Memory Storage**: ChromaDB semantic storage for both STM and LTM with embedding similarity
+- **Neural Attention Enhancement**: DPAD network providing +0.200 attention boosts with novelty detection
+- **Cognitive Load Tracking**: Real-time fatigue, capacity, and efficiency monitoring
+- **Proactive Memory Recall**: Context-aware memory search using conversation history
+- **Memory Consolidation**: Automatic STM→LTM transfer based on importance and emotional valence
+- **Attention Rest/Recovery**: Cognitive break functionality with fatigue reduction
+- **Metacognitive Reflection**: Self-monitoring with STM/LTM health reports and performance analytics
+- **Sleep Cycles**: Dream-state consolidation with neural integration
+- **Forgetting Curves**: Realistic memory decay with biological parameters
+- **DPAD Neural Networks**: Dual-Path Attention Dynamics for enhanced cognitive processing
+- **LSHN Integration**: Latent Structured Hopfield Networks for memory pattern completion
 
 ## Actionable Roadmap (2025+)
 ### Mid-Term Goals (3–6 Months)
