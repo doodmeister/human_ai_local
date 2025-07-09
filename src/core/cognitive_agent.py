@@ -497,30 +497,61 @@ class CognitiveAgent:
               f"Items in Focus: {attention_scores.get('items_in_focus', 0)}")
     
     def get_cognitive_status(self) -> Dict[str, Any]:
-        """Get current cognitive state information"""
-        # Get memory system status
-        memory_status = self.memory.get_status()
-          # Get attention mechanism status
-        attention_status = self.attention.get_attention_status()
-        
-        # Get sensory processing statistics
-        sensory_stats = self.sensory_processor.get_processing_stats()
+        """Get current cognitive state information with error handling"""
+        try:
+            # Get memory system status with fallback
+            try:
+                memory_status = self.memory.get_status()
+            except Exception as e:
+                print(f"Error getting memory status: {e}")
+                memory_status = {"error": str(e), "stm": {"vector_db_count": 0}, "ltm": {"vector_db_count": 0}}
+            
+            # Get attention mechanism status with fallback
+            try:
+                attention_status = self.attention.get_attention_status()
+            except Exception as e:
+                print(f"Error getting attention status: {e}")
+                attention_status = {"error": str(e), "available_capacity": 0.0, "cognitive_load": 0.0}
+            
+            # Get sensory processing statistics with fallback
+            try:
+                sensory_stats = self.sensory_processor.get_processing_stats()
+            except Exception as e:
+                print(f"Error getting sensory stats: {e}")
+                sensory_stats = {"error": str(e), "total_processed": 0, "filtered_count": 0}
 
-        return {
-            "session_id": self.session_id,
-            "fatigue_level": self.current_fatigue,
-            "attention_focus": self.attention_focus,
-            "active_goals": self.active_goals,
-            "conversation_length": len(self.conversation_context),
-            "last_interaction": self.conversation_context[-1]["timestamp"] if self.conversation_context else None,            "memory_status": memory_status,
-            "attention_status": attention_status,
-            "sensory_processing": sensory_stats,
-            "cognitive_integration": {
-                "attention_memory_sync": len(self.attention_focus) > 0 and memory_status["stm"].get("vector_db_count", 0) > 0,
-                "processing_capacity": attention_status.get("available_capacity", 0.0),                "overall_efficiency": 1.0 - self.current_fatigue,
-                "sensory_efficiency": 1.0 - (sensory_stats.get("filtered_count", 0) / max(1, sensory_stats.get("total_processed", 1)))
+            return {
+                "session_id": self.session_id,
+                "fatigue_level": self.current_fatigue,
+                "attention_focus": self.attention_focus,
+                "active_goals": self.active_goals,
+                "conversation_length": len(self.conversation_context),
+                "last_interaction": self.conversation_context[-1]["timestamp"] if self.conversation_context else None,
+                "memory_status": memory_status,
+                "attention_status": attention_status,
+                "sensory_processing": sensory_stats,
+                "cognitive_integration": {
+                    "attention_memory_sync": len(self.attention_focus) > 0 and memory_status.get("stm", {}).get("vector_db_count", 0) > 0,
+                    "processing_capacity": attention_status.get("available_capacity", 0.0),
+                    "overall_efficiency": 1.0 - self.current_fatigue,
+                    "sensory_efficiency": 1.0 - (sensory_stats.get("filtered_count", 0) / max(1, sensory_stats.get("total_processed", 1)))
+                }
             }
-        }
+        except Exception as e:
+            print(f"Critical error getting cognitive status: {e}")
+            # Return minimal fallback status
+            return {
+                "session_id": self.session_id,
+                "fatigue_level": self.current_fatigue,
+                "attention_focus": [],
+                "active_goals": [],
+                "conversation_length": 0,
+                "last_interaction": None,
+                "memory_status": {"error": str(e)},
+                "attention_status": {"error": str(e)},
+                "sensory_processing": {"error": str(e)},
+                "cognitive_integration": {"error": str(e)}
+            }
     
     async def enter_dream_state(self, cycle_type: str = "deep"):
         """Enter dream-state processing for memory consolidation"""
