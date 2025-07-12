@@ -37,6 +37,10 @@ class AttentionConfig:
     attention_recovery_rate: float = 0.05
     salience_threshold: float = 0.5
     max_attention_items: int = 7  # Miller's magical number
+    allow_dynamic_novelty: bool = False  # Enable per-call novelty boost override
+    attention_decay_base: float = 0.1
+    attention_decay_fatigue_scale: float = 0.2
+    attention_decay_age_scale: float = 0.05
 
 @dataclass
 class AgentConfig:

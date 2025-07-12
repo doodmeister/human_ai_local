@@ -1,10 +1,9 @@
 """
 Core Cognitive Agent - Central orchestrator for the cognitive architecture
 """
+
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import torch
-import numpy as np
 import uuid
 import os
 from openai import OpenAI
@@ -99,11 +98,7 @@ class CognitiveAgent:
         self.memory = MemorySystem(memory_config)
         
         # Attention mechanism
-        self.attention = AttentionMechanism(
-            max_attention_items=self.config.attention.max_attention_items,
-            salience_threshold=self.config.attention.salience_threshold,
-            fatigue_decay_rate=self.config.attention.fatigue_decay_rate,
-            attention_recovery_rate=self.config.attention.attention_recovery_rate        )        # Sensory processing interface
+        self.attention = AttentionMechanism(self.config.attention)
         self.sensory_processor = SensoryProcessor()
         self.sensory_interface = SensoryInterface(self.sensory_processor)
 
@@ -287,7 +282,8 @@ class CognitiveAgent:
         
         # Estimate cognitive effort required
         effort_required = 0.5  # Default effort
-        if len(processed_input.get("raw_input", "")) > 100:            effort_required = 0.7  # Longer inputs require more effort
+        if len(processed_input.get("raw_input", "")) > 100:
+            effort_required = 0.7  # Longer inputs require more effort
         
         # Allocate attention using the attention mechanism
         attention_result = self.attention.allocate_attention(
@@ -361,7 +357,7 @@ class CognitiveAgent:
             
         import asyncio
         loop = asyncio.get_event_loop()
-        
+
         def make_openai_call():
             if not self.openai_client:
                 raise Exception("OpenAI client is None - API key not configured")
@@ -373,7 +369,7 @@ class CognitiveAgent:
             )
             content = response.choices[0].message.content
             return content.strip() if content is not None else ""
-        
+
         return await loop.run_in_executor(None, make_openai_call)
 
     def set_system_prompt(self, prompt: str):
@@ -747,47 +743,51 @@ class CognitiveAgent:
         """
         if not self.neural_integration:
             return attention_result  # Return original if neural integration unavailable
-        
+
         try:
             # Get embedding from processed input
             if 'embedding' not in processed_input:
                 return attention_result
-            
+
             embedding = processed_input['embedding']
-            
+
+            # Import torch and numpy locally to avoid unused import warnings if neural integration is not used
+            import torch
+            import numpy as np
+
             # Convert to torch tensor if needed
             if isinstance(embedding, np.ndarray):
                 embedding_tensor = torch.from_numpy(embedding).float().unsqueeze(0)  # Add batch dim
             else:
                 embedding_tensor = torch.tensor(embedding, dtype=torch.float32).unsqueeze(0)
-            
+
             # Create attention scores tensor
             attention_scores = torch.tensor([base_salience], dtype=torch.float32)
-            
+
             # Process through neural network
             neural_result = await self.neural_integration.process_attention_update(
                 embedding_tensor,
                 attention_scores,
                 salience_scores=torch.tensor([novelty], dtype=torch.float32)
             )
-            
+
             if 'error' not in neural_result:
                 # Extract neural predictions
                 novelty_scores = neural_result.get('novelty_scores', torch.tensor([novelty]))
                 processing_quality = neural_result.get('processing_quality', 1.0)
-                
+
                 # Enhance attention scores with neural predictions
                 if len(novelty_scores) > 0:
                     enhanced_novelty = float(novelty_scores[0])
-                    
+
                     # Calculate enhancement factor
                     neural_enhancement = min(0.2, enhanced_novelty * 0.1)  # Cap at 20% boost
-                    
+
                     # Apply enhancement to attention result
                     enhanced_attention_score = min(1.0, 
                         attention_result.get("attention_score", 0.5) + neural_enhancement
                     )
-                    
+
                     # Update attention result
                     attention_result.update({
                         "attention_score": enhanced_attention_score,
@@ -796,12 +796,12 @@ class CognitiveAgent:
                         "neural_processing_quality": processing_quality,
                         "neural_enhanced": True
                     })
-                    
+
                     print(f"🧠 Neural attention enhancement: +{neural_enhancement:.3f} "
                           f"(novelty: {enhanced_novelty:.3f})")
-                
+
             return attention_result
-            
+
         except Exception as e:
             print(f"⚠ Neural attention enhancement error: {e}")
             return attention_result  # Return original on error
