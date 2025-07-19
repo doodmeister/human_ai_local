@@ -40,6 +40,7 @@ from src.interfaces.api.procedural_api import router as procedural_router
 from src.interfaces.api.prospective_api import router as prospective_router
 from src.interfaces.api.semantic_api import router as semantic_router
 from src.interfaces.api.agent_api import router as agent_router
+from src.interfaces.api.executive_api import router as executive_router
 
 
 @asynccontextmanager
@@ -64,6 +65,7 @@ app.include_router(procedural_router, prefix="/api")
 app.include_router(prospective_router, prefix="/api")
 app.include_router(semantic_router, prefix="/api")
 app.include_router(agent_router, prefix="/api/agent")
+app.include_router(executive_router, prefix="/api/executive")
 
 # Reflection state (for status/report endpoints)
 reflection_lock = threading.Lock()
