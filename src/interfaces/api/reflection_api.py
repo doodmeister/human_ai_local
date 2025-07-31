@@ -59,6 +59,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Health check endpoint for launcher verification
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for verifying server is running."""
+    return {"status": "healthy", "service": "George Cognitive API"}
+
 # Register all routers under /api
 app.include_router(memory_router, prefix="/api")
 app.include_router(procedural_router, prefix="/api")

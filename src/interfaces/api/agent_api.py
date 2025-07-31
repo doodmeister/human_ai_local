@@ -67,11 +67,29 @@ async def list_memories(system: str, request: Request):
     """
     agent = request.app.state.agent
     if system == "stm":
-        # Return all STM items as dicts
-        return {"memories": [item.__dict__ for item in agent.memory.stm.items.values()]}
+        # Return all STM items using get_all_memories method
+        stm_memories = agent.memory.stm.get_all_memories()
+        return {"memories": [item.__dict__ for item in stm_memories]}
     elif system == "ltm":
-        # Return all LTM records as dicts
-        return {"memories": [record.to_dict() for record in agent.memory.ltm.memories.values()]}
+        # Return all LTM records directly from collection
+        try:
+            ltm_collection = agent.memory.ltm.collection
+            if ltm_collection:
+                result = ltm_collection.get()
+                memories = []
+                if result.get('ids'):
+                    for i, memory_id in enumerate(result['ids']):
+                        memory_dict = {
+                            'id': memory_id,
+                            'content': result.get('documents', [])[i] if i < len(result.get('documents', [])) else '',
+                            'metadata': result.get('metadatas', [])[i] if i < len(result.get('metadatas', [])) else {}
+                        }
+                        memories.append(memory_dict)
+                return {"memories": memories}
+            else:
+                return {"memories": []}
+        except Exception as e:
+            return {"error": f"Failed to retrieve LTM memories: {str(e)}"}
     else:
         return {"error": "Invalid system. Use 'stm' or 'ltm'."}
 

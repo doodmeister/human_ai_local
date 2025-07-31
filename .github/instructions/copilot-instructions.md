@@ -3,12 +3,15 @@ applyTo: '**'
 ---
 All code should be written in python
 The terminal is bash running on windows 11
-run all commands in the terminal without prompting to continue
-use Git commands when necessary
+Always make sure the environment is activated before running commands
+Use Git commands when necessary
 emojis in bash commands cause encoding issues
-avoid emojis in bash commands.
+Do not put emojis in bash commands
 All test scripts should be saved in the tests/ directory
-ruff is our linter
+Use `ruff` as our linter
+Use `pytest` as our test framework
+Use `uv` as our package manager
+
 
 # Human-AI Cognition Project - AI Assistant Instructions
 
@@ -153,36 +156,6 @@ FATIGUE_DECAY_RATE=0.01
 ATTENTION_RECOVERY_RATE=0.05
 ```
 
-## STM & Attention Integration Examples
-```python
-# Complete cognitive processing with STM and attention
-from src.core.cognitive_agent import CognitiveAgent
-
-agent = CognitiveAgent()
-
-# Process input through complete pipeline
-response = await agent.process_input("I love programming in Python")
-
-# Check cognitive state including STM and attention
-status = agent.get_cognitive_status()
-print(f"STM Status: {status['memory_status']['stm']}")
-print(f"Attention Status: {status['attention_status']}")
-print(f"Cognitive Integration: {status['cognitive_integration']}")
-
-# Direct STM operations
-stm_memories = agent.memory.stm.get_all_memories()
-search_results = agent.memory.stm.search_semantic("programming", max_results=3)
-
-# Attention management
-break_results = agent.take_cognitive_break(duration_minutes=1.0)
-print(f"Cognitive load reduced: {break_results['cognitive_load_reduction']:.3f}")
-print(f"Recovery effective: {break_results['recovery_effective']}")
-
-# Reflection with STM analysis
-reflection = agent.reflect()
-stm_stats = reflection['stm_metacognitive_stats']
-print(f"STM Capacity Utilization: {stm_stats['capacity_utilization']:.1%}")
-```
 
 ## Unique Features
 - **Biologically-Inspired STM**: 7-item capacity with LRU eviction and activation-based decay
@@ -221,33 +194,4 @@ print(f"STM Capacity Utilization: {stm_stats['capacity_utilization']:.1%}")
 - Prioritize explainability and user-facing value
 - Test for human-likeness, not just functionality
 - Use terminal commands without prompting to continue
-
-## Procedural Memory System (June 2025)
-- **ProceduralMemory** is now unified with STM and LTM. Procedures (skills, routines, action sequences) can be stored as either short-term or long-term memories.
-- Unified API: Store, retrieve, search, use, delete, and clear procedural memories via the same interface as other memory types.
-- **Persistence:** Procedures in LTM are persistent; STM procedures are in-memory only.
-- **Tested:** Comprehensive tests ensure correct storage, retrieval, and deletion from both STM and LTM.
-
-## CLI Integration
-- The `george_cli.py` script supports procedural memory management:
-  - `/procedure add` — interactively add a new procedure (description, steps, tags, STM/LTM)
-  - `/procedure list` — list all stored procedures
-  - `/procedure search <query>` — search procedures by description/steps
-  - `/procedure use <id>` — increment usage and display steps for a procedure
-  - `/procedure delete <id>` — delete a procedure by ID
-  - `/procedure clear` — remove all procedural memories
-
-## Example: Using Procedural Memory in Python
-```python
-from src.memory.memory_system import MemorySystem
-memsys = MemorySystem()
-proc_id = memsys.procedural.store(
-    description="How to make tea",
-    steps=["Boil water", "Add tea leaves", "Steep", "Pour into cup"],
-    tags=["kitchen", "beverage"],
-    memory_type="ltm"  # or "stm"
-)
-proc = memsys.procedural.retrieve(proc_id)
-print(proc)
-```
-
+- Ensure all components are production-ready
