@@ -526,7 +526,12 @@ human_ai_local/
 ├── config/                     # Configuration files
 ├── scripts/                    # Utility scripts
 ├── notebooks/                  # Jupyter notebooks
-└── infrastructure/             # Infrastructure as Code
+├── infrastructure/             # Infrastructure as Code
+├── start_server.py            # Core API server startup
+├── start_george.py            # Python launcher (all platforms)
+├── start_george.sh            # Shell script (Git Bash/Linux/Mac)
+├── STARTUP_README.md          # Startup instructions
+└── STARTUP_GUIDE.md           # Detailed troubleshooting
 ```
 
 ## Quick Start
@@ -541,17 +546,51 @@ cp .env.example .env
 # Edit .env with your OpenAI API key
 ```
 
-### **Running the System**
+### **🚀 One-Command Startup**
+The fastest way to start George is with the startup scripts:
 ```bash
-# 1. Start the backend API server (all endpoints):
-python -m uvicorn src.interfaces.api.reflection_api:app --reload --port 8000
+# Git Bash / Linux / Mac users:
+./start_george.sh
 
-# 2. Use the CLI interface:
-python scripts/george_cli.py
-
-# 3. Launch the Streamlit dashboard:
-streamlit run scripts/george_streamlit.py
+# Any terminal:
+python start_george.py
 ```
+These scripts automatically:
+- ✅ Detect your virtual environment
+- ✅ Start the API server with timeout fixes
+- ✅ Launch the Streamlit interface  
+- ✅ Handle initialization progress
+- ✅ Open your browser automatically
+# Edit .env with your OpenAI API key
+```
+
+### **Running the System**
+
+#### **🚀 Quick Start (Recommended)**
+```bash
+# Option 1: Git Bash / Linux / Mac
+./start_george.sh
+
+# Option 2: Any terminal
+python start_george.py
+```
+
+#### **🔧 Manual Startup (Advanced)**
+```bash
+# 1. Start the backend API server:
+python start_server.py
+
+# 2. In another terminal, start the Streamlit interface:
+python -m streamlit run scripts/george_streamlit_production.py --server.port 8501
+
+# 3. Use the CLI interface (optional):
+python scripts/george_cli.py
+```
+
+#### **📍 Access Points**
+- **Web Interface**: http://localhost:8501
+- **API Documentation**: http://localhost:8000/docs  
+- **API Health Check**: http://localhost:8000/health
 
 ### **Testing the Executive System**
 ```bash
@@ -602,14 +641,22 @@ asyncio.run(demo_executive())
 ```
 
 ## Streamlit Dashboard (George)
-The new Streamlit interface provides a modern chat UI for interacting with George, including:
-- Real-time chat with the agent (uses the same backend API as the CLI)
-- Context display for each response
-- Sidebar controls to clear chat history
+The production Streamlit interface provides a comprehensive cognitive architecture dashboard including:
+- Enhanced chat interface with cognitive monitoring
+- Real-time attention and memory system status
+- Executive functioning controls and goal management
+- Memory exploration across STM, LTM, episodic, and semantic systems
+- Metacognitive reflection and system diagnostics
 
 To launch:
 ```bash
-streamlit run scripts/george_streamlit.py
+# Use the startup scripts (recommended)
+./start_george.sh
+# or
+python start_george.py
+
+# Or manually start just the interface
+python -m streamlit run scripts/george_streamlit_production.py --server.port 8501
 ```
 Then open [http://localhost:8501](http://localhost:8501) in your browser.
 

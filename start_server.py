@@ -12,15 +12,14 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 try:
-    from src.interfaces.api.reflection_api import app
+    from george_api_simple import app
     print("✅ API app imported successfully")
-    print("🚀 Starting Executive API server on http://localhost:8000...")
+    print("🚀 Starting George Cognitive API server on http://localhost:8000...")
     print("📋 Available endpoints:")
-    print("   POST /api/executive/goals - Create a goal")  
-    print("   GET  /api/executive/goals - List all goals")
-    print("   GET  /api/executive/goals/{id} - Get specific goal")
-    print("   GET  /api/executive/status - Get executive status")
-    print("   + 10 more endpoints for tasks, decisions, resources...")
+    print("   GET  /health - Health check")  
+    print("   GET  /api/agent/status - Get cognitive status")
+    print("   POST /api/agent/process - Process user input")
+    print("   GET  /api/agent/memory/list/{system} - List STM/LTM memories")
     print()
     
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=False, log_level="info")

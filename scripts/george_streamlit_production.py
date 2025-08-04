@@ -84,26 +84,97 @@ class GeorgeAPI:
     """API client for George's cognitive backend"""
     
     @staticmethod
-    def get(endpoint: str) -> Dict[str, Any]:
-        """GET request to George API"""
+    def get(endpoint: str, timeout: int = 60) -> Dict[str, Any]:
+        """GET request to George API with configurable timeout"""
         try:
-            response = requests.get(f"{API_BASE_URL}{endpoint}", timeout=10)
+            response = requests.get(f"{API_BASE_URL}{endpoint}", timeout=timeout)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.Timeout:
+            st.error(f"⏱️ Request timed out after {timeout}s. Agent may still be initializing...")
+            return {"error": f"Timeout after {timeout}s", "status": "timeout"}
         except requests.exceptions.RequestException as e:
             st.error(f"API Error: {e}")
             return {"error": str(e)}
     
     @staticmethod
-    def post(endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """POST request to George API"""
+    def post(endpoint: str, data: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
+        """POST request to George API with configurable timeout"""
         try:
-            response = requests.post(f"{API_BASE_URL}{endpoint}", json=data, timeout=30)
+            response = requests.post(f"{API_BASE_URL}{endpoint}", json=data, timeout=timeout)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.Timeout:
+            st.error(f"⏱️ Request timed out after {timeout}s. Processing may be taking longer than expected...")
+            return {"error": f"Timeout after {timeout}s", "status": "timeout"}
         except requests.exceptions.RequestException as e:
             st.error(f"API Error: {e}")
             return {"error": str(e)}
+
+def check_api_connection() -> bool:
+    """Check if the George API is accessible and responsive"""
+    try:
+        # Simple health check with short timeout first
+        response = requests.get(f"{API_BASE_URL}/health", timeout=5)
+        if response.status_code == 200:
+            return True
+    except:
+        pass
+    return False
+
+def wait_for_agent_initialization():
+    """Wait for agent to fully initialize with progress indication"""
+    if 'agent_initialized' not in st.session_state:
+        st.session_state.agent_initialized = False
+    
+    if not st.session_state.agent_initialized:
+        with st.spinner("🧠 Initializing George's cognitive architecture..."):
+            # Check if API is responding
+            if not check_api_connection():
+                st.error("❌ Cannot connect to George API server. Please ensure:")
+                st.markdown("""
+                - The API server is running: `python start_server.py`
+                - The server is accessible at http://localhost:8000
+                - No firewall is blocking the connection
+                """)
+                st.stop()
+            
+            # Use initialization status endpoint for better feedback
+            max_attempts = 12  # 120 seconds total
+            for attempt in range(max_attempts):
+                try:
+                    init_status = GeorgeAPI.get("/api/agent/init-status", timeout=5)
+                    status = init_status.get("status", "unknown")
+                    message = init_status.get("message", "No status message")
+                    
+                    if status == "ready":
+                        st.session_state.agent_initialized = True
+                        st.success("✅ George's cognitive architecture is ready!")
+                        time.sleep(1)  # Brief pause to show success message
+                        return
+                    elif status == "initializing":
+                        st.info(f"⏳ {message} (attempt {attempt + 1}/{max_attempts})")
+                        time.sleep(10)
+                    elif status == "error":
+                        st.error(f"❌ Initialization failed: {message}")
+                        st.stop()
+                    else:
+                        # Try to trigger initialization by calling agent status
+                        GeorgeAPI.get("/api/agent/status", timeout=5)
+                        time.sleep(5)
+                except Exception as e:
+                    st.warning(f"⚠️ Connection attempt {attempt + 1}/{max_attempts}: {str(e)}")
+                    time.sleep(10)
+            
+            st.error("❌ George's cognitive architecture failed to initialize within 120 seconds")
+            st.markdown("""
+            **Troubleshooting steps:**
+            1. Check if the API server is running: `python start_server.py`
+            2. Check server logs for errors
+            3. Ensure all dependencies are installed: `pip install -r requirements.txt`
+            4. Try restarting the API server
+            """)
+            st.stop()
 
 def initialize_session_state():
     """Initialize Streamlit session state variables"""
@@ -126,36 +197,36 @@ def render_header():
 
 def render_cognitive_status_bar():
     """Render the cognitive status bar"""
-    status_data = GeorgeAPI.get("/api/agent/status")
+    status_data = GeorgeAPI.get("/api/agent/status", timeout=30)  # Longer timeout for status
     
-    if "error" not in status_data:
+    if "error" not in status_data and status_data.get("status") != "timeout":
         col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
-            cognitive_mode = status_data.get("cognitive_mode", "UNKNOWN")
-            mode_color = "status-healthy" if cognitive_mode == "FOCUSED" else "status-warning"
+            cognitive_mode = status_data.get("cognitive_status", {}).get("cognitive_mode", "UNKNOWN")
             st.markdown(f'<div class="cognitive-state">Mode: {cognitive_mode}</div>', unsafe_allow_html=True)
         
         with col2:
-            cognitive_load = status_data.get("attention_status", {}).get("cognitive_load", 0.0)
-            load_color = "status-healthy" if cognitive_load < 0.7 else "status-warning" if cognitive_load < 0.9 else "status-critical"
+            cognitive_load = status_data.get("cognitive_status", {}).get("attention_status", {}).get("cognitive_load", 0.0)
             st.metric("Cognitive Load", f"{cognitive_load:.1%}", delta=None)
         
         with col3:
-            stm_count = status_data.get("memory_status", {}).get("stm", {}).get("vector_db_count", 0)
+            stm_count = status_data.get("cognitive_status", {}).get("memory_status", {}).get("stm", {}).get("vector_db_count", 0)
             st.metric("STM Memories", stm_count)
         
         with col4:
-            ltm_count = status_data.get("memory_status", {}).get("ltm", {}).get("memory_count", 0)
+            ltm_count = status_data.get("cognitive_status", {}).get("memory_status", {}).get("ltm", {}).get("memory_count", 0)
             st.metric("LTM Memories", ltm_count)
         
         with col5:
-            active_processes = status_data.get("active_processes", 0)
+            active_processes = status_data.get("cognitive_status", {}).get("active_processes", 0)
             st.metric("Active Processes", active_processes)
         
         st.session_state.agent_status = status_data
+    elif status_data.get("status") == "timeout":
+        st.warning("⏱️ Cognitive status temporarily unavailable (processing request...)")
     else:
-        st.error("Unable to connect to George's cognitive backend")
+        st.error("❌ Unable to connect to George's cognitive backend")
 
 def render_enhanced_chat():
     """Render the enhanced chat interface with cognitive integration"""
@@ -510,14 +581,255 @@ def render_executive_dashboard():
         st.error("Unable to load executive data")
         st.info("Executive dashboard coming in Phase 1 completion")
 
+def render_procedural_memory():
+    """Render procedural memory interface"""
+    st.subheader("📋 Procedural Memory - Skills & Procedures")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("### Current Procedures")
+        
+        # Get procedural memories
+        procedures_data = GeorgeAPI.get("/api/agent/memory/procedural/list")
+        
+        if "error" not in procedures_data:
+            procedures = procedures_data.get("procedures", [])
+            
+            if procedures:
+                for i, proc in enumerate(procedures):
+                    with st.expander(f"🔧 {proc.get('description', 'Unnamed Procedure')}"):
+                        st.write(f"**Steps:** {len(proc.get('steps', []))}")
+                        for j, step in enumerate(proc.get('steps', []), 1):
+                            st.write(f"{j}. {step}")
+                        st.write(f"**Tags:** {', '.join(proc.get('tags', []))}")
+                        st.write(f"**Usage Count:** {proc.get('usage_count', 0)}")
+            else:
+                st.info("No procedures stored yet. Create your first procedure!")
+        else:
+            st.warning("Unable to load procedural memories")
+    
+    with col2:
+        st.markdown("### Create New Procedure")
+        
+        with st.form("create_procedure"):
+            proc_description = st.text_input("Procedure Name", placeholder="e.g., Morning Coffee Routine")
+            
+            # Dynamic steps input
+            num_steps = st.number_input("Number of Steps", min_value=1, max_value=20, value=3)
+            steps = []
+            for i in range(num_steps):
+                step = st.text_input(f"Step {i+1}", placeholder=f"Enter step {i+1}")
+                if step:
+                    steps.append(step)
+            
+            proc_tags = st.text_input("Tags (comma-separated)", placeholder="routine, daily, morning")
+            memory_type = st.selectbox("Store in", ["stm", "ltm"])
+            importance = st.slider("Importance", 0.0, 1.0, 0.5)
+            
+            if st.form_submit_button("Create Procedure", type="primary"):
+                if proc_description and steps:
+                    tags_list = [tag.strip() for tag in proc_tags.split(",") if tag.strip()]
+                    
+                    response = GeorgeAPI.post("/api/agent/memory/procedural/create", {
+                        "description": proc_description,
+                        "steps": steps,
+                        "tags": tags_list,
+                        "memory_type": memory_type,
+                        "importance": importance
+                    })
+                    
+                    if "error" not in response:
+                        st.success(f"Procedure '{proc_description}' created successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to create procedure: {response.get('error')}")
+                else:
+                    st.error("Please provide a description and at least one step")
+
+def render_prospective_memory():
+    """Render prospective memory interface"""
+    st.subheader("📅 Prospective Memory - Future Intentions & Reminders")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("### Active Reminders")
+        
+        # Get prospective memories
+        reminders_data = GeorgeAPI.get("/api/agent/memory/prospective/list")
+        
+        if "error" not in reminders_data:
+            reminders = reminders_data.get("reminders", [])
+            
+            if reminders:
+                for reminder in reminders:
+                    with st.expander(f"⏰ {reminder.get('description', 'Unnamed Reminder')}"):
+                        st.write(f"**Created:** {reminder.get('created_at', 'Unknown')}")
+                        if reminder.get('trigger_time'):
+                            st.write(f"**Trigger Time:** {reminder.get('trigger_time')}")
+                        st.write(f"**Tags:** {', '.join(reminder.get('tags', []))}")
+                        st.write(f"**Status:** {'Completed' if reminder.get('completed') else 'Active'}")
+            else:
+                st.info("No active reminders. Create your first reminder!")
+        else:
+            st.warning("Unable to load prospective memories")
+    
+    with col2:
+        st.markdown("### Create New Reminder")
+        
+        with st.form("create_reminder"):
+            reminder_desc = st.text_area("Reminder Description", placeholder="e.g., Call dentist for appointment")
+            
+            # Date and time selection
+            reminder_date = st.date_input("Reminder Date")
+            reminder_time = st.time_input("Reminder Time")
+            
+            # Combine date and time
+            if reminder_date and reminder_time:
+                from datetime import datetime
+                trigger_datetime = datetime.combine(reminder_date, reminder_time)
+                trigger_time_str = trigger_datetime.isoformat()
+            else:
+                trigger_time_str = None
+            
+            reminder_tags = st.text_input("Tags (comma-separated)", placeholder="important, health, appointment")
+            
+            if st.form_submit_button("Create Reminder", type="primary"):
+                if reminder_desc:
+                    tags_list = [tag.strip() for tag in reminder_tags.split(",") if tag.strip()]
+                    
+                    response = GeorgeAPI.post("/api/agent/memory/prospective/create", {
+                        "description": reminder_desc,
+                        "trigger_time": trigger_time_str,
+                        "tags": tags_list
+                    })
+                    
+                    if "error" not in response:
+                        st.success(f"Reminder created successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to create reminder: {response.get('error')}")
+                else:
+                    st.error("Please provide a description")
+
+def render_neural_analytics():
+    """Render neural activity monitoring and performance analytics"""
+    st.subheader("🔬 Neural Activity & Performance Analytics")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Neural Network Status")
+        
+        neural_data = GeorgeAPI.get("/api/neural/status")
+        
+        if "error" not in neural_data:
+            # DPAD Network Status
+            st.markdown("#### DPAD Network (Attention Enhancement)")
+            dpad_available = neural_data.get("dpad_available", False)
+            st.write(f"Status: {'🟢 Active' if dpad_available else '🔴 Inactive'}")
+            
+            if dpad_available:
+                activity = neural_data.get("neural_activity", {})
+                attention_boost = activity.get("attention_enhancement", 0.0)
+                
+                # Create gauge for attention enhancement
+                fig_attention = go.Figure(go.Indicator(
+                    mode = "gauge+number",
+                    value = attention_boost * 100,
+                    domain = {'x': [0, 1], 'y': [0, 1]},
+                    title = {'text': "Attention Boost %"},
+                    gauge = {
+                        'axis': {'range': [None, 100]},
+                        'bar': {'color': "darkblue"},
+                        'steps': [
+                            {'range': [0, 50], 'color': "lightgray"},
+                            {'range': [50, 80], 'color': "yellow"},
+                            {'range': [80, 100], 'color': "green"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 90
+                        }
+                    }
+                ))
+                fig_attention.update_layout(height=300)
+                st.plotly_chart(fig_attention, use_container_width=True)
+            
+            # LSHN Network Status
+            st.markdown("#### LSHN Network (Memory Consolidation)")
+            lshn_available = neural_data.get("lshn_available", False)
+            st.write(f"Status: {'🟢 Active' if lshn_available else '🔴 Inactive'}")
+            
+            if lshn_available:
+                consolidation = neural_data.get("neural_activity", {}).get("consolidation_activity", 0.0)
+                st.progress(consolidation, text=f"Consolidation Activity: {consolidation:.1%}")
+        else:
+            st.warning("Unable to load neural status")
+    
+    with col2:
+        st.markdown("### Performance Analytics")
+        
+        analytics_data = GeorgeAPI.get("/api/analytics/performance")
+        
+        if "error" not in analytics_data:
+            efficiency = analytics_data.get("cognitive_efficiency", {})
+            usage = analytics_data.get("usage_statistics", {})
+            trends = analytics_data.get("trends", {})
+            
+            # Cognitive Efficiency Metrics
+            st.markdown("#### Cognitive Efficiency")
+            col2a, col2b = st.columns(2)
+            
+            with col2a:
+                st.metric("Overall Efficiency", f"{efficiency.get('overall', 0.0):.1%}")
+                st.metric("Memory Efficiency", f"{efficiency.get('memory', 0.0):.1%}")
+            
+            with col2b:
+                st.metric("Attention Efficiency", f"{efficiency.get('attention', 0.0):.1%}")
+                st.metric("Processing Efficiency", f"{efficiency.get('processing', 0.0):.1%}")
+            
+            # Usage Statistics
+            st.markdown("#### Usage Statistics")
+            session_duration = usage.get("session_duration", 0)
+            hours = session_duration // 3600
+            minutes = (session_duration % 3600) // 60
+            
+            st.write(f"**Session Duration:** {hours}h {minutes}m")
+            st.write(f"**Interactions:** {usage.get('interactions', 0)}")
+            st.write(f"**Error Rate:** {usage.get('error_rate', 0.0):.1%}")
+            
+            # Trends
+            st.markdown("#### Performance Trends")
+            st.write(f"**Cognitive Load:** {trends.get('cognitive_load_trend', 'Unknown')}")
+            st.write(f"**Memory Usage:** {trends.get('memory_usage_trend', 'Unknown')}")
+            st.write(f"**Performance:** {trends.get('performance_trend', 'Unknown')}")
+            
+            # Performance Chart
+            if st.button("🔄 Refresh Analytics"):
+                st.rerun()
+        else:
+            st.warning("Unable to load performance analytics")
+
 def main():
     """Main application entry point"""
     initialize_session_state()
+    wait_for_agent_initialization()  # Add initialization check
     render_header()
     render_cognitive_status_bar()
     
-    # Main interface tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["💬 Enhanced Chat", "🧠 Memory Dashboard", "🎯 Attention Monitor", "🎯 Executive Dashboard"])
+    # Main interface tabs - Phase 1 + Phase 2 Features
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "💬 Enhanced Chat", 
+        "🧠 Memory Dashboard", 
+        "🎯 Attention Monitor", 
+        "🎯 Executive Dashboard",
+        "📋 Procedural Memory",
+        "📅 Prospective Memory", 
+        "🔬 Neural & Analytics"
+    ])
     
     with tab1:
         render_enhanced_chat()
@@ -531,9 +843,18 @@ def main():
     with tab4:
         render_executive_dashboard()
     
+    with tab5:
+        render_procedural_memory()
+    
+    with tab6:
+        render_prospective_memory()
+    
+    with tab7:
+        render_neural_analytics()
+    
     # Footer
     st.divider()
-    st.markdown("*George - Human-AI Cognitive Architecture | Phase 1 Production Interface*")
+    st.markdown("*George - Human-AI Cognitive Architecture | Phase 1 + Phase 2 Features*")
 
 if __name__ == "__main__":
     main()

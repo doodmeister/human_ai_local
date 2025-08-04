@@ -40,14 +40,15 @@ This directory contains world-class Streamlit interfaces for interacting with Ge
 
 ## 🚀 Quick Start
 
-### Option 1: Use the Launcher Scripts
+### Option 1: Use the Startup Scripts (Recommended)
 ```bash
-# Windows
-./launch_george.bat
+# From the main project directory
 
-# Linux/Mac
-chmod +x launch_george.sh
-./launch_george.sh
+# Git Bash / Linux / Mac
+../start_george.sh
+
+# Any terminal
+python ../start_george.py
 ```
 
 ### Option 2: Direct Launch
@@ -55,10 +56,10 @@ chmod +x launch_george.sh
 # Install requirements
 pip install streamlit plotly pandas requests
 
-# Standard interface (recommended)
-streamlit run george_streamlit.py --server.port 8501
+# Production interface (recommended)
+streamlit run george_streamlit_production.py --server.port 8501
 
-# Enhanced interface (full-featured)
+# Enhanced interface (full-featured)  
 streamlit run george_streamlit_enhanced.py --server.port 8502
 ```
 
@@ -67,7 +68,7 @@ streamlit run george_streamlit_enhanced.py --server.port 8502
 1. **George API Server** must be running:
    ```bash
    # From the main project directory
-   python src/interfaces/api/reflection_api.py
+   python start_server.py
    ```
    API will be available at: http://localhost:8000
 
