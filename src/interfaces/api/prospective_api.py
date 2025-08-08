@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional, List, Any
+from typing import Optional, List
 
 router = APIRouter()
 
@@ -15,9 +15,7 @@ def process_due_reminders(request: Request):
     ltm = agent.memory.ltm
     count = memsys.process_due_reminders(ltm_system=ltm)
     return {"processed": count}
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
-from typing import Optional, List, Any
+from fastapi import APIRouter, Request
 
 router = APIRouter()
 

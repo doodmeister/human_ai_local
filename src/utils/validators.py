@@ -8,8 +8,7 @@ to ensure data integrity and security throughout the cognitive pipeline.
 import re
 import html
 import logging
-from typing import Any, Dict, List, Optional, Union
-from datetime import datetime
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

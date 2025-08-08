@@ -14,13 +14,10 @@ Date: July 2025
 
 import streamlit as st
 import requests
-import json
 import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 # Page configuration
 st.set_page_config(
@@ -706,7 +703,7 @@ def render_prospective_memory():
                     })
                     
                     if "error" not in response:
-                        st.success(f"Reminder created successfully!")
+                        st.success("Reminder created successfully!")
                         st.rerun()
                     else:
                         st.error(f"Failed to create reminder: {response.get('error')}")

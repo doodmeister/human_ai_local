@@ -21,19 +21,15 @@ Version: 2.0.0
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import (
-    Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING, 
-    Protocol, runtime_checkable, Callable, Set
+    Any, Dict, List, Optional, Tuple, TYPE_CHECKING, 
+    Protocol, runtime_checkable
 )
-from weakref import WeakSet
 
 from .stm import VectorShortTermMemory, STMConfiguration
 from .ltm import VectorLongTermMemory

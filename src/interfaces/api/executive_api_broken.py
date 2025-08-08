@@ -26,14 +26,12 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from datetime import datetime
-import uuid
 
 from ...executive.executive_agent import ExecutiveAgent
 from ..executive.goals import GoalPriority
 from ...executive.tasks import TaskStatus
-from ...executive.controller import CognitiveMode
 
 router = APIRouter()
 

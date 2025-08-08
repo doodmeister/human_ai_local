@@ -3,7 +3,6 @@
 Test runner script that properly sets up the Python path for src-layout projects.
 """
 import sys
-import os
 from pathlib import Path
 
 # Add src to the Python path

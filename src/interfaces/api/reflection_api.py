@@ -23,7 +23,7 @@ Returns:
 
 Requirements: fastapi, uvicorn
 """
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 import threading

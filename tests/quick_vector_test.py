@@ -5,8 +5,7 @@ Quick test for vector-only memory systems
 import sys
 sys.path.append('.')
 
-from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration, MemoryItem
-from datetime import datetime
+from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration
 import tempfile
 
 def main():

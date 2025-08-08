@@ -187,7 +187,7 @@ async def enhanced_chat(chat_request: ChatRequest, request: Request):
                 memory_context = []
         
         # Track memory events (simulated for now)
-        memory_events = [f"Stored interaction in STM"]
+        memory_events = ["Stored interaction in STM"]
         
         # Get cognitive state
         cognitive_state = {

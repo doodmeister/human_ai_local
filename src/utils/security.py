@@ -8,13 +8,11 @@ the cognitive agent from various threats.
 
 import hashlib
 import secrets
-import time
 import logging
 import re
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Set
-import os
+from typing import Dict, Set
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +193,7 @@ class SecurityManager:
         """
         if token in self._session_tokens:
             del self._session_tokens[token]
-            logger.info(f"Revoked session token")
+            logger.info("Revoked session token")
     
     def sanitize_input(self, input_text: str) -> str:
         """

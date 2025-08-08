@@ -184,7 +184,7 @@ def main():
                         if response.json().get("success"):
                             print(f"[George] Procedure {proc_id} deleted.")
                         else:
-                            print(f"[George] Procedure not found or could not be deleted.")
+                            print("[George] Procedure not found or could not be deleted.")
                     except requests.exceptions.RequestException as e:
                         if e.response and e.response.status_code == 404:
                             print("[George] Procedure not found.")
