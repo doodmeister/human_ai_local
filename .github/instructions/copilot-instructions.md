@@ -115,46 +115,7 @@ human_ai_local/
 
 ## Testing Strategy
 - Unit, Integration, Cognitive, Performance tests
-
-## Quick Start
-```bash
-# Initialize and test the cognitive agent with STM and attention
-python -c "
-import asyncio
-from src.core.cognitive_agent import CognitiveAgent
-
-async def test_system():
-    agent = CognitiveAgent()
-    response = await agent.process_input('Hello, I am a software engineer')
-    status = agent.get_cognitive_status()
-    print(f'STM memories: {status[\"memory_status\"][\"stm\"][\"vector_db_count\"]}')
-    print(f'Attention load: {status[\"attention_status\"][\"cognitive_load\"]:.3f}')
-    await agent.shutdown()
-
-asyncio.run(test_system())
-"
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run comprehensive tests
-python -m pytest tests/test_memory_integration.py -v
-python -m pytest tests/test_attention_integration.py -v
-```
-
-## Environment Setup
-Create `.env` file:
-```
-OPENAI_API_KEY=your_key_here
-CHROMA_PERSIST_DIR=./data/memory_stores
-STM_COLLECTION=stm_memories
-LTM_COLLECTION=ltm_memories
-STM_CAPACITY=7
-ATTENTION_MAX_ITEMS=7
-ATTENTION_SALIENCE_THRESHOLD=0.5
-FATIGUE_DECAY_RATE=0.01
-ATTENTION_RECOVERY_RATE=0.05
-```
+- Use pytest for all testing
 
 
 ## Unique Features

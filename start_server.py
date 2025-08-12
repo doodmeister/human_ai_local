@@ -13,6 +13,10 @@ sys.path.insert(0, str(project_root))
 
 try:
     from george_api_simple import app
+    from src.interfaces.api import chat_router
+
+    app.include_router(chat_router)
+
     print("✅ API app imported successfully")
     print("🚀 Starting George Cognitive API server on http://localhost:8000...")
     print("📋 Available endpoints:")

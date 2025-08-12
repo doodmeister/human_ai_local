@@ -20,7 +20,6 @@ class MemoryConfig:
     chroma_persist_dir: Optional[str] = None
     ltm_similarity_threshold: float = 0.7
     ltm_max_results: int = 10
-    use_vector_stm: bool = True
     use_vector_ltm: bool = True
 
     # Semantic Memory
@@ -101,6 +100,36 @@ class PerformanceConfig:
     enable_tensor_cores: bool = True
     
 @dataclass
+class ChatConfig:
+    """Configuration for chat-based interactions"""
+    max_recent_turns: int = 8
+    max_context_items: int = 16
+    stm_activation_min: float = 0.15
+    ltm_similarity_threshold: float = 0.62
+    retrieval_timeout_ms: int = 400
+    fallback_min_overlap: float = 0.15
+    streaming_enabled: bool = True
+    performance_target_p95_ms: int = 1000
+    scoring_version: str = "v1.0"
+    preview_max_items: int = 8
+    preview_max_content_chars: int = 120
+
+    def to_dict(self) -> dict:
+        return {
+            "max_recent_turns": self.max_recent_turns,
+            "max_context_items": self.max_context_items,
+            "stm_activation_min": self.stm_activation_min,
+            "ltm_similarity_threshold": self.ltm_similarity_threshold,
+            "retrieval_timeout_ms": self.retrieval_timeout_ms,
+            "fallback_min_overlap": self.fallback_min_overlap,
+            "streaming_enabled": self.streaming_enabled,
+            "performance_target_p95_ms": self.performance_target_p95_ms,
+            "scoring_version": self.scoring_version,
+            "preview_max_items": self.preview_max_items,
+            "preview_max_content_chars": self.preview_max_content_chars,
+        }
+
+@dataclass
 class CognitiveConfig:
     """Main configuration class for the cognitive system"""
     # Core settings
@@ -115,6 +144,7 @@ class CognitiveConfig:
     aws: AWSConfig = field(default_factory=AWSConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
     
     def __post_init__(self):
         """Create data and model directories after initialization"""
@@ -144,3 +174,17 @@ class CognitiveConfig:
 
 # Global configuration instance
 config = CognitiveConfig.from_env()
+
+def get_global_config() -> CognitiveConfig:
+    """Return the global cognitive configuration singleton."""
+    return config
+
+def get_chat_config() -> ChatConfig:
+    """Return chat configuration (safe fallback)."""
+    try:
+        # If a global singleton (e.g., get_global_config()) exists, pull chat section.
+        global_config = get_global_config()  # type: ignore
+        return getattr(global_config, "chat", ChatConfig())
+    except Exception:
+        return ChatConfig()
+        return ChatConfig()

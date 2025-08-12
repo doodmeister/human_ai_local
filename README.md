@@ -987,3 +987,82 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Human-AI Cognition Framework** - Building the future of human-like artificial intelligence through biologically-inspired cognitive architectures.
 
 *Version 2.0.0 (July 2025) - Production-Grade Cognitive AI*
+
+## Phase 1 Immediate Priority: Production Chat Interface (In Progress)
+
+Objectives:
+- Real-time cognitively-informed chat
+- Deterministic explainable context assembly
+- End-to-end latency target < 1s (p95)
+- Full provenance for every context item
+
+Core Components (scaffold added):
+- ConversationSession (session state, turns, LRU eviction)
+- ContextBuilder (staged retrieval + provenance)
+- Chat models (TurnRecord, ContextItem, ProvenanceTrace, ChatMetrics)
+- Fallback retrieval strategy placeholder
+- Skipped test scaffolds (tests/test_chat_interface_pipeline.py)
+
+Planned Pipeline Stages:
+1. RecentTurnsSelector
+2. STMSemanticSelector
+3. LTMSemanticSelector
+4. EpisodicAnchorSelector
+5. AttentionFocusInjector
+6. ExecutiveModeAnnotator
+
+Initial Inclusion Rules (prototype):
+- STM activation >= 0.15 (cap 4)
+- LTM similarity >= 0.62 (cap 3)
+- Episodic anchors cap 2 (temporal/tag overlap)
+- Attention focus always included (forced flag)
+
+Metrics (to expose):
+- turn_latency_ms
+- retrieval_time_ms
+- stm_hits / ltm_hits
+- fallback_used
+- attention_boost
+- fatigue_delta
+- consolidation_time_ms
+
+Checklist:
+- [x] Scaffold models
+- [x] Session manager (LRU)
+- [x] Context builder skeleton
+- [x] Skipped test placeholders
+- [x] Emotional & salience tagging utility (heuristic scaffold)
+- [x] Consolidation decision hook (placeholder)
+- [x] Provenance schema (reason, scores dict, source_system)
+- [x] ChatService orchestrator scaffold
+- [x] Chat config (ChatConfig) integrated
+- [x] API /agent/chat endpoint (non-stream + streaming scaffold)
+- [x] Streaming support (placeholder tokens)
+- [x] Attention + executive enrichment scaffold (live mode/focus)
+- [x] Expanded provenance (attention & executive factor annotation)
+- [x] Multi-tier semantic fallback path (recent turns + tokens)
+- [ ] Performance & consolidation tests (p95 tightening)
+- [ ] Performance tuning (<1s p95)
+
+Success Criteria:
+- Deterministic context & ranks
+- Full provenance (item factors + stage rationale)
+- Graceful degraded mode with meaningful fallback
+- Latency & resilience tests pass
+
+Next Implementation Order:
+1. Wire actual STM/LTM/Episodic instances via factory
+2. Attention/executive enrichment
+3. Semantic fallback enhancement
+4. Consolidation + performance tests
+5. Streamlit panels (Chat + Context first)
+6. Latency tuning & p95 verification
+```
+---
+2. Attention/executive enrichment
+3. Semantic fallback enhancement
+4. Consolidation + performance tests
+5. Streamlit panels (Chat + Context first)
+6. Latency tuning & p95 verification
+
+---
