@@ -5,6 +5,10 @@ import time
 import asyncio
 from collections import deque
 from pydantic import BaseModel, Field
+try:  # Pydantic v2
+    from pydantic import ConfigDict
+except Exception:  # fallback for older versions
+    ConfigDict = None  # type: ignore
 
 from .conversation_session import SessionManager
 from .models import TurnRecord
@@ -43,6 +47,12 @@ class ChatService:
         # Snapshot history ring buffer
         history_size = int(self.context_builder.cfg.get("metacog_snapshot_history_size", 50))
         self._metacog_history = deque(maxlen=history_size)
+    # Metacog metrics counters (initialized lazily via metrics_registry)
+    # Counter names:
+    #  - metacog_snapshots_total
+    #  - metacog_advisory_items_total
+    #  - metacog_stm_high_util_events_total
+    #  - metacog_performance_degraded_events_total
 
     def get_context_preview(
         self,
@@ -93,6 +103,45 @@ class ChatService:
         )
         sess.add_turn(user_turn)
 
+        # --- Adaptive retrieval limits (temporary adjustment of max_context_items) ---
+        cfg = self.context_builder.cfg
+        original_max_ctx = cfg.get("max_context_items")
+        adaptive_retrieval_applied = False
+        try:
+            degraded_flag = metrics_registry.state.get("performance_degraded")
+            stm_util_ratio = None
+            # Estimate STM utilization cheaply via consolidator if available
+            cons = getattr(self, "consolidator", None)
+            if cons is not None:
+                stm_obj = getattr(cons, "stm", None)
+                if stm_obj is not None:
+                    cap = getattr(stm_obj, "capacity", None)
+                    size = None
+                    if hasattr(stm_obj, "__len__"):
+                        try:
+                            size = len(stm_obj)  # type: ignore
+                        except Exception:
+                            size = None
+                    if size is None:
+                        size = getattr(stm_obj, "size", None)
+                    if isinstance(size, int) and isinstance(cap, int) and cap:
+                        stm_util_ratio = min(1.0, size / cap)
+            # Heuristic: if degraded or high STM utilization, reduce context size 25-50%
+            if original_max_ctx and isinstance(original_max_ctx, int) and original_max_ctx > 4:
+                reduce_factor = 1.0
+                if degraded_flag:
+                    reduce_factor *= 0.75
+                if stm_util_ratio is not None and stm_util_ratio >= 0.85:
+                    reduce_factor *= 0.75  # compounding -> potentially 0.56
+                if reduce_factor < 0.999:
+                    new_limit = max(4, int(original_max_ctx * reduce_factor))
+                    if new_limit < original_max_ctx:
+                        cfg["max_context_items"] = new_limit
+                        adaptive_retrieval_applied = True
+                        metrics_registry.inc("adaptive_retrieval_applied_total")
+        except Exception:
+            pass
+
         built = self.context_builder.build(
             session=sess,
             query=message,
@@ -100,6 +149,12 @@ class ChatService:
             include_memory=flags.get("include_memory", True),
             include_trace=flags.get("include_trace", True),
         )
+        # Restore original context limit after build
+        if adaptive_retrieval_applied:
+            try:
+                cfg["max_context_items"] = original_max_ctx
+            except Exception:
+                pass
 
         # Prospective memory injection (non-invasive: append dicts only)
         extra_due: list[Dict[str, Any]] = []
@@ -204,6 +259,7 @@ class ChatService:
         if self._metacog_interval > 0 and (self._turn_counter % self._metacog_interval == 0):
             try:
                 self._last_metacog_snapshot = self._metacog_snapshot()
+                metrics_registry.inc("metacog_snapshots_total")
                 attach_metacog = True
             except Exception:
                 pass
@@ -295,6 +351,83 @@ class ChatService:
                 degraded = p95 > target
                 metrics_registry.state["performance_degraded"] = degraded
                 payload["metrics"]["performance_degraded"] = degraded
+        # --- Dynamic metacog interval adjustment ---
+        try:
+            # Use a simple stability heuristic: if last 5 turns not degraded and stm util < 70%, relax interval (+1 up to 10)
+            # If degraded or high util (>=85%) tighten (-1 down to min 2)
+            history_util = []
+            # Estimate current stm util again (cheap best-effort)
+            stm_util = None
+            cons = getattr(self, "consolidator", None)
+            if cons is not None:
+                stm_obj = getattr(cons, "stm", None)
+                if stm_obj is not None:
+                    cap = getattr(stm_obj, "capacity", None)
+                    size = None
+                    if hasattr(stm_obj, "__len__"):
+                        try:
+                            size = len(stm_obj)  # type: ignore
+                        except Exception:
+                            size = None
+                    if size is None:
+                        size = getattr(stm_obj, "size", None)
+                    if isinstance(size, int) and isinstance(cap, int) and cap:
+                        stm_util = min(1.0, size / cap)
+            degraded_flag = metrics_registry.state.get("performance_degraded")
+            current_interval = self._metacog_interval
+            new_interval = current_interval
+            if degraded_flag or (stm_util is not None and stm_util >= 0.85):
+                if current_interval > 2:
+                    new_interval = current_interval - 1
+            else:
+                if (stm_util is None or stm_util < 0.70) and not degraded_flag:
+                    if current_interval < 10:
+                        new_interval = current_interval + 1
+            if new_interval != current_interval:
+                self._metacog_interval = new_interval
+                metrics_registry.state["metacog_interval"] = new_interval
+        except Exception:
+            pass
+        # --- Adaptive STM activation weight modulation (meta-driven) ---
+        try:
+            # Accessible stm via consolidator if available
+            stm_obj = None
+            if getattr(self, 'consolidator', None) is not None:
+                stm_obj = getattr(self.consolidator, 'stm', None)
+            # Only proceed if stm exposes set_activation_weights
+            if stm_obj is not None and hasattr(stm_obj, 'set_activation_weights') and hasattr(stm_obj, 'get_activation_weights'):
+                weights = stm_obj.get_activation_weights()
+                degraded_flag = metrics_registry.state.get('performance_degraded')
+                # Recompute util (reuse above if still in scope)
+                stm_util_ratio = None
+                try:
+                    cap = getattr(stm_obj, 'capacity', None)
+                    size = None
+                    if hasattr(stm_obj, '__len__'):
+                        size = len(stm_obj)  # type: ignore
+                    if isinstance(size, int) and isinstance(cap, int) and cap:
+                        stm_util_ratio = min(1.0, size / cap)
+                except Exception:
+                    pass
+                rec = weights.get('recency', 0.4)
+                freq = weights.get('frequency', 0.3)
+                sal = weights.get('salience', 0.3)
+                adjusted = False
+                # If degraded: bias toward recency (fresh context more reliable)
+                if degraded_flag:
+                    rec += 0.05; sal -= 0.025; freq -= 0.025; adjusted = True
+                # If high utilization: bias toward salience (select stronger memories)
+                if stm_util_ratio is not None and stm_util_ratio >= 0.85:
+                    sal += 0.05; rec -= 0.025; freq -= 0.025; adjusted = True
+                # Clamp non-negative
+                if adjusted:
+                    rec = max(0.01, rec)
+                    freq = max(0.01, freq)
+                    sal = max(0.01, sal)
+                    stm_obj.set_activation_weights(recency=rec, frequency=freq, salience=sal)
+                    metrics_registry.inc('metacog_activation_weight_adjustments_total')
+        except Exception:
+            pass
         return payload
 
     async def process_user_message_stream(
@@ -340,9 +473,12 @@ class ChatService:
         stm_utilization: Optional[float] = None
         stm_capacity: Optional[int] = None
         last_user_turn_status: Optional[str] = None
-        # extra fields allowed
-        class Config:
-            extra = "allow"
+        # Allow extra fields (pydantic v2 style if available, else legacy Config)
+        if ConfigDict is not None:  # pydantic v2
+            model_config = ConfigDict(extra="allow")  # type: ignore
+        else:  # pragma: no cover - legacy compatibility
+            class Config:  # type: ignore
+                extra = "allow"
 
     def _metacog_snapshot(self) -> Dict[str, Any]:
         """Generate a lightweight metacognitive snapshot.
@@ -411,6 +547,9 @@ class ChatService:
         try:
             # Validate and coerce via model (drops invalid fields if any)
             model = self.SnapshotModel(**snap)
+            # Prefer model_dump in v2; fallback to dict()
+            if hasattr(model, "model_dump"):
+                return model.model_dump()
             return model.dict()
         except Exception:
             return snap
@@ -516,6 +655,16 @@ class ChatService:
             "ema_turn_latency_ms": ema,
             "chat_turns_per_sec": tps,
         }
+        # Inject metacog counters summary if present
+        try:
+            mc = {}
+            for k in ("metacog_snapshots_total", "metacog_advisory_items_total", "metacog_stm_high_util_events_total", "metacog_performance_degraded_events_total", "adaptive_retrieval_applied_total"):
+                if k in metrics_registry.counters:
+                    mc[k] = metrics_registry.counters.get(k, 0)
+            if mc:
+                base["metacog"] = {"counters": mc, "interval": self._metacog_interval}
+        except Exception:
+            pass
         if cons_counters:
             stm_total = float(cons_counters.get("stm_store_total", 0))
             ltm_total = float(cons_counters.get("ltm_promotions_total", 0))

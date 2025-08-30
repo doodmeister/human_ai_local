@@ -19,6 +19,7 @@ Version: 2.0.0
 """
 
 import json
+import math
 import logging
 import threading
 from datetime import datetime
@@ -52,7 +53,8 @@ except ImportError:
     Collection = None
 
 # Local imports
-from .short_term_memory import MemoryItem
+# MemoryItem defined in vector_stm module (legacy consolidation)
+from .vector_stm import MemoryItem
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -97,6 +99,16 @@ class STMConfiguration:
     capacity: int = 7
     min_activation_threshold: float = 0.2
     decay_rate: float = 0.1
+    # New decay / activation customization
+    decay_mode: str = "linear"  # one of: linear, exponential, power, sigmoid
+    decay_lambda: float = 0.35   # exponential lambda
+    decay_power_alpha: float = 0.8  # power-law exponent
+    decay_sigmoid_k: float = 0.9    # sigmoid steepness
+    decay_sigmoid_midpoint_hours: float = 0.5  # midpoint in hours
+    # Activation weight defaults (will be normalized)
+    weight_recency: float = 0.4
+    weight_frequency: float = 0.3
+    weight_salience: float = 0.3
     enable_gpu: bool = True
     max_concurrent_operations: int = 4
     connection_timeout: int = 30
@@ -112,6 +124,25 @@ class STMConfiguration:
             raise VectorSTMConfigError("Min activation threshold must be between 0 and 1")
         if not (0.0 <= self.decay_rate <= 1.0):
             raise VectorSTMConfigError("Decay rate must be between 0 and 1")
+        if self.decay_mode not in {"linear", "exponential", "power", "sigmoid"}:
+            raise VectorSTMConfigError("decay_mode must be one of linear|exponential|power|sigmoid")
+        # Basic positive validations
+        for attr in ("decay_lambda", "decay_power_alpha", "decay_sigmoid_k", "decay_sigmoid_midpoint_hours"):
+            if getattr(self, attr) <= 0:
+                raise VectorSTMConfigError(f"{attr} must be > 0")
+        for w in (self.weight_recency, self.weight_frequency, self.weight_salience):
+            if w < 0:
+                raise VectorSTMConfigError("Activation weights must be non-negative")
+
+    def activation_weights(self) -> Dict[str, float]:
+        total = self.weight_recency + self.weight_frequency + self.weight_salience
+        if total <= 0:
+            return {"recency": 0.4, "frequency": 0.3, "salience": 0.3}
+        return {
+            "recency": self.weight_recency / total,
+            "frequency": self.weight_frequency / total,
+            "salience": self.weight_salience / total,
+        }
 
 
 class EmbeddingManager:
@@ -325,7 +356,7 @@ class VectorShortTermMemory:
     - Performance optimizations and resource management
     """
     
-    def __init__(self, config: Optional[STMConfiguration] = None):
+    def __init__(self, config: Optional[STMConfiguration] = None, *, disable_storage: bool = False):
         """
         Initialize Vector STM with configuration.
         
@@ -333,19 +364,20 @@ class VectorShortTermMemory:
             config: STM configuration object. If None, uses default configuration.
         """
         self.config = config or STMConfiguration()
-        self._validate_dependencies()
-        
-        # Initialize components
+        self._disable_storage = disable_storage
+        if not self._disable_storage:
+            self._validate_dependencies()
+        # Initialize components (embedding manager still needed for activation fairness if used)
         self.persist_dir = Path(self.config.chroma_persist_dir or "data/memory_stores/chroma_stm")
         self.embedding_manager = EmbeddingManager(
             self.config.embedding_model,
             self.config.enable_gpu
-        )
+        ) if not disable_storage else None
         self.chroma_manager = ChromaDBManager(
             self.persist_dir,
             self.config.collection_name,
             self.config.connection_timeout
-        )
+        ) if not disable_storage else None
         
         # Thread pool for concurrent operations
         self.executor = ThreadPoolExecutor(max_workers=self.config.max_concurrent_operations)
@@ -432,10 +464,10 @@ class VectorShortTermMemory:
                 except (ValueError, TypeError):
                     pass
             
-            # Calculate recency component
-            age_hours = (now - encoding_time).total_seconds() / 3600
+            # Age and recency computation (configurable)
+            age_hours = max(0.0, (now - encoding_time).total_seconds() / 3600)
             decay_rate = MetadataValidator.validate_numeric_field(metadata.get('decay_rate', self.config.decay_rate), 'decay_rate')
-            recency = max(0.0, 1.0 - (age_hours * decay_rate))
+            recency = self._compute_recency(age_hours, decay_rate)
             
             # Calculate frequency component
             access_count = max(0, int(metadata.get('access_count', 0)))
@@ -446,13 +478,67 @@ class VectorShortTermMemory:
             attention = MetadataValidator.validate_numeric_field(metadata.get('attention_score', 0.0), 'attention_score')
             salience = (importance + attention) / 2.0
             
-            # Weighted combination
-            activation = (recency * 0.4) + (frequency * 0.3) + (salience * 0.3)
+            # Weighted combination (config-driven)
+            w = self.config.activation_weights()
+            activation = (recency * w["recency"]) + (frequency * w["frequency"]) + (salience * w["salience"])
             
             return max(0.0, min(1.0, activation))
         except Exception as e:
             logger.error(f"Failed to calculate activation: {e}")
             return 0.0
+
+    # --- New helper methods for configurable decay ---
+    def _compute_recency(self, age_hours: float, item_decay_rate: float) -> float:
+        """Compute recency component based on configured decay mode.
+
+        Modes:
+          linear: 1 - age_hours * item_decay_rate (clamped)
+          exponential: exp(-lambda * age_hours)
+          power: (age_hours + 1) ** (-alpha)
+          sigmoid: 1 / (1 + exp(k * (age_hours - midpoint)))
+        """
+        try:
+            mode = getattr(self.config, 'decay_mode', 'linear')
+            if mode == 'linear':
+                val = 1.0 - (age_hours * item_decay_rate)
+            elif mode == 'exponential':
+                lam = getattr(self.config, 'decay_lambda', 0.35)
+                val = math.exp(-lam * age_hours)
+            elif mode == 'power':
+                alpha = getattr(self.config, 'decay_power_alpha', 0.8)
+                val = (age_hours + 1.0) ** (-alpha)
+            elif mode == 'sigmoid':
+                k = getattr(self.config, 'decay_sigmoid_k', 0.9)
+                midpoint = getattr(self.config, 'decay_sigmoid_midpoint_hours', 0.5)
+                # center so value ~1 early then drops near midpoint
+                val = 1.0 / (1.0 + math.exp(k * (age_hours - midpoint)))
+            else:  # fallback
+                val = 1.0 - (age_hours * item_decay_rate)
+            if not isinstance(val, (int, float)) or math.isnan(val) or math.isinf(val):
+                return 0.0
+            return max(0.0, min(1.0, float(val)))
+        except Exception:
+            return max(0.0, min(1.0, 1.0 - (age_hours * item_decay_rate)))
+
+    # Public API to adjust weights (for meta-cognition adaptation)
+    def set_activation_weights(self, recency: Optional[float] = None, frequency: Optional[float] = None, salience: Optional[float] = None):
+        """Adjust activation component weights (non-negative, auto-normalized)."""
+        try:
+            if recency is not None and recency >= 0:
+                self.config.weight_recency = float(recency)
+            if frequency is not None and frequency >= 0:
+                self.config.weight_frequency = float(frequency)
+            if salience is not None and salience >= 0:
+                self.config.weight_salience = float(salience)
+        except Exception:
+            pass
+        # Ensure at least minimal defaults if all zero
+        if self.config.weight_recency + self.config.weight_frequency + self.config.weight_salience <= 0:
+            self.config.weight_recency, self.config.weight_frequency, self.config.weight_salience = 0.4, 0.3, 0.3
+        return self.config.activation_weights()
+
+    def get_activation_weights(self) -> Dict[str, float]:
+        return self.config.activation_weights()
     
     def _enforce_capacity_limit(self) -> List[str]:
         """Enforce capacity limit by removing least recently used items"""
@@ -529,7 +615,8 @@ class VectorShortTermMemory:
         try:
             # Validate inputs
             memory_id = MetadataValidator.validate_memory_id(memory_id)
-            content_str = MetadataValidator.validate_content(content)
+        if not self._disable_storage:
+            self._enforce_capacity_limit()
             
             if not content_str:
                 logger.warning(f"Empty content for memory {memory_id}")

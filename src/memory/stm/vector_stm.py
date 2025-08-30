@@ -21,6 +21,7 @@ Version: 2.0.0
 import json
 import logging
 import threading
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -126,6 +127,15 @@ class STMConfiguration:
     capacity: int = 7
     min_activation_threshold: float = 0.2
     decay_rate: float = 0.1
+    # Adaptive decay / activation extensions
+    decay_mode: str = "linear"  # linear|exponential|power|sigmoid
+    decay_lambda: float = 0.35
+    decay_power_alpha: float = 0.8
+    decay_sigmoid_k: float = 0.9
+    decay_sigmoid_midpoint_hours: float = 0.5
+    weight_recency: float = 0.4
+    weight_frequency: float = 0.3
+    weight_salience: float = 0.3
     enable_gpu: bool = True
     max_concurrent_operations: int = 4
     connection_timeout: int = 30
@@ -141,6 +151,24 @@ class STMConfiguration:
             raise VectorSTMConfigError("Min activation threshold must be between 0 and 1")
         if not (0.0 <= self.decay_rate <= 1.0):
             raise VectorSTMConfigError("Decay rate must be between 0 and 1")
+        if self.decay_mode not in {"linear", "exponential", "power", "sigmoid"}:
+            raise VectorSTMConfigError("decay_mode must be one of linear|exponential|power|sigmoid")
+        for attr in ("decay_lambda", "decay_power_alpha", "decay_sigmoid_k", "decay_sigmoid_midpoint_hours"):
+            if getattr(self, attr) <= 0:
+                raise VectorSTMConfigError(f"{attr} must be > 0")
+        for w in (self.weight_recency, self.weight_frequency, self.weight_salience):
+            if w < 0:
+                raise VectorSTMConfigError("Activation weights must be non-negative")
+
+    def activation_weights(self) -> Dict[str, float]:
+        total = self.weight_recency + self.weight_frequency + self.weight_salience
+        if total <= 0:
+            return {"recency": 0.4, "frequency": 0.3, "salience": 0.3}
+        return {
+            "recency": self.weight_recency / total,
+            "frequency": self.weight_frequency / total,
+            "salience": self.weight_salience / total,
+        }
 
 
 class EmbeddingManager:
@@ -409,7 +437,7 @@ class VectorShortTermMemory:
     - Performance optimizations and resource management
     """
     
-    def __init__(self, config: Optional[STMConfiguration] = None):
+    def __init__(self, config: Optional[STMConfiguration] = None, *, disable_storage: bool = False):
         """
         Initialize Vector STM with configuration.
         
@@ -417,28 +445,68 @@ class VectorShortTermMemory:
             config: STM configuration object. If None, uses default configuration.
         """
         self.config = config or STMConfiguration()
-        self._validate_dependencies()
-        
-        # Initialize components
-        self.persist_dir = Path(self.config.chroma_persist_dir or "data/memory_stores/chroma_stm")
-        self.embedding_manager = EmbeddingManager(
-            self.config.embedding_model,
-            self.config.enable_gpu
-        )
-        self.chroma_manager = ChromaDBManager(
-            self.persist_dir,
-            self.config.collection_name,
-            self.config.connection_timeout
-        )
-        
+        self._disable_storage = disable_storage
+        if not self._disable_storage:
+            self._validate_dependencies()
+            self.persist_dir = Path(self.config.chroma_persist_dir or "data/memory_stores/chroma_stm")
+            self.embedding_manager = EmbeddingManager(
+                self.config.embedding_model,
+                self.config.enable_gpu
+            )
+            self.chroma_manager = ChromaDBManager(
+                self.persist_dir,
+                self.config.collection_name,
+                self.config.connection_timeout
+            )
+        else:
+            # Minimal placeholders for test-mode activation calculations
+            self.persist_dir = Path("/dev/null")
+            # Lightweight stubs to satisfy attribute checks while disabling I/O
+            class _NullEmbeddingManager:
+                def encode(self, *_args, **_kwargs):
+                    return [0.0]
+                def get_model_name(self):
+                    return "disabled"
+                def get_device(self):
+                    return "cpu"
+            class _NullCollection:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def count(self): return 0
+                def get(self, *args, **kwargs): return {"ids": [], "metadatas": [], "documents": [], "embeddings": []}
+                def query(self, *args, **kwargs): return {"ids": [], "metadatas": [], "documents": [], "embeddings": [], "distances": []}
+                def add(self, *args, **kwargs): return None
+                def update(self, *args, **kwargs): return None
+                def delete(self, *args, **kwargs): return None
+                def upsert(self, *args, **kwargs): return None
+            class _NullChromaManager:
+                def get_collection(self):
+                    return _NullCollection()
+            self.embedding_manager = _NullEmbeddingManager()
+            self.chroma_manager = _NullChromaManager()
+
         # Thread pool for concurrent operations
-        self.executor = ThreadPoolExecutor(max_workers=self.config.max_concurrent_operations)
-        
+        if not self._disable_storage:
+            self.executor = ThreadPoolExecutor(max_workers=self.config.max_concurrent_operations)
+        else:
+            class _NullFuture:
+                def result(self, timeout=None): return None
+                def done(self): return True
+                def add_done_callback(self, fn):
+                    try:
+                        fn(self)
+                    except Exception:
+                        pass
+            class _NullExecutor:
+                def submit(self, *a, **k): return _NullFuture()
+                def shutdown(self, wait=True): return None
+            self.executor = _NullExecutor()
+
         # Performance metrics
         self._operation_count = 0
         self._error_count = 0
-        
-        logger.info(f"Vector STM initialized successfully (capacity={self.config.capacity})")
+
+        logger.info(f"Vector STM initialized (capacity={self.config.capacity}, storage_disabled={self._disable_storage})")
     
     def _validate_dependencies(self):
         """Validate that required dependencies are available"""
@@ -504,10 +572,16 @@ class VectorShortTermMemory:
         }
     
     def _calculate_activation(self, metadata: Dict[str, Any]) -> float:
-        """Calculate activation score based on recency, frequency, and salience"""
+        """Calculate activation score using configurable decay modes and adaptive weights.
+
+        Components:
+          recency   - time-based decay using selected mode
+          frequency - normalized access count
+          salience  - average of importance & attention
+        Weights come from current configuration (normalized on access).
+        """
         try:
             now = datetime.now()
-            
             # Parse timestamps safely
             encoding_time = now
             if metadata.get('encoding_time'):
@@ -515,34 +589,100 @@ class VectorShortTermMemory:
                     encoding_time = datetime.fromisoformat(str(metadata['encoding_time']))
                 except (ValueError, TypeError):
                     pass
-            
-            # Calculate recency component
-            age_hours = (now - encoding_time).total_seconds() / 3600
-            decay_rate = MetadataValidator.validate_numeric_field(metadata.get('decay_rate', self.config.decay_rate), 'decay_rate')
-            recency = max(0.0, 1.0 - (age_hours * decay_rate))
-            
-            # Calculate frequency component
+
+            age_hours = max(0.0, (now - encoding_time).total_seconds() / 3600)
+            recency = self._compute_recency(age_hours, metadata)
+
             access_count = max(0, int(metadata.get('access_count', 0)))
+            # Use a diminishing returns curve; 10 accesses -> ~1.0
             frequency = min(1.0, access_count / 10.0)
-            
-            # Calculate salience component
+
             importance = MetadataValidator.validate_numeric_field(metadata.get('importance', 0.5), 'importance')
             attention = MetadataValidator.validate_numeric_field(metadata.get('attention_score', 0.0), 'attention_score')
-            salience = (importance + attention) / 2.0
-            
-            # Weighted combination
-            activation = (recency * 0.4) + (frequency * 0.3) + (salience * 0.3)
-            
+            salience = max(0.0, min(1.0, (importance + attention) / 2.0))
+
+            w = self.config.activation_weights()
+            activation = (recency * w['recency']) + (frequency * w['frequency']) + (salience * w['salience'])
             return max(0.0, min(1.0, activation))
         except Exception as e:
             logger.error(f"Failed to calculate activation: {e}")
             return 0.0
+
+    # --- Adaptive activation weight API ---
+    def set_activation_weights(self, *, recency: Optional[float] = None, frequency: Optional[float] = None, salience: Optional[float] = None) -> Dict[str, float]:
+        """Dynamically adjust activation component weights.
+
+        Args:
+            recency: New weight for recency component
+            frequency: New weight for frequency component
+            salience: New weight for salience component
+
+        Returns: Normalized weight dictionary actually applied.
+        """
+        updated = False
+        if recency is not None:
+            self.config.weight_recency = max(0.0, float(recency)); updated = True
+        if frequency is not None:
+            self.config.weight_frequency = max(0.0, float(frequency)); updated = True
+        if salience is not None:
+            self.config.weight_salience = max(0.0, float(salience)); updated = True
+        if updated:
+            logger.debug("STM activation weights updated: %s", self.config.activation_weights())
+        return self.config.activation_weights()
+
+    def get_activation_weights(self) -> Dict[str, float]:
+        return self.config.activation_weights()
+
+    # --- Decay / recency computation ---
+    def _compute_recency(self, age_hours: float, metadata: Optional[Dict[str, Any]] = None) -> float:
+        """Compute recency score (0-1) using configured decay mode.
+
+        Modes:
+          linear: 1 - age * decay_rate (floor at 0)
+          exponential: exp(-lambda * age)
+          power: (age + 1)^-alpha
+          sigmoid: 1 / (1 + exp(k*(age-midpoint)))
+        """
+        try:
+            mode = self.config.decay_mode
+            decay_rate = self.config.decay_rate
+            if metadata and 'decay_rate' in metadata:
+                try:
+                    decay_rate = float(metadata['decay_rate'])
+                except (TypeError, ValueError):
+                    pass
+
+            if mode == 'linear':
+                recency = max(0.0, 1.0 - (age_hours * decay_rate))
+            elif mode == 'exponential':
+                lam = max(1e-6, self.config.decay_lambda * decay_rate)
+                recency = float(math.exp(-lam * age_hours))
+            elif mode == 'power':
+                alpha = max(1e-6, self.config.decay_power_alpha * (decay_rate + 1e-6))
+                recency = float((age_hours + 1.0) ** (-alpha))
+            elif mode == 'sigmoid':
+                k = self.config.decay_sigmoid_k * (decay_rate + 1e-6)
+                mid = self.config.decay_sigmoid_midpoint_hours
+                recency = 1.0 / (1.0 + math.exp(k * (age_hours - mid)))
+            else:
+                recency = max(0.0, 1.0 - (age_hours * decay_rate))
+
+            return max(0.0, min(1.0, recency))
+        except Exception as e:
+            logger.error(f"Failed to compute recency: {e}")
+            return 0.0
+
+    # Public helper primarily for tests / diagnostics without accessing private method
+    def compute_activation_for_metadata(self, metadata: Dict[str, Any]) -> float:
+        return self._calculate_activation(metadata)
     
     def _enforce_capacity_limit(self) -> List[str]:
         """Enforce capacity limit by removing least recently used items"""
         evicted_ids = []
         
         try:
+            if self._disable_storage:
+                return evicted_ids
             with self.chroma_manager.get_collection() as collection:
                 result = collection.get()
                 
@@ -1169,7 +1309,7 @@ class VectorShortTermMemory:
     def shutdown(self):
         """Shutdown the STM system and cleanup resources"""
         try:
-            if hasattr(self, 'executor'):
+            if getattr(self, 'executor', None) is not None and hasattr(self.executor, 'shutdown'):
                 self.executor.shutdown(wait=True)
             logger.info("Vector STM shut down successfully")
         except Exception as e:

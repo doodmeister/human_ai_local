@@ -116,6 +116,9 @@ class ChatConfig:
     consolidation_salience_threshold: float = 0.55
     consolidation_valence_threshold: float = 0.60
     throughput_window_seconds: int = 60  # rolling window for throughput/rate metrics
+    # Metacognition & adaptive settings
+    metacog_turn_interval: int = 5
+    metacog_snapshot_history_size: int = 50
 
     def to_dict(self) -> dict:
         return {
@@ -133,6 +136,8 @@ class ChatConfig:
             "consolidation_salience_threshold": self.consolidation_salience_threshold,
             "consolidation_valence_threshold": self.consolidation_valence_threshold,
             "throughput_window_seconds": self.throughput_window_seconds,
+            "metacog_turn_interval": self.metacog_turn_interval,
+            "metacog_snapshot_history_size": self.metacog_snapshot_history_size,
         }
 
 @dataclass

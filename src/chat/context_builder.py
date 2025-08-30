@@ -23,20 +23,6 @@ from .constants import (
 )
 from .metrics import metrics_registry
 
-# Local provisional config (should be migrated into central config.py later)
-DEFAULT_CHAT_CONFIG = {
-    "max_recent_turns": 8,
-    "max_context_items": 16,
-    "stm_activation_min": 0.15,
-    "ltm_similarity_threshold": 0.62,
-    "timeouts": {"retrieval_ms": 400},
-    "fallback_min_overlap": 0.15,
-    # Metacognition interval (every N user turns capture snapshot)
-    "metacog_turn_interval": 5,
-    # Snapshot history ring buffer size
-    "metacog_snapshot_history_size": 50,
-}
-
 
 class ContextBuilder:
     """Staged context construction pipeline (extended scaffold with basic fallback)."""
@@ -50,10 +36,9 @@ class ContextBuilder:
         attention: Any = None,
         executive: Any = None,
     ):
-        # Start from defaults and update with provided config (if any)
-        self.cfg = dict(DEFAULT_CHAT_CONFIG)
-        if chat_config:
-            self.cfg.update(chat_config)
+        # Accept provided configuration dict directly (already from global ChatConfig.to_dict())
+        self.cfg = dict(chat_config) if chat_config else {}
+        # Backward compatibility: ensure timeouts structure
         if "timeouts" not in self.cfg:
             self.cfg["timeouts"] = {"retrieval_ms": self.cfg.get("retrieval_timeout_ms", 400)}
         self.stm = stm
@@ -163,6 +148,10 @@ class ContextBuilder:
                         scores={"composite": 0.0},
                     )
                 )
+                try:
+                    metrics_registry.inc("metacog_stm_high_util_events_total")
+                except Exception:
+                    pass
             if degraded:
                 meta_items.append(
                     ContextItem(
@@ -174,9 +163,17 @@ class ContextBuilder:
                         scores={"composite": 0.0},
                     )
                 )
+                try:
+                    metrics_registry.inc("metacog_performance_degraded_events_total")
+                except Exception:
+                    pass
             if meta_items:
                 # Append without disturbing prior ranking (metacog rank=0 will be re-scored earlier if needed)
                 items.extend(meta_items)
+                try:
+                    metrics_registry.inc("metacog_advisory_items_total", value=len(meta_items))
+                except Exception:
+                    pass
         except Exception:
             pass
 

@@ -100,13 +100,14 @@ The Human-AI Cognition project is an ambitious open-source framework designed to
 - **Event-Driven Processing** - Lambda-based consolidation cycles
 - **Modular Design** - Loosely coupled cognitive components
 
-### Current Development State
-- ✅ **Functional**: Basic cognitive loop with STM/LTM integration
-- ✅ **Functional**: Claude-based conversational interface
-- ✅ **Functional**: Memory embedding and retrieval
-- 🚧 **In Progress**: Dream-state consolidation
-- 🚧 **In Progress**: DPAD neural network integration
-- 📋 **Planned**: Advanced meta-cognition features
+### Current Development State (Updated 2025-08)
+- ✅ Core cognitive loop with STM/LTM/Attention integration
+- ✅ ChatService with deterministic context + provenance
+- ✅ Memory embedding & retrieval across STM/LTM/Episodic
+- ✅ Dream-state consolidation pipeline (baseline) active
+- ✅ DPAD & LSHN neural components integrated (baseline modes)
+- ✅ Metacognitive adaptive layer (snapshots, dynamic interval, adaptive retrieval & thresholds)
+- 📋 Planned: Extended multi-modal ingestion & advanced executive planning heuristics
 
 ---
 
