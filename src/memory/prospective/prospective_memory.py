@@ -48,7 +48,7 @@ class InMemoryReminder:
         self.triggered_ts: Optional[float] = None
         self.metadata = metadata or {}
 
-class ProspectiveMemory:
+class ProspectiveMemory(ProspectiveMemorySystem):
     """Lightweight alternative (no vectors) for tests & fast integration.
 
     Provides:

@@ -35,7 +35,7 @@ from .stm import VectorShortTermMemory, STMConfiguration
 from .ltm import VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .semantic.semantic_memory import SemanticMemorySystem
-from .prospective.prospective_memory import ProspectiveMemorySystem
+from .prospective.prospective_memory import ProspectiveMemorySystem, ProspectiveMemory, ProspectiveMemoryVectorStore
 from .procedural.procedural_memory import ProceduralMemory
 
 if TYPE_CHECKING:
@@ -73,6 +73,8 @@ class MemorySystemConfig:
     consolidation_age_minutes: int = 30
     auto_process_prospective: bool = True
     prospective_process_interval: int = 60  # seconds
+    # New flag: whether to use vector-backed prospective memory (Chroma) instead of lightweight in-memory singleton
+    use_vector_prospective: bool = False
 
 
 @dataclass
@@ -205,17 +207,17 @@ class MemorySystem:
         self._semantic: Optional[SemanticMemorySystem] = None
         self._prospective: Optional[ProspectiveMemorySystem] = None
         self._procedural: Optional[ProceduralMemory] = None
-        
+
         # Session tracking
         self._session_memories: List[Dict[str, Any]] = []
         self._last_consolidation = datetime.now()
         self._last_prospective_process = datetime.now()
-        
+
         # Performance monitoring
         self._operation_counts: Dict[str, int] = {}
         self._error_counts: Dict[str, int] = {}
         self._start_time = datetime.now()
-        
+
         # Initialize core systems
         try:
             self._initialize_systems()
@@ -259,10 +261,23 @@ class MemorySystem:
             )
             
             # Initialize Prospective Memory
-            self._prospective = ProspectiveMemorySystem(
-                chroma_persist_dir=self._config.chroma_persist_dir,
-                embedding_model=self._config.embedding_model
-            )
+            try:
+                if getattr(self._config, 'use_vector_prospective', False):
+                    from src.memory.prospective.prospective_memory import ProspectiveMemoryVectorStore
+                    self._prospective = ProspectiveMemoryVectorStore(
+                        chroma_persist_dir=self._config.chroma_persist_dir,
+                        embedding_model=self._config.embedding_model
+                    )
+                    logger.info("Prospective memory backend: vector store (ChromaDB)")
+                else:
+                    from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
+                    self._prospective = get_inmemory_prospective_memory()
+                    logger.info("Prospective memory backend: in-memory singleton")
+            except Exception as e:
+                logger.warning(f"Prospective memory init fallback to in-memory due to error: {e}")
+                from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
+                self._prospective = get_inmemory_prospective_memory()
+                logger.info("Prospective memory backend: in-memory singleton (fallback)")
             
             # Initialize Procedural Memory
             self._procedural = ProceduralMemory(stm=self._stm, ltm=self._ltm)
@@ -300,10 +315,20 @@ class MemorySystem:
         return self._semantic
     
     @property
-    def prospective(self) -> ProspectiveMemorySystem:
-        """Get the prospective memory system."""
+    def prospective(self) -> Any:
+        """Get the prospective memory system.
+
+        Provides a lazy safety net: if initialization path didn't set _prospective
+        (e.g., early failure before assignment), return the in-memory singleton
+        instead of raising to keep higher-level systems functioning.
+        """
         if self._prospective is None:
-            raise MemorySystemError("Prospective memory not initialized")
+            try:
+                from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
+                self._prospective = get_inmemory_prospective_memory()
+                logger.info("Prospective memory lazily initialized to in-memory singleton")
+            except Exception as e:  # pragma: no cover - should not occur
+                raise MemorySystemError(f"Prospective memory not initialized and lazy init failed: {e}") from e
         return self._prospective
     
     @property
