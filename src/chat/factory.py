@@ -5,6 +5,7 @@ from .conversation_session import SessionManager
 from .context_builder import ContextBuilder
 from src.core.config import get_chat_config
 from importlib import import_module
+import os
 
 def _lazy_import(path: str, attr: str):
     try:
@@ -45,6 +46,10 @@ def build_chat_service(
                 episodic = EpisodicMemorySystem()
             except Exception:
                 episodic = None
+    # Skip semantic memory heavy dependency in lightweight test mode
+    if os.environ.get("DISABLE_SEMANTIC_MEMORY") == "1":
+        if hasattr(__import__('src.memory', fromlist=['semantic']), 'semantic'):
+            pass  # no-op
     if attention is None:
         AttentionMechanism = _lazy_import("src.attention.attention_mechanism", "AttentionMechanism")
         if AttentionMechanism:
@@ -64,4 +69,11 @@ def build_chat_service(
     cfg.setdefault("retrieval_timeout_ms", cfg_obj.retrieval_timeout_ms)
     builder = ContextBuilder(chat_config=cfg, stm=stm, ltm=ltm, episodic=episodic,
                              attention=attention, executive=executive)
-    return ChatService(SessionManager(), builder)
+    # Lazy create consolidator (won't fail if memory systems absent)
+    consolidator = None
+    try:
+        from src.memory.consolidation.consolidator import MemoryConsolidator, ConsolidationPolicy  # type: ignore
+        consolidator = MemoryConsolidator(stm=stm, ltm=ltm, policy=ConsolidationPolicy())
+    except Exception:
+        consolidator = None
+    return ChatService(SessionManager(), builder, consolidator=consolidator)

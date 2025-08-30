@@ -10,6 +10,7 @@ class ChatMetricsRegistry:
         self.timings: Dict[str, List[float]] = defaultdict(list)
         self.histograms: Dict[str, list] = {}
         self.state: Dict[str, Any] = {}
+        self.events: Dict[str, List[float]] = defaultdict(list)  # timestamped events for rate calculations
 
     def inc(self, name: str, value: int = 1) -> None:
         self.counters[name] += value
@@ -56,6 +57,78 @@ class ChatMetricsRegistry:
         ordered = sorted(data)
         idx = max(0, int(len(ordered) * 0.95) - 1)
         return ordered[idx]
+
+    def percentile(self, hist_name: str, q: float) -> float:
+        """
+        Return q-th percentile (0-100) for a histogram; 0.0 if empty.
+        """
+        if not (0 <= q <= 100):
+            raise ValueError("q must be in [0,100]")
+        data = self.histograms.get(hist_name)
+        if not data:
+            return 0.0
+        ordered = sorted(data)
+        if not ordered:
+            return 0.0
+        # Nearest-rank method
+        rank = int(round((q / 100) * (len(ordered) - 1)))
+        return ordered[min(len(ordered) - 1, max(0, rank))]
+
+    def mark_event(self, name: str, timestamp: float | None = None, max_len: int = 1000):
+        """
+        Record an instantaneous event (for throughput / rate metrics).
+        """
+        ts = timestamp or time.time()
+        events = self.events[name]
+        events.append(ts)
+        if len(events) > max_len:
+            del events[0 : len(events) - max_len]
+
+    def get_rate(self, name: str, window_seconds: float = 60.0) -> float:
+        """
+        Events per second over the given sliding window.
+        """
+        now = time.time()
+        events = self.events.get(name, [])
+        if not events:
+            return 0.0
+        cutoff = now - window_seconds
+        # binary search optional; simple filter for small lists
+        recent = [e for e in events if e >= cutoff]
+        return len(recent) / window_seconds if window_seconds > 0 else 0.0
+
+    def reset(self):
+        """
+        Clear all collected metrics (useful for test isolation).
+        """
+        self.counters.clear()
+        self.timings.clear()
+        self.histograms.clear()
+        self.state.clear()
+        self.events.clear()
+
+    def export_state(self) -> Dict[str, Any]:
+        """
+        Export current metrics (excluding raw timing lists for brevity).
+        """
+        snap = self.snapshot()
+        return {
+            "counters": snap["counters"],
+            "state": snap["state"],
+            "hist_summary": {k: {"count": len(v)} for k, v in self.histograms.items()},
+        }
+
+    def import_state(self, data: Dict[str, Any]):
+        """
+        Merge imported counters and state (does not reconstruct raw lists).
+        """
+        for k, v in data.get("counters", {}).items():
+            self.counters[k] = int(v)
+        for k, v in data.get("state", {}).items():
+            self.state[k] = v
+
+# Backward compatibility alias
+MetricsRegistry = ChatMetricsRegistry
 
 
 metrics_registry = ChatMetricsRegistry()

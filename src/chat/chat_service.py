@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 import time
 import asyncio
+from collections import deque
+from pydantic import BaseModel, Field
 
 from .conversation_session import SessionManager
 from .models import TurnRecord
@@ -12,6 +14,7 @@ from .metrics import metrics_registry
 from .provenance import build_item_provenance
 from .scoring import get_scoring_profile_version
 from .constants import PREVIEW_MAX_ITEMS, PREVIEW_MAX_CONTENT_CHARS
+from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 
 
 class ChatService:
@@ -24,14 +27,22 @@ class ChatService:
     - Returns structured payload
     """
 
-    def __init__(
-        self,
-        session_manager: SessionManager,
-        context_builder: ContextBuilder,
-    ):
+    def __init__(self,
+                 session_manager: SessionManager,
+                 context_builder: ContextBuilder,
+                 consolidator: Optional[Any] = None) -> None:
         self.sessions = session_manager
         self.context_builder = context_builder
-        self.consolidation_log: list = []  # (turn_id, status, salience, valence)
+        self.consolidator = consolidator
+        # Consolidation event log (simple list for recent trace enrichment)
+        self.consolidation_log = []  # entries: dict(user_turn_id,status,salience,valence,timestamp)
+        # Metacognitive tracking fields
+        self._turn_counter = 0
+        self._last_metacog_snapshot = None
+        self._metacog_interval = int(self.context_builder.cfg.get("metacog_turn_interval", 5))
+        # Snapshot history ring buffer
+        history_size = int(self.context_builder.cfg.get("metacog_snapshot_history_size", 50))
+        self._metacog_history = deque(maxlen=history_size)
 
     def get_context_preview(
         self,
@@ -82,7 +93,6 @@ class ChatService:
         )
         sess.add_turn(user_turn)
 
-        # Build context (use user message as query)
         built = self.context_builder.build(
             session=sess,
             query=message,
@@ -91,9 +101,32 @@ class ChatService:
             include_trace=flags.get("include_trace", True),
         )
 
-        # Placeholder assistant response (replace with LLM integration)
-        response_text = self._generate_placeholder_response(message)
+        # Prospective memory injection (non-invasive: append dicts only)
+        extra_due: list[Dict[str, Any]] = []
+        try:
+            pm = get_inmemory_prospective_memory()
+            # Track injected reminder ids inside session state to avoid double counting
+            injected_key = "_prospective_injected_ids"
+            injected_ids = getattr(sess, injected_key, set())
+            if not isinstance(injected_ids, set):  # safety
+                injected_ids = set()
+            for r in pm.check_due():
+                extra_due.append({
+                    "source_id": f"reminder-{r.id}",
+                    "source_system": "prospective",
+                    "reason": "due_reminder",
+                    "rank": 0,
+                    "content": f"REMINDER: {r.content}",
+                    "scores": {"reminder": 1.0, "composite": 1.0},
+                })
+                if r.id not in injected_ids:
+                    metrics_registry.inc("prospective_reminders_injected_total")
+                    injected_ids.add(r.id)
+            setattr(sess, injected_key, injected_ids)
+        except Exception:
+            extra_due = []
 
+        response_text = self._generate_placeholder_response(message)
         assistant_turn = TurnRecord(
             role="assistant",
             content=response_text,
@@ -103,21 +136,78 @@ class ChatService:
         )
         sess.add_turn(assistant_turn)
 
-        # Consolidation decision (placeholder)
         t_cons = time.time()
+        # Adaptive threshold tweak: if high STM utilization or performance degraded, raise salience threshold slightly.
+        adaptive_cfg = None
+        original_sal_thr = None
+        original_val_thr = None
+        try:
+            adaptive_cfg = getattr(self, "context_builder").cfg
+            original_sal_thr = adaptive_cfg.get("consolidation_salience_threshold")
+            original_val_thr = adaptive_cfg.get("consolidation_valence_threshold")
+            # Estimate STM utilization (best-effort)
+            stm_util = None
+            cons = getattr(self, "consolidator", None)
+            if cons is not None:
+                stm_obj = getattr(cons, "stm", None)
+                if stm_obj is not None:
+                    cap = getattr(stm_obj, "capacity", None)
+                    size = None
+                    if hasattr(stm_obj, "__len__"):
+                        try:
+                            size = len(stm_obj)  # type: ignore
+                        except Exception:
+                            size = None
+                    if size is None:
+                        size = getattr(stm_obj, "size", None)
+                    if isinstance(size, int) and isinstance(cap, int) and cap > 0:
+                        stm_util = size / cap
+            degraded = metrics_registry.state.get("performance_degraded")
+            if adaptive_cfg is not None:
+                # Base thresholds
+                base_sal = adaptive_cfg.get("consolidation_salience_threshold", 0.55)
+                base_val = adaptive_cfg.get("consolidation_valence_threshold", 0.60)
+                sal_adj = base_sal
+                val_adj = base_val
+                if stm_util is not None and stm_util >= 0.85:
+                    sal_adj += 0.05  # slightly more selective
+                if degraded:
+                    sal_adj += 0.05  # further tighten under performance pressure
+                # Cap adjustments
+                sal_adj = min(sal_adj, 0.85)
+                adaptive_cfg["consolidation_salience_threshold"] = sal_adj
+                adaptive_cfg["consolidation_valence_threshold"] = val_adj
+        except Exception:
+            pass
         stored = self._maybe_consolidate(user_turn, assistant_turn)
+        # Restore original thresholds to avoid permanent drift
+        try:
+            if adaptive_cfg is not None:
+                if original_sal_thr is not None:
+                    adaptive_cfg["consolidation_salience_threshold"] = original_sal_thr
+                if original_val_thr is not None:
+                    adaptive_cfg["consolidation_valence_threshold"] = original_val_thr
+        except Exception:
+            pass
         built.metrics.consolidation_time_ms = (time.time() - t_cons) * 1000.0
         built.metrics.consolidated_user_turn = stored
-        self.consolidation_log.append(
-            {
-                "user_turn_id": user_turn.turn_id,
-                "status": user_turn.consolidation_status,
-                "salience": user_turn.salience,
-                "valence": user_turn.valence,
-                "timestamp": time.time(),
-            }
-        )
-        # Build payload
+        self.consolidation_log.append({
+            "user_turn_id": user_turn.turn_id,
+            "status": user_turn.consolidation_status,
+            "salience": user_turn.salience,
+            "valence": user_turn.emotional_valence,
+            "timestamp": time.time(),
+        })
+        # Metacog turn counter / periodic snapshot
+        self._turn_counter += 1
+        attach_metacog = False
+        if self._metacog_interval > 0 and (self._turn_counter % self._metacog_interval == 0):
+            try:
+                self._last_metacog_snapshot = self._metacog_snapshot()
+                attach_metacog = True
+            except Exception:
+                pass
+
         payload = {
             "session_id": sess.session_id,
             "user_turn_id": user_turn.turn_id,
@@ -143,9 +233,33 @@ class ChatService:
                     "scores": ci.scores,
                 }
                 for ci in built.items
-            ],
+            ] + extra_due,
         }
-        # Add trace if requested
+        if attach_metacog and self._last_metacog_snapshot:
+            payload["metacog"] = self._last_metacog_snapshot
+            # Persist snapshot into LTM (best-effort) if LTM available via context builder
+            try:
+                ltm = getattr(self.context_builder, "ltm", None)
+                snap = dict(self._last_metacog_snapshot)
+                snap["type"] = "meta_reflection"
+                # Add to history first
+                try:
+                    self._metacog_history.append(snap)
+                except Exception:
+                    pass
+                if ltm is not None and hasattr(ltm, "add_item"):
+                    # Expect signature add_item(content: str, metadata: dict | None)
+                    content = (
+                        f"Metacog snapshot turn={snap.get('turn_counter')} "
+                        f"perf_p95={snap.get('performance', {}).get('latency_p95_ms')} "
+                        f"stm_util={snap.get('stm_utilization')}"
+                    )
+                    try:
+                        ltm.add_item(content=content, metadata=snap)  # type: ignore
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         if flags.get("include_trace"):
             payload["trace"] = {
                 "pipeline": [s.__dict__ for s in built.trace.pipeline_stages],
@@ -158,15 +272,24 @@ class ChatService:
             if any(ci.source_system == "executive" for ci in built.items):
                 payload["trace"].setdefault("notes", []).append("executive_mode state included")
             payload["trace"]["consolidation_log_tail"] = self.consolidation_log[-10:]
-        # Turn latency + histogram observe
+
         total_lat = (time.time() - t_start) * 1000.0
         payload["metrics"]["turn_latency_ms"] = total_lat
         metrics_registry.observe_hist("chat_turn_latency_ms", total_lat)
+        ema_alpha = 0.2
+        prev_ema = metrics_registry.state.get("ema_turn_latency_ms")
+        ema = total_lat if prev_ema is None else prev_ema + ema_alpha * (total_lat - prev_ema)
+        metrics_registry.state["ema_turn_latency_ms"] = ema
+        payload["metrics"]["ema_turn_latency_ms"] = ema
+        metrics_registry.mark_event("chat_turn")
+        window = self.context_builder.cfg.get("throughput_window_seconds", 60)
+        tps = metrics_registry.get_rate("chat_turn", window_seconds=float(window))
+        metrics_registry.state["chat_turns_per_sec"] = tps
+        payload["metrics"]["chat_turns_per_sec"] = tps
         snap = metrics_registry.snapshot()
-        if "chat_turn_latency_p95_ms" in snap["state"]:
+        if "chat_turn_latency_p95_ms" in snap.get("state", {}):
             p95 = snap["state"]["chat_turn_latency_p95_ms"]
             payload["metrics"]["latency_p95_ms"] = p95
-            # Performance degradation flag (compare to configured target if available)
             target = self.context_builder.cfg.get("performance_target_p95_ms")
             if isinstance(target, (int, float)) and target > 0:
                 degraded = p95 > target
@@ -206,14 +329,127 @@ class ChatService:
         snippet = user_text[:60].strip()
         return f"Acknowledged: {snippet}"
 
+    # --- Metacognition ---
+
+    class SnapshotModel(BaseModel):
+        ts: float = Field(..., description="Timestamp (epoch seconds)")
+        turn_counter: int
+        performance: Optional[Dict[str, Any]] = None
+        recent_consolidation_selectivity: Optional[float] = None
+        promotion_age_p95_seconds: Optional[float] = None
+        stm_utilization: Optional[float] = None
+        stm_capacity: Optional[int] = None
+        last_user_turn_status: Optional[str] = None
+        # extra fields allowed
+        class Config:
+            extra = "allow"
+
+    def _metacog_snapshot(self) -> Dict[str, Any]:
+        """Generate a lightweight metacognitive snapshot.
+
+        Returns a dict with:
+        - timestamp
+        - turn_counter
+        - stm_utilization (0..1) if consolidator present
+        - stm_capacity
+        - recent_consolidation_selectivity (ltm_promotions / stm_store) if counters present
+        - performance (latency_p95_ms, degraded flag) if available
+        - last_user_turn_status (status of most recent consolidation attempt)
+        Safe – all failures swallowed returning partial data.
+        """
+        snap: Dict[str, Any] = {
+            "ts": time.time(),
+            "turn_counter": self._turn_counter,
+        }
+        try:
+            # Performance state
+            perf_p95 = metrics_registry.get_p95("chat_turn_latency_ms")
+            degraded = metrics_registry.state.get("performance_degraded")
+            snap["performance"] = {"latency_p95_ms": perf_p95, "degraded": degraded}
+            # Consolidation selectivity
+            stm_total = metrics_registry.counters.get("consolidation_stm_store_total")
+            ltm_promos = metrics_registry.counters.get("consolidation_ltm_promotions_total")
+            if isinstance(stm_total, (int, float)) and stm_total > 0 and isinstance(ltm_promos, (int, float)):
+                snap["recent_consolidation_selectivity"] = ltm_promos / max(stm_total, 1)
+            # Promotion age p95 if recorded
+            if "consolidation_promotion_age_seconds" in metrics_registry.histograms:
+                try:
+                    age_p95 = metrics_registry.percentile("consolidation_promotion_age_seconds", 95)
+                    snap["promotion_age_p95_seconds"] = age_p95
+                except Exception:
+                    pass
+            # STM utilization via consolidator if it exposes method / attrs
+            util = None
+            capacity = None
+            if self.consolidator is not None:
+                # Expect consolidator.stm for vector STM with capacity attr or method
+                stm_obj = getattr(self.consolidator, "stm", None)
+                if stm_obj is not None:
+                    try:
+                        capacity = getattr(stm_obj, "capacity", None)
+                        size = None
+                        if hasattr(stm_obj, "__len__"):
+                            try:
+                                size = len(stm_obj)  # type: ignore
+                            except Exception:
+                                size = None
+                        if size is None:
+                            size = getattr(stm_obj, "size", None)
+                        if isinstance(size, int) and isinstance(capacity, int) and capacity > 0:
+                            util = min(1.0, size / capacity)
+                    except Exception:
+                        pass
+            if util is not None:
+                snap["stm_utilization"] = util
+            if capacity is not None:
+                snap["stm_capacity"] = capacity
+            # Last user turn consolidation status
+            if self.consolidation_log:
+                snap["last_user_turn_status"] = self.consolidation_log[-1]["status"]
+        except Exception:
+            pass
+        try:
+            # Validate and coerce via model (drops invalid fields if any)
+            model = self.SnapshotModel(**snap)
+            return model.dict()
+        except Exception:
+            return snap
+
     def _maybe_consolidate(self, user_turn: TurnRecord, assistant_turn: TurnRecord) -> bool:
-        # existing heuristic stub: high salience OR strong valence magnitude
+        # Prefer new consolidator if available
+        if self.consolidator:
+            try:
+                ev = self.consolidator.record_turn(
+                    turn_id=user_turn.turn_id,
+                    salience=user_turn.salience or 0.0,
+                    valence=user_turn.emotional_valence or 0.0,
+                    importance=user_turn.importance or 0.0,
+                    content=user_turn.content,
+                )
+                # Mark rehearsal opportunity (assistant referencing user content)
+                self.consolidator.mark_rehearsal(user_turn.turn_id)
+                if ev.stored_in_stm:
+                    user_turn.consolidation_status = "stored"
+                    metrics_registry.inc("consolidated_stored_total")
+                    return True
+                else:
+                    user_turn.consolidation_status = "skipped"
+                    metrics_registry.inc("consolidated_skipped_total")
+                    return False
+            except Exception:
+                pass  # fall back to legacy heuristic
+        # Legacy heuristic fallback
+        cfg = getattr(self, "context_builder").cfg if hasattr(self, "context_builder") else {}
+        sal_thr = cfg.get("consolidation_salience_threshold", 0.55)
+        val_thr = cfg.get("consolidation_valence_threshold", 0.60)
         sal = user_turn.salience
-        val_mag = abs(user_turn.valence)
-        if sal >= 0.55 or val_mag >= 0.6:
+        val_mag = abs(user_turn.emotional_valence)
+        if (sal is not None and sal >= sal_thr) or (val_mag is not None and val_mag >= val_thr):
             user_turn.consolidation_status = "stored"
+            metrics_registry.inc("consolidated_stored_total")
             return True
         user_turn.consolidation_status = "skipped"
+        metrics_registry.inc("consolidated_skipped_total")
         return False
 
     def _summarize_context_items(self, items):
@@ -260,8 +496,50 @@ class ChatService:
         degraded = False
         if isinstance(target, (int, float)) and target > 0:
             degraded = p95 > target
-        return {
+        tps = metrics_registry.get_rate("chat_turn", window_seconds=float(self.context_builder.cfg.get("throughput_window_seconds", 60)))
+        ema = metrics_registry.state.get("ema_turn_latency_ms", 0.0)
+        # Consolidation metrics enrichment (if consolidator active / metrics present)
+        cons_counters: Dict[str, Any] = {}
+        promotion_age_p95 = 0.0
+        # Counters emitted by MemoryConsolidator
+        if metrics_registry.counters.get("consolidation_stm_store_total") is not None:
+            cons_counters["stm_store_total"] = metrics_registry.counters.get("consolidation_stm_store_total", 0)
+        if metrics_registry.counters.get("consolidation_ltm_promotions_total") is not None:
+            cons_counters["ltm_promotions_total"] = metrics_registry.counters.get("consolidation_ltm_promotions_total", 0)
+        # Promotion age histogram p95 (seconds)
+        if "consolidation_promotion_age_seconds" in metrics_registry.histograms:
+            promotion_age_p95 = metrics_registry.percentile("consolidation_promotion_age_seconds", 95)
+        base = {
             "latency_p95_ms": p95,
             "target_p95_ms": target,
             "performance_degraded": degraded,
+            "ema_turn_latency_ms": ema,
+            "chat_turns_per_sec": tps,
         }
+        if cons_counters:
+            stm_total = float(cons_counters.get("stm_store_total", 0))
+            ltm_total = float(cons_counters.get("ltm_promotions_total", 0))
+            selectivity = (ltm_total / stm_total) if stm_total > 0 else 0.0
+            # Recent window stats (last N promotion ages) for volatility insight
+            ages_hist = metrics_registry.histograms.get("consolidation_promotion_age_seconds", [])
+            recent_window = ages_hist[-5:] if ages_hist else []
+            recent_avg = sum(recent_window) / len(recent_window) if recent_window else 0.0
+            # Alerting: configurable threshold for promotion age p95
+            alert_threshold = self.context_builder.cfg.get("consolidation_promotion_age_p95_alert_seconds")
+            age_alert = False
+            if isinstance(alert_threshold, (int, float)) and alert_threshold > 0 and promotion_age_p95 > alert_threshold:
+                age_alert = True
+                metrics_registry.state["consolidation_age_alert"] = True
+            base["consolidation"] = {
+                "counters": cons_counters,
+                "promotion_age_p95_seconds": promotion_age_p95,
+                "selectivity_ratio": selectivity,
+                "recent_promotion_age_seconds": {
+                    "count": len(recent_window),
+                    "avg": recent_avg,
+                    "values": recent_window,
+                },
+                "promotion_age_alert": age_alert,
+                "promotion_age_alert_threshold": alert_threshold,
+            }
+        return base

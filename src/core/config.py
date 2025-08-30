@@ -113,6 +113,9 @@ class ChatConfig:
     scoring_version: str = "v1.0"
     preview_max_items: int = 8
     preview_max_content_chars: int = 120
+    consolidation_salience_threshold: float = 0.55
+    consolidation_valence_threshold: float = 0.60
+    throughput_window_seconds: int = 60  # rolling window for throughput/rate metrics
 
     def to_dict(self) -> dict:
         return {
@@ -127,6 +130,9 @@ class ChatConfig:
             "scoring_version": self.scoring_version,
             "preview_max_items": self.preview_max_items,
             "preview_max_content_chars": self.preview_max_content_chars,
+            "consolidation_salience_threshold": self.consolidation_salience_threshold,
+            "consolidation_valence_threshold": self.consolidation_valence_threshold,
+            "throughput_window_seconds": self.throughput_window_seconds,
         }
 
 @dataclass

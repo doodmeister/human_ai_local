@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import List, Optional, Callable, Any, Dict
 import threading
 
@@ -30,6 +31,10 @@ DEFAULT_CHAT_CONFIG = {
     "ltm_similarity_threshold": 0.62,
     "timeouts": {"retrieval_ms": 400},
     "fallback_min_overlap": 0.15,
+    # Metacognition interval (every N user turns capture snapshot)
+    "metacog_turn_interval": 5,
+    # Snapshot history ring buffer size
+    "metacog_snapshot_history_size": 50,
 }
 
 
@@ -45,7 +50,10 @@ class ContextBuilder:
         attention: Any = None,
         executive: Any = None,
     ):
-        self.cfg = dict(chat_config)
+        # Start from defaults and update with provided config (if any)
+        self.cfg = dict(DEFAULT_CHAT_CONFIG)
+        if chat_config:
+            self.cfg.update(chat_config)
         if "timeouts" not in self.cfg:
             self.cfg["timeouts"] = {"retrieval_ms": self.cfg.get("retrieval_timeout_ms", 400)}
         self.stm = stm
@@ -122,6 +130,55 @@ class ContextBuilder:
 
         # Truncate after ranking
         items = items[: self.cfg["max_context_items"]]
+
+        # Metacognitive context injection (lightweight):
+        # Add advisory items if performance degraded or STM utilization high.
+        try:
+            meta_items: List[ContextItem] = []
+            degraded = metrics_registry.state.get("performance_degraded")
+            stm_util = None
+            stm_capacity = None
+            if self.stm is not None:
+                cap = getattr(self.stm, "capacity", None)
+                size = None
+                if hasattr(self.stm, "__len__"):
+                    try:
+                        size = len(self.stm)  # type: ignore
+                    except Exception:
+                        size = None
+                if size is None:
+                    size = getattr(self.stm, "size", None)
+                if isinstance(size, int) and isinstance(cap, int) and cap > 0:
+                    stm_capacity = cap
+                    stm_util = min(1.0, size / cap)
+            # High utilization threshold (fixed 0.85 for now)
+            if stm_util is not None and stm_util >= 0.85:
+                meta_items.append(
+                    ContextItem(
+                        source_id="metacog-stm-pressure",
+                        source_system="metacog",
+                        reason="stm_high_utilization",
+                        content=f"STM utilization high ({stm_util:.2%}) capacity={stm_capacity}",
+                        rank=0,
+                        scores={"composite": 0.0},
+                    )
+                )
+            if degraded:
+                meta_items.append(
+                    ContextItem(
+                        source_id="metacog-performance",
+                        source_system="metacog",
+                        reason="performance_degraded",
+                        content="System performance degraded (p95 latency above target)",
+                        rank=0,
+                        scores={"composite": 0.0},
+                    )
+                )
+            if meta_items:
+                # Append without disturbing prior ranking (metacog rank=0 will be re-scored earlier if needed)
+                items.extend(meta_items)
+        except Exception:
+            pass
 
         # Metrics
         metrics.stm_hits = sum(1 for c in items if c.source_system == "stm")
@@ -251,7 +308,8 @@ class ContextBuilder:
         def _run():
             try:
                 # Expect memory_obj.search(query=...) returns list[dict]
-                result_container["res"] = memory_obj.search(query=query)  # type: ignore
+                result = memory_obj.search(query=query)  # type: ignore
+                result_container["res"] = self._normalize_memory_results(result)
             except Exception as e:  # pragma: no cover
                 exc_container["exc"] = e
         th = threading.Thread(target=_run, daemon=True)
@@ -262,6 +320,143 @@ class ContextBuilder:
         if "exc" in exc_container:
             raise exc_container["exc"]
         return result_container.get("res", []) or []
+
+    # --- Normalization helper to adapt various memory search return formats ---
+    def _normalize_memory_results(self, raw: Any) -> List[Dict[str, Any]]:
+        """Normalize diverse memory search outputs into list[dict].
+
+        Supported input shapes:
+          - list[dict] (already in target shape)
+          - list[Tuple[MemoryItem, float]]
+          - list[VectorMemoryResult]
+          - None / other -> []
+        Dict schema produced (subset may be used downstream):
+          {id, content, activation, similarity, recency, salience}
+        """
+        if not raw:
+            return []
+        now = datetime.now()
+        if isinstance(raw, list) and (len(raw) == 0 or isinstance(raw[0], dict)):
+            # Map generic dict results (LTM/Episodic) to unified schema
+            out: List[Dict[str, Any]] = []
+            for i, d in enumerate(raw):  # type: ignore
+                if not isinstance(d, dict):
+                    continue
+                content = d.get('content') or d.get('text') or d.get('summary') or ''
+                if not content:
+                    continue
+                # Similarity mapping
+                similarity = d.get('similarity')
+                if similarity is None:
+                    similarity = d.get('similarity_score')
+                try:
+                    similarity = float(similarity) if similarity is not None else 0.0
+                except Exception:
+                    similarity = 0.0
+                # Activation candidates
+                act = d.get('activation')
+                if act is None:
+                    imp = d.get('importance')
+                    conf = d.get('confidence')
+                    try:
+                        if imp is not None or conf is not None:
+                            imp_v = float(imp) if imp is not None else 0.5
+                            conf_v = float(conf) if conf is not None else 0.5
+                            act = max(0.0, min(1.0, imp_v * 0.6 + conf_v * 0.4))
+                        else:
+                            act = 0.0
+                    except Exception:
+                        act = 0.0
+                # Recency estimation
+                recency = 0.0
+                ts_raw = d.get('last_access') or d.get('encoding_time') or d.get('timestamp')
+                if isinstance(ts_raw, str):
+                    try:
+                        dt = datetime.fromisoformat(ts_raw)
+                        age_hours = (now - dt).total_seconds() / 3600.0
+                        recency = max(0.0, 1.0 - age_hours / 24.0)  # simple 24h decay
+                    except Exception:
+                        recency = 0.0
+                salience = 0.0
+                for k_sal in ('salience','vividness','emotional_valence'):
+                    if k_sal in d:
+                        try:
+                            sv = abs(float(d[k_sal]))
+                            salience = max(salience, min(1.0, sv))
+                        except Exception:
+                            pass
+                out.append({
+                    'id': d.get('id', f'dict-{i}'),
+                    'content': content,
+                    'activation': float(act) if act is not None else 0.0,
+                    'similarity': similarity,
+                    'recency': recency,
+                    'salience': salience,
+                })
+            return out
+
+        normalized: List[Dict[str, Any]] = []
+
+        def compute_activation(item: Any) -> Dict[str, float]:
+            try:
+                enc = getattr(item, 'encoding_time', None)
+                if not isinstance(enc, datetime):
+                    enc = now
+                age_hours = (now - enc).total_seconds() / 3600.0
+                decay_rate = float(getattr(item, 'decay_rate', 0.1) or 0.1)
+                recency = max(0.0, 1.0 - age_hours * decay_rate)
+                access_count = int(getattr(item, 'access_count', 0) or 0)
+                frequency = min(1.0, access_count / 10.0)
+                importance = float(getattr(item, 'importance', 0.5) or 0.5)
+                attention_score = float(getattr(item, 'attention_score', 0.0) or 0.0)
+                salience = (importance + attention_score) / 2.0
+                activation = (recency * 0.4) + (frequency * 0.3) + (salience * 0.3)
+                return {'activation': max(0.0, min(1.0, activation)), 'recency': recency, 'salience': salience}
+            except Exception:
+                return {'activation': 0.0, 'recency': 0.0, 'salience': 0.0}
+
+        # VectorMemoryResult pattern
+        if isinstance(raw, list) and raw and hasattr(raw[0], 'item') and hasattr(raw[0], 'similarity_score'):
+            for r in raw:  # type: ignore
+                try:
+                    item = getattr(r, 'item', None)
+                    if not item:
+                        continue
+                    meta = compute_activation(item)
+                    normalized.append({
+                        'id': getattr(item, 'id', ''),
+                        'content': getattr(item, 'content', ''),
+                        'activation': meta['activation'],
+                        'similarity': float(getattr(r, 'similarity_score', 0.0) or 0.0),
+                        'recency': meta['recency'],
+                        'salience': meta['salience'],
+                    })
+                except Exception:
+                    continue
+            return normalized
+
+        # Tuple (MemoryItem, score)
+        if isinstance(raw, list) and raw and isinstance(raw[0], tuple):
+            for tup in raw:
+                try:
+                    if len(tup) < 1:
+                        continue
+                    item = tup[0]
+                    similarity = float(tup[1]) if len(tup) > 1 else 0.0
+                    meta = compute_activation(item)
+                    normalized.append({
+                        'id': getattr(item, 'id', ''),
+                        'content': getattr(item, 'content', ''),
+                        'activation': meta['activation'],
+                        'similarity': similarity,
+                        'recency': meta['recency'],
+                        'salience': meta['salience'],
+                    })
+                except Exception:
+                    continue
+            return normalized
+
+        return []
 
     def _wrap_memory_results(
         self,
@@ -282,9 +477,12 @@ class ContextBuilder:
                 "recency": r.get("recency", 0.0),
                 "salience": r.get("salience", 0.0),
             }
+            rid = str(r.get("id", idx))
+            if source_system == "ltm" and (rid.startswith("ltm-turn-") or r.get("original_stm_id")):
+                scores["promoted_from_stm"] = 1.0
             items.append(
                 ContextItem(
-                    source_id=str(r.get("id", idx)),
+                    source_id=rid,
                     source_system=source_system,
                     content=content,
                     rank=100 + idx,  # after recent turns

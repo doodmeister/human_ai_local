@@ -60,6 +60,181 @@ Comprehensive testing demonstrates:
 
 ---
 
+## 📊 Consolidation & Performance Metrics (August 2025)
+
+### Consolidation Pipeline Visibility
+The chat performance endpoint (`/agent/chat/performance`) now surfaces consolidation metrics alongside latency and throughput:
+
+Returned structure (fields only):
+```
+{
+  "latency_p95_ms": <float>,
+  "target_p95_ms": <float|None>,
+  "performance_degraded": <bool>,
+  "ema_turn_latency_ms": <float>,
+  "chat_turns_per_sec": <float>,
+  "consolidation": {
+    "counters": {
+      "stm_store_total": <int>,        # Total user turns stored in STM
+      "ltm_promotions_total": <int>    # Successful promotions to LTM
+    },
+    "promotion_age_p95_seconds": <float> # p95 age (s) of promoted turns (STM dwell time)
+  }
+}
+```
+
+## ⏰ Prospective Memory Reminders (In-Memory Beta)
+
+An initial lightweight Prospective Memory module enables scheduling future intentions ("reminders") that automatically surface in chat context when due.
+
+### Capabilities
+- Add reminders with relative due time (seconds from now)
+- List all / only pending reminders
+- Retrieve due reminders (one-shot triggering)
+- Automatic injection of due reminders into chat context (rank 0) for explainability
+
+### In-Memory Model
+Implemented as a fast, non-persistent singleton (`ProspectiveMemory`) distinct from the vector-based persistent system (which remains intact for future expansion). Each reminder:
+```
+{
+  "id": "uuid",
+  "content": "Send weekly report",
+  "due_ts": <epoch_seconds>,
+  "due_in_seconds": <float>,
+  "created_ts": <epoch_seconds>,
+  "triggered_ts": <epoch_seconds|null>,
+  "metadata": { }
+}
+```
+
+### Injection Behavior
+On each chat turn, any newly due reminders (not previously triggered) are:
+1. Marked triggered (single-shot semantics)
+2. Counted in metrics
+3. Pushed into context items with fields:
+```
+{
+  "source_system": "prospective",
+  "source_id": <reminder id>,
+  "reason": "due_reminder",
+  "content": <reminder content>,
+  "rank": 0
+}
+```
+
+### API Endpoints
+```
+POST /agent/reminders
+  body: { "content": "Water the plants", "due_in_seconds": 300 }
+  -> 201 { reminder payload }
+
+GET /agent/reminders
+  -> 200 [ reminder payloads including triggered ]
+
+GET /agent/reminders/due
+  -> 200 [ newly due (one-shot) reminders triggered at request time ]
+```
+
+### Metrics
+New counters exposed via metrics registry:
+```
+prospective_reminders_created_total    # Incremented on POST create
+prospective_reminders_triggered_total  # Incremented when a reminder becomes due (either via /due or chat turn)
+prospective_reminders_injected_total   # Incremented when due reminders are injected into chat context
+```
+
+### Design Notes & Next Steps
+- Keeps heavy vector ProspectiveMemorySystem untouched; future merge will unify persistence & semantic search.
+- Current beta focuses on deterministic scheduling and visibility for turn-level reasoning.
+- Planned: persistence, natural-language scheduling ("in 5 minutes"), recurring reminders, promotion to LTM upon completion.
+
+---
+### Promotion Provenance
+Promoted LTM items now carry a `promoted_from_stm` provenance flag (appears in:
+1. Context item scores (`promoted_from_stm: 1.0`)
+2. Provenance details trace (`trace.provenance_details[].promoted_from_stm`)
+
+Example provenance entry:
+```json
+{
+  "source_id": "ltm-turn-abc123",
+  "source_system": "ltm",
+  "reason": "semantic_match",
+  "composite": 0.8421,
+  "factors": [
+    {"factor": "similarity", "weight": 0.4, "value": 0.91, "contribution": 0.364, "category": "retrieval"},
+    {"factor": "activation", "weight": 0.3, "value": 0.73, "contribution": 0.219, "category": "retrieval"},
+    {"factor": "recency", "weight": 0.2, "value": 0.55, "contribution": 0.110, "category": "retrieval"},
+    {"factor": "salience", "weight": 0.1, "value": 0.49, "contribution": 0.049, "category": "retrieval"}
+  ],
+  "promoted_from_stm": true,
+  "composite_vs_factor_sum_delta": 0.0001
+}
+```
+
+### Age & Rehearsal Gating
+Promotion requires simultaneously:
+- Rehearsals >= policy.min_rehearsals_for_promotion
+- Age (seconds since first seen) >= policy.min_age_seconds
+
+These safeguards prevent premature promotion and make the promotion age histogram meaningful.
+
+### Operational Uses
+- `promotion_age_p95_seconds` provides a stability signal (rising values may indicate lowered rehearsal frequency or throttled promotions)
+- `stm_store_total / ltm_promotions_total` ratio approximates consolidation selectivity
+- Provenance flag allows downstream explanation layers to highlight durable memories.
+
+---
+### API Schema (Performance & Consolidation)
+
+Minimal OpenAPI-style fragments for new observability endpoints:
+
+```yaml
+paths:
+  /agent/chat/performance:
+    get:
+      summary: Chat performance & consolidation metrics
+      responses:
+        '200':
+          description: Performance snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  latency_p95_ms: { type: number }
+                  performance_degraded: { type: boolean }
+                  ema_turn_latency_ms: { type: number }
+                  chat_turns_per_sec: { type: number }
+                  consolidation:
+                    type: object
+                    properties:
+                      counters:
+                        type: object
+                        properties:
+                          stm_store_total: { type: integer }
+                          ltm_promotions_total: { type: integer }
+                      promotion_age_p95_seconds: { type: number }
+                      selectivity_ratio: { type: number }
+                      recent_promotion_age_seconds:
+                        type: object
+                        properties:
+                          count: { type: integer }
+                          avg: { type: number }
+                          values:
+                            type: array
+                            items: { type: number }
+                      promotion_age_alert: { type: boolean }
+                      promotion_age_alert_threshold: { type: number }
+  /agent/chat/consolidation/status:
+    get:
+      summary: Consolidation subsystem status
+      responses:
+        '200':
+          description: Current consolidation counters and recent events
+```
+
+
 ## 🧠 Complete STM & Attention Integration (July 2025)
 
 ### Production-Grade Short-Term Memory System
@@ -297,6 +472,16 @@ The Long-Term Memory (LTM) system has been significantly enhanced with biologica
 ---
 
 
+## API Endpoints (Selected)
+
+Core chat & cognition service endpoints (FastAPI):
+
+- `POST /agent/chat` – Process a chat message (optional streaming via `stream=true`)
+- `GET /agent/chat/preview` – Deterministic context preview (no generation)
+- `GET /agent/chat/metrics` – Metrics snapshot (light by default)
+- `GET /agent/chat/performance` – Performance status (latency p95, degradation flag)
+- `GET /agent/chat/consolidation/status` – Consolidation subsystem status, counters, recent events (inactive flag if not configured)
+
 ## CLI Commands
 
 ### **Memory Operations**
@@ -362,7 +547,7 @@ POST /prospective/process_due        # Process due reminders
 # Agent interaction
 POST /agent/chat                     # Chat with agent
 GET /agent/status                    # Get agent status
-
+GET /agent/chat/performance          # Chat performance status (p95, target, degraded)
 # System management
 POST /test/reset                     # Reset system (test only)
 GET /health                          # Health check
