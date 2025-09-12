@@ -89,9 +89,17 @@ class GeorgeAPI:
             return response.json()
         except requests.exceptions.Timeout:
             st.error(f"⏱️ Request timed out after {timeout}s. Agent may still be initializing...")
+            if 'api_errors' not in st.session_state:
+                st.session_state.api_errors = []
+            st.session_state.api_errors.append({"method":"GET","endpoint":endpoint,"error":"timeout","ts": datetime.now().isoformat()})
+            st.session_state.api_errors = st.session_state.api_errors[-50:]
             return {"error": f"Timeout after {timeout}s", "status": "timeout"}
         except requests.exceptions.RequestException as e:
             st.error(f"API Error: {e}")
+            if 'api_errors' not in st.session_state:
+                st.session_state.api_errors = []
+            st.session_state.api_errors.append({"method":"GET","endpoint":endpoint,"error":str(e),"ts": datetime.now().isoformat()})
+            st.session_state.api_errors = st.session_state.api_errors[-50:]
             return {"error": str(e)}
     
     @staticmethod
@@ -103,9 +111,17 @@ class GeorgeAPI:
             return response.json()
         except requests.exceptions.Timeout:
             st.error(f"⏱️ Request timed out after {timeout}s. Processing may be taking longer than expected...")
+            if 'api_errors' not in st.session_state:
+                st.session_state.api_errors = []
+            st.session_state.api_errors.append({"method":"POST","endpoint":endpoint,"error":"timeout","payload_keys": list(data.keys()),"ts": datetime.now().isoformat()})
+            st.session_state.api_errors = st.session_state.api_errors[-50:]
             return {"error": f"Timeout after {timeout}s", "status": "timeout"}
         except requests.exceptions.RequestException as e:
             st.error(f"API Error: {e}")
+            if 'api_errors' not in st.session_state:
+                st.session_state.api_errors = []
+            st.session_state.api_errors.append({"method":"POST","endpoint":endpoint,"error":str(e),"payload_keys": list(data.keys()),"ts": datetime.now().isoformat()})
+            st.session_state.api_errors = st.session_state.api_errors[-50:]
             return {"error": str(e)}
 
 def check_api_connection() -> bool:
@@ -185,6 +201,71 @@ def initialize_session_state():
         st.session_state.attention_history = []
     if 'executive_data' not in st.session_state:
         st.session_state.executive_data = {}
+    # Aggregated captured memories cache keyed by composite key
+    if 'captured_memory_cache' not in st.session_state:
+        st.session_state.captured_memory_cache = {}
+    if 'captured_memory_list' not in st.session_state:
+        st.session_state.captured_memory_list = []  # ordered list for display
+
+def aggregate_captured_memories(captured_list):
+    """Aggregate captured memories into session_state caches.
+
+    Ensures frequency/last_seen are updated and contradictions merged.
+    """
+    if not captured_list:
+        return
+    cache = st.session_state.captured_memory_cache
+    ordered = st.session_state.captured_memory_list
+    for cm in captured_list:
+        key = f"{cm.get('memory_type')}|{cm.get('subject')}|{cm.get('predicate')}|{cm.get('object')}"
+        existing = cache.get(key)
+        if existing:
+            existing['frequency'] = max(existing.get('frequency', 0), cm.get('frequency', 0))
+            existing['last_seen_ts'] = cm.get('last_seen_ts', existing.get('last_seen_ts'))
+            if cm.get('contradiction'):
+                existing['contradiction'] = True
+                existing.setdefault('contradicted_prior', [])
+                for v in (cm.get('contradicted_prior', []) or []):
+                    if v not in existing['contradicted_prior']:
+                        existing['contradicted_prior'].append(v)
+        else:
+            cache[key] = dict(cm)
+            ordered.append(cache[key])
+
+def render_captured_memories_sidebar():
+    """Render sidebar section listing captured memories with filters/search."""
+    with st.sidebar:
+        st.markdown("### 🧩 Captured Memories")
+        total = len(st.session_state.captured_memory_list)
+        if total == 0:
+            st.caption("No captured memories yet.")
+            return
+        categories = sorted({cm.get('memory_type') for cm in st.session_state.captured_memory_list})
+        selected_categories = st.multiselect("Categories", categories, default=categories, key='mem_cat_select')
+        search = st.text_input("Search", placeholder="substring filter", key='mem_search')
+        show_contradictions_only = st.checkbox("Contradictions only", value=False, key='mem_contrad_only')
+        filtered = []
+        for cm in st.session_state.captured_memory_list:
+            if cm.get('memory_type') not in selected_categories:
+                continue
+            if show_contradictions_only and not cm.get('contradiction'):
+                continue
+            haystack = (cm.get('content','') + ' ' + str(cm.get('object',''))).lower()
+            if search and search.lower() not in haystack:
+                continue
+            filtered.append(cm)
+        contrad_count = sum(1 for cm in st.session_state.captured_memory_list if cm.get('contradiction'))
+        st.metric("Stored", total)
+        st.metric("Contradictions", contrad_count)
+        for cm in reversed(filtered[-15:]):
+            freq = cm.get('frequency', 1)
+            tag = cm.get('memory_type')
+            line = f"[{tag}] {cm.get('content','')[:80]} (f={freq})"
+            if cm.get('contradiction'):
+                line += " ⚠️"
+            st.write(line)
+        if len(filtered) == 0 and total > 0:
+            st.caption("No matches for current filters.")
 
 def render_header():
     """Render the main header"""
@@ -228,49 +309,112 @@ def render_cognitive_status_bar():
 def render_enhanced_chat():
     """Render the enhanced chat interface with cognitive integration"""
     st.subheader("💬 Enhanced Cognitive Chat")
+    # Initialize session scaffolding if missing
+    if 'sessions' not in st.session_state:
+        st.session_state.sessions = [{'id': 'default', 'label': 'Default Session'}]
+    if 'active_session_id' not in st.session_state:
+        st.session_state.active_session_id = 'default'
+    if 'per_session_history' not in st.session_state:
+        st.session_state.per_session_history = {}
+    if 'default' not in st.session_state.per_session_history:
+        st.session_state.per_session_history['default'] = []
     
+    # Session management controls
+    with st.expander("🗂 Session Management"):
+        existing_labels = [s['label'] for s in st.session_state.sessions]
+        active_idx = 0
+        for i, s in enumerate(st.session_state.sessions):
+            if s['id'] == st.session_state.active_session_id:
+                active_idx = i
+                break
+        chosen_label = st.selectbox("Active Session", existing_labels, index=active_idx, key='active_session_select')
+        # Map back to id
+        for s in st.session_state.sessions:
+            if s['label'] == chosen_label:
+                st.session_state.active_session_id = s['id']
+                break
+        new_label = st.text_input("New Session Label", key='new_session_label_input')
+        if st.button("➕ Create Session", key='create_session_btn') and new_label:
+            import uuid as _uuid
+            new_id = _uuid.uuid4().hex[:12]
+            st.session_state.sessions.append({'id': new_id, 'label': new_label})
+            st.session_state.per_session_history[new_id] = []
+            st.session_state.active_session_id = new_id
+            st.success(f"Created session '{new_label}'")
+            st.rerun()
+        if st.button("🧹 Clear Active Session Chat", key='clear_session_btn'):
+            sid = st.session_state.active_session_id
+            st.session_state.per_session_history[sid] = []
+            if sid == 'default':
+                # also clear global fallback
+                st.session_state.chat_history = []
+            st.success("Cleared chat for active session")
+
     # Chat input
     with st.container():
-        col1, col2 = st.columns([4, 1])
+        col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
-            user_input = st.text_input("Chat with George:", placeholder="Ask me anything or give me a task...")
+            user_input = st.text_input("Chat with George:", placeholder="Ask me anything or give me a task...", key='chat_input_box')
         with col2:
-            include_reflection = st.checkbox("Include Reflection", value=False)
+            include_reflection = st.checkbox("Reflection", value=False, key='flag_reflection')
+            include_trace = st.checkbox("Trace", value=False, key='flag_trace')
+        with col3:
+            include_attention = st.checkbox("Attention", value=True, key='flag_attention')
+            include_memory = st.checkbox("Memory", value=True, key='flag_memory')
     
-    if user_input and st.button("Send", type="primary"):
+    # Context preview controls
+    with st.expander("🔎 Context Preview (before send)"):
+        preview_msg = st.text_input("Preview message", key='preview_msg_input', placeholder="Type a message to preview context retrieval...")
+        if st.button("Run Preview", key='run_preview_btn') and preview_msg:
+            with st.spinner("Building context preview..."):
+                preview = GeorgeAPI.get(f"/agent/chat/preview?message={preview_msg}")
+            if 'items' in preview:
+                st.write(f"Items ({preview.get('item_count')}):")
+                for it in preview['items']:
+                    st.write(f"• [{it.get('source')}] {it.get('content')}")
+            else:
+                st.warning("No preview data returned")
+
+    if user_input and st.button("Send", type="primary", key='send_chat_btn'):
         # Display user message
-        st.session_state.chat_history.append({
-            "role": "user",
-            "content": user_input,
-            "timestamp": datetime.now()
-        })
-        
-        # Send to George API
-        chat_data = {
-            "text": user_input,
-            "include_reflection": include_reflection,
-            "use_memory_context": True
+        sid = st.session_state.active_session_id
+        user_msg = {"role": "user", "content": user_input, "timestamp": datetime.now()}
+        st.session_state.chat_history.append(user_msg)
+        st.session_state.per_session_history[sid].append(user_msg)
+        # Build payload for new /agent/chat endpoint
+        flags = {
+            "reflection": include_reflection,
+            "include_trace": include_trace,
+            "include_attention": include_attention,
+            "include_memory": include_memory,
         }
-        
+        # Remove false flags to cut payload noise
+        flags = {k: v for k, v in flags.items() if v}
+        chat_data = {"message": user_input, "flags": flags or None, "session_id": sid}
         with st.spinner("George is thinking..."):
-            response = GeorgeAPI.post("/api/agent/chat", chat_data)
-        
+            response = GeorgeAPI.post("/agent/chat", chat_data)
         if "error" not in response:
-            # Display George's response
-            st.session_state.chat_history.append({
+            asst_msg = {
                 "role": "george",
                 "content": response.get("response", "No response"),
                 "memory_context": response.get("memory_context", []),
                 "cognitive_state": response.get("cognitive_state", {}),
                 "memory_events": response.get("memory_events", []),
+                "captured_memories": response.get("captured_memories", []),
                 "rationale": response.get("rationale"),
                 "timestamp": datetime.now()
-            })
+            }
+            st.session_state.chat_history.append(asst_msg)
+            st.session_state.per_session_history[sid].append(asst_msg)
+            # Aggregate captured memories via helper
+            aggregate_captured_memories(response.get("captured_memories", []))
         else:
             st.error(f"Chat error: {response['error']}")
     
     # Display chat history
-    for message in reversed(st.session_state.chat_history[-10:]):  # Show last 10 messages
+    sid = st.session_state.active_session_id
+    session_history = st.session_state.per_session_history.get(sid, [])
+    for message in reversed(session_history[-10:]):  # Show last 10 for active session
         with st.container():
             if message["role"] == "user":
                 st.markdown(f"""
@@ -284,6 +428,7 @@ def render_enhanced_chat():
                 cognitive_state = message.get("cognitive_state", {})
                 memory_events = message.get("memory_events", [])
                 
+                # Fixed timestamp formatting: balanced braces/parentheses
                 st.markdown(f"""
                 <div class="chat-message" style="border-left-color: #1f77b4;">
                     <strong>🧠 George ({message['timestamp'].strftime('%H:%M:%S')}):</strong><br>
@@ -307,6 +452,17 @@ def render_enhanced_chat():
                             st.write("**Memory Events:**")
                             for event in memory_events:
                                 st.write(f"• {event}")
+
+                        captured = message.get("captured_memories") or []
+                        if captured:
+                            st.write("**Captured Memories (current turn):**")
+                            for cm in captured:
+                                subj = cm.get('subject') or ''
+                                pred = cm.get('predicate') or ''
+                                obj = cm.get('object') or ''
+                                mtype = cm.get('memory_type')
+                                freq = cm.get('frequency')
+                                st.write(f"• [{mtype}] {subj} {pred} {obj} (freq={freq})")
                         
                         if message.get("rationale"):
                             st.write("**Reasoning:**")
@@ -317,7 +473,7 @@ def render_memory_dashboard():
     st.subheader("🧠 Memory Management Dashboard")
     
     # Memory system selector
-    memory_systems = ["STM", "LTM", "Episodic", "Semantic", "Procedural", "Prospective"]
+    memory_systems = ["STM", "LTM", "Episodic", "Semantic", "Procedural", "Prospective", "Semantic Facts"]
     selected_system = st.selectbox("Select Memory System", memory_systems)
     
     col1, col2 = st.columns([2, 1])
@@ -326,32 +482,93 @@ def render_memory_dashboard():
         # Memory browser
         st.write(f"**{selected_system} Memory Browser**")
         
-        if selected_system in ["STM", "LTM"]:
-            # Get memories from agent API
-            memories_data = GeorgeAPI.get(f"/api/agent/memory/list/{selected_system.lower()}")
-            
-            if "error" not in memories_data and "memories" in memories_data:
-                memories = memories_data["memories"]
-                if memories:
-                    for i, memory in enumerate(memories[:10]):  # Show first 10
-                        # Handle different memory formats
-                        if isinstance(memory, dict):
-                            content = memory.get('content', 'N/A')
-                            memory_id = memory.get('id', f'memory_{i}')
-                        else:
-                            content = str(memory)
-                            memory_id = f'memory_{i}'
-                        
-                        # Truncate content for display
-                        display_content = content[:50] + "..." if len(content) > 50 else content
-                        
-                        with st.expander(f"Memory {i+1}: {display_content}"):
-                            st.json(memory)
-                else:
-                    st.info(f"No {selected_system} memories found")
+    if selected_system in ["STM", "LTM"]:
+        # Get memories from agent API
+        memories_data = GeorgeAPI.get(f"/api/agent/memory/list/{selected_system.lower()}")
+        if "error" not in memories_data and "memories" in memories_data:
+            memories = memories_data["memories"]
+            if memories:
+                for i, memory in enumerate(memories[:10]):  # Show first 10
+                    # Handle different memory formats
+                    if isinstance(memory, dict):
+                        content = memory.get('content', 'N/A')
+                        memory_id = memory.get('id', f'memory_{i}')
+                    else:
+                        content = str(memory)
+                        memory_id = f'memory_{i}'
+                    # Truncate content for display
+                    display_content = content[:50] + "..." if len(content) > 50 else content
+                    with st.expander(f"Memory {i+1}: {display_content}"):
+                        st.json(memory)
             else:
-                st.warning(f"Unable to load {selected_system} memories")
+                st.info(f"No {selected_system} memories found")
         else:
+            st.warning(f"Unable to load {selected_system} memories")
+    elif selected_system == "Semantic Facts":
+        st.write("**Semantic Facts**")
+        # Counters (pull from chat metrics endpoint once per render; simple cache)
+        if '_semantic_metrics_cache' not in st.session_state:
+            try:
+                _m = GeorgeAPI.get('/agent/chat/metrics')
+                st.session_state._semantic_metrics_cache = _m
+            except Exception:
+                st.session_state._semantic_metrics_cache = {}
+        metrics_blob = st.session_state.get('_semantic_metrics_cache', {}) or {}
+        cap_counters = metrics_blob.get('captured_memory_counters') or metrics_blob.get('captured_memory', {})
+        sem_promos = None
+        contradictions = None
+        if isinstance(cap_counters, dict):
+            # Try multiple possible key names for robustness
+            sem_promos = cap_counters.get('semantic_promotions_total') or cap_counters.get('captured_memory_semantic_promotions_total')
+            contradictions = cap_counters.get('contradictions_total') or cap_counters.get('captured_memory_contradictions_total')
+        promo_col, contrad_col, refresh_col = st.columns([1,1,1])
+        with promo_col:
+            st.metric("Semantic Promotions", sem_promos if sem_promos is not None else 0)
+        with contrad_col:
+            st.metric("Contradictions", contradictions if contradictions is not None else 0)
+        with refresh_col:
+            if st.button("↻ Refresh Counters", key='sem_metrics_refresh'):
+                try:
+                    st.session_state._semantic_metrics_cache = GeorgeAPI.get('/agent/chat/metrics')
+                except Exception:
+                    st.warning("Failed to refresh counters")
+        # Search filters
+        with st.expander("Search Facts"):
+            subj = st.text_input("Subject", key="sem_search_subj")
+            pred = st.text_input("Predicate", key="sem_search_pred")
+            obj = st.text_input("Object Contains", key="sem_search_obj")
+            if st.button("Search Facts", key="sem_search_btn"):
+                params = {}
+                if subj: params['subject'] = subj
+                if pred: params['predicate'] = pred
+                if obj: params['object_val'] = obj
+                results = GeorgeAPI.post("/api/semantic/fact/search", params)
+                if 'results' in results:
+                    st.write(f"Found {len(results['results'])} facts")
+                    for r in results['results'][:50]:
+                        with st.expander(f"{r.get('subject')} {r.get('predicate')} {r.get('object_val')}"):
+                            st.json(r)
+                else:
+                    st.warning("No results or error")
+        if st.button("List All Facts", key="sem_list_all"):
+            all_res = GeorgeAPI.post("/api/semantic/fact/search", {})
+            facts = all_res.get('results', [])
+            st.write(f"Total facts: {len(facts)}")
+            for r in facts[:100]:
+                st.write(f"• {r.get('subject')} {r.get('predicate')} {r.get('object_val')}")
+        with st.expander("Add New Fact"):
+            new_subj = st.text_input("New Subject", key="sem_new_subj")
+            new_pred = st.text_input("New Predicate", key="sem_new_pred")
+            new_obj = st.text_area("Object Value", key="sem_new_obj")
+            if st.button("Store Fact", key="sem_store_btn") and new_subj and new_pred and new_obj:
+                payload = {"subject": new_subj, "predicate": new_pred, "object_val": new_obj}
+                res = GeorgeAPI.post("/api/semantic/fact/store", payload)
+                if 'fact_id' in res:
+                    st.success(f"Stored fact id: {res['fact_id']}")
+                    st.rerun()
+                else:
+                    st.error("Failed to store fact")
+    else:
             # Placeholder for other memory systems
             st.info(f"{selected_system} memory browser coming in Phase 2")
     
@@ -389,15 +606,71 @@ def render_memory_dashboard():
                 else:
                     st.error(f"Consolidation failed: {result['error']}")
     
-    # Memory search
+        # Export captured memories (available regardless of selected system)
+        st.write("**Captured Memories Export**")
+        captured_list = st.session_state.get('captured_memory_list', [])
+        if captured_list:
+            import json as _json
+            export_json = _json.dumps(captured_list, indent=2, default=str)
+            st.download_button(
+                label="⬇️ Download Captured Memories JSON",
+                data=export_json.encode('utf-8'),
+                file_name="captured_memories.json",
+                mime="application/json",
+                key='download_captured_memories'
+            )
+            st.caption(f"{len(captured_list)} captured memory items available")
+        else:
+            st.caption("No captured memories yet this session")
+
+    # Memory search (legacy simple) + Unified Search
     st.write("**Memory Search**")
-    search_query = st.text_input("Search across all memory systems:", placeholder="Enter search terms...")
-    
-    if search_query and st.button("🔍 Search Memories"):
+    with st.expander("Unified Search (STM, LTM, Semantic)"):
+        unified_query = st.text_input("Query", key='unified_mem_query')
+        col_u1, col_u2, col_u3 = st.columns([1,1,2])
+        with col_u1:
+            inc_stm = st.checkbox("STM", value=True, key='unified_inc_stm')
+        with col_u2:
+            inc_ltm = st.checkbox("LTM", value=True, key='unified_inc_ltm')
+        with col_u3:
+            inc_sem = st.checkbox("Semantic Facts", value=True, key='unified_inc_sem')
+        limit = st.number_input("Per-System Limit", min_value=5, max_value=100, value=20, step=5, key='unified_limit')
+        if unified_query and st.button("Run Unified Search", key='unified_search_btn'):
+            unified_results = {}
+            with st.spinner("Running unified search..."):
+                try:
+                    if inc_stm:
+                        stm_res = GeorgeAPI.post("/agent/memory/search", {"query": unified_query, "system": "stm", "limit": limit})
+                        unified_results['STM'] = stm_res.get('memory_context', stm_res.get('results', [])) if isinstance(stm_res, dict) else []
+                    if inc_ltm:
+                        ltm_res = GeorgeAPI.post("/agent/memory/search", {"query": unified_query, "system": "ltm", "limit": limit})
+                        unified_results['LTM'] = ltm_res.get('memory_context', ltm_res.get('results', [])) if isinstance(ltm_res, dict) else []
+                    if inc_sem:
+                        # Semantic facts search endpoint reuses subject/predicate/object filters; we approximate with object_val contains
+                        sem_res = GeorgeAPI.post("/api/semantic/fact/search", {"object_val": unified_query})
+                        unified_results['Semantic Facts'] = sem_res.get('results', []) if isinstance(sem_res, dict) else []
+                except Exception as e:
+                    st.error(f"Unified search error: {e}")
+            # Display grouped
+            for sys_name, items in unified_results.items():
+                st.markdown(f"**{sys_name} Results ({len(items)})**")
+                if not items:
+                    st.write("_None_")
+                    continue
+                # Show limited details
+                for i, itm in enumerate(items[:limit]):
+                    if isinstance(itm, dict):
+                        snippet = str(itm)[:140] + ("..." if len(str(itm))>140 else "")
+                        with st.expander(f"{sys_name} #{i+1}: {snippet}"):
+                            st.json(itm)
+                    else:
+                        st.write(f"• {itm}")
+    # Legacy simple search (kept for backward compatibility)
+    search_query = st.text_input("Simple search (legacy across systems):", placeholder="Enter search terms...", key='legacy_mem_search')
+    if search_query and st.button("🔍 Search Memories", key='legacy_mem_search_btn'):
         search_data = {"query": search_query}
         with st.spinner("Searching memories..."):
             results = GeorgeAPI.post("/agent/memory/search", search_data)
-        
         if "error" not in results:
             memory_context = results.get("memory_context", [])
             if memory_context:
@@ -816,16 +1089,20 @@ def main():
     wait_for_agent_initialization()  # Add initialization check
     render_header()
     render_cognitive_status_bar()
+
+    # Sidebar captured memories panel
+    render_captured_memories_sidebar()
     
     # Main interface tabs - Phase 1 + Phase 2 Features
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "💬 Enhanced Chat", 
         "🧠 Memory Dashboard", 
         "🎯 Attention Monitor", 
         "🎯 Executive Dashboard",
         "📋 Procedural Memory",
         "📅 Prospective Memory", 
-        "🔬 Neural & Analytics"
+        "🔬 Neural & Analytics",
+        "📊 Chat Metrics"
     ])
     
     with tab1:
@@ -848,6 +1125,127 @@ def main():
     
     with tab7:
         render_neural_analytics()
+
+    with tab8:
+        st.subheader("📊 Chat Metrics & Metacog")
+        # Auto-refresh interval
+        col_a, col_b, col_c = st.columns([1,1,1])
+        with col_a:
+            refresh_seconds = st.number_input("Refresh (s)", min_value=5, max_value=120, value=15, step=5, key='chat_metrics_refresh')
+        with col_b:
+            do_refresh = st.checkbox("Auto Refresh", value=True, key='chat_metrics_auto')
+        with col_c:
+            if st.button("Manual Refresh", key='chat_metrics_manual'):
+                st.session_state['_force_chat_metrics_refresh'] = True
+        # Simple timer-based refresh using empty placeholder
+        placeholder = st.empty()
+        if 'chat_metrics_history' not in st.session_state:
+            st.session_state.chat_metrics_history = []  # store (ts, p95, ema, tps)
+        if 'metacog_history_cache' not in st.session_state:
+            st.session_state.metacog_history_cache = []
+        import time as _t
+        # Decide if we fetch
+        last_fetch = st.session_state.get('_chat_metrics_last_fetch')
+        need = False
+        now = _t.time()
+        if st.session_state.get('_force_chat_metrics_refresh'):
+            need = True
+            st.session_state['_force_chat_metrics_refresh'] = False
+        elif do_refresh and (last_fetch is None or now - last_fetch >= refresh_seconds):
+            need = True
+        if need:
+            metrics_data = GeorgeAPI.get('/agent/chat/metrics')
+            perf_data = GeorgeAPI.get('/agent/chat/performance')
+            metacog_data = GeorgeAPI.get('/agent/chat/metacog/status')
+            cons_data = GeorgeAPI.get('/agent/chat/consolidation/status')
+            st.session_state['_chat_metrics_last_fetch'] = now
+            # Record history point
+            try:
+                p95 = perf_data.get('latency_p95_ms') if isinstance(perf_data, dict) else None
+                ema = perf_data.get('ema_turn_latency_ms') if isinstance(perf_data, dict) else None
+                tps = perf_data.get('chat_turns_per_sec') if isinstance(perf_data, dict) else None
+                # Derive attention/fatigue signals if present
+                att_focus = None
+                fatigue = None
+                # Search possible locations for attention metrics
+                if isinstance(metacog_data, dict):
+                    snap = metacog_data.get('snapshot') or {}
+                    if isinstance(snap, dict):
+                        att_focus = snap.get('attention_focus') or snap.get('attention', {}).get('focus')
+                        fatigue = snap.get('fatigue') or snap.get('attention', {}).get('fatigue')
+                if att_focus is None and isinstance(metrics_data, dict):
+                    att_focus = metrics_data.get('attention_focus')
+                if fatigue is None and isinstance(metrics_data, dict):
+                    fatigue = metrics_data.get('fatigue')
+                st.session_state.chat_metrics_history.append({'ts': now, 'p95': p95, 'ema': ema, 'tps': tps, 'attention_focus': att_focus, 'fatigue': fatigue})
+                st.session_state.chat_metrics_history = st.session_state.chat_metrics_history[-200:]
+                if metacog_data.get('history_tail'):
+                    st.session_state.metacog_history_cache = metacog_data['history_tail']
+            except Exception:
+                pass
+            st.session_state['_chat_metrics_current'] = {
+                'metrics': metrics_data,
+                'performance': perf_data,
+                'metacog': metacog_data,
+                'consolidation': cons_data
+            }
+        current = st.session_state.get('_chat_metrics_current', {})
+        with placeholder.container():
+            col1, col2, col3 = st.columns(3)
+            perf = current.get('performance', {}) or {}
+            with col1:
+                st.metric('Latency p95 (ms)', f"{perf.get('latency_p95_ms', 0):.1f}")
+            with col2:
+                st.metric('EMA (ms)', f"{perf.get('ema_turn_latency_ms', 0):.1f}")
+            with col3:
+                st.metric('Turns/sec', f"{perf.get('chat_turns_per_sec', 0):.2f}")
+            # History charts
+            hist = st.session_state.chat_metrics_history
+            if hist:
+                import pandas as pd
+                df = pd.DataFrame(hist)
+                df['age'] = df['ts'] - df['ts'].iloc[0]
+                st.line_chart(df.set_index('age')[['p95','ema']])
+                st.line_chart(df.set_index('age')[['tps']])
+                # Attention & fatigue sparkline (filter non-null)
+                if 'attention_focus' in df.columns and df['attention_focus'].notnull().any():
+                    af_df = df[['age','attention_focus']].dropna()
+                    st.line_chart(af_df.set_index('age'))
+                if 'fatigue' in df.columns and df['fatigue'].notnull().any():
+                    fg_df = df[['age','fatigue']].dropna()
+                    st.line_chart(fg_df.set_index('age'))
+            # Metacog snapshot
+            metacog = current.get('metacog', {})
+            if metacog.get('available'):
+                st.markdown('**Last Metacog Snapshot**')
+                st.json(metacog.get('snapshot', {}))
+            # Metacog history tail
+            if st.session_state.metacog_history_cache:
+                with st.expander('Metacog History Tail'):
+                    for snap in st.session_state.metacog_history_cache:
+                        st.write(f"Turn {snap.get('turn_counter')} | p95={snap.get('performance',{}).get('latency_p95_ms')} | stm_util={snap.get('stm_utilization')}")
+            else:
+                st.caption('No metacog history yet.')
+            # Consolidation status
+            cons = current.get('consolidation', {})
+            st.markdown('**Consolidation Status**')
+            if cons.get('active'):
+                st.write(cons.get('status'))
+                events = cons.get('recent_events') or []
+                if events:
+                    with st.expander('Recent Consolidation Events'):
+                        for ev in events:
+                            st.write(ev)
+            else:
+                st.caption(cons.get('reason','inactive'))
+            # API error panel
+            if 'api_errors' in st.session_state and st.session_state.api_errors:
+                with st.expander('⚠️ Recent API Errors'):
+                    for e in reversed(st.session_state.api_errors[-25:]):
+                        st.write(f"{e.get('ts')} | {e.get('method')} {e.get('endpoint')} -> {e.get('error')}")
+                    if st.button('Clear API Errors', key='clear_api_err_btn'):
+                        st.session_state.api_errors = []
+                        st.rerun()
     
     # Footer
     st.divider()
@@ -855,3 +1253,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # QA Instructions (manual):
+    # 1. Send messages like "Alice is a doctor" then "Alice is a painter" to observe contradiction badge increment.
+    # 2. Send preference statements ("I like chess") multiple times; verify frequency increments in sidebar list (f=).
+    # 3. Use category multiselect to isolate one memory type.
+    # 4. Toggle 'Contradictions only' to filter list.
+    # 5. Use Search box with substring (e.g., 'chess') to narrow results.
+    # 6. Confirm counts (Stored, Contradictions) update dynamically after each turn.

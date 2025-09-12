@@ -19,6 +19,8 @@ from .provenance import build_item_provenance
 from .scoring import get_scoring_profile_version
 from .constants import PREVIEW_MAX_ITEMS, PREVIEW_MAX_CONTENT_CHARS
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
+from .memory_capture import MemoryCaptureModule, MemoryCaptureCache, CapturedMemory  # added import near top
+import re  # added for fact question pattern
 
 
 class ChatService:
@@ -38,6 +40,9 @@ class ChatService:
         self.sessions = session_manager
         self.context_builder = context_builder
         self.consolidator = consolidator
+        # Memory capture modules (Phase 1)
+        self._capture = MemoryCaptureModule()
+        self._capture_cache = MemoryCaptureCache()
         # Consolidation event log (simple list for recent trace enrichment)
         self.consolidation_log = []  # entries: dict(user_turn_id,status,salience,valence,timestamp)
         # Metacognitive tracking fields
@@ -102,6 +107,114 @@ class ChatService:
             importance=importance,
         )
         sess.add_turn(user_turn)
+        # --- Phase 1 memory capture ---
+        try:
+            captures = self._capture.extract(message)
+        except Exception:
+            captures = []
+        stored_captures: list[dict] = []
+        for cm in captures:
+            # Gather prior objects for contradiction check BEFORE updating frequency
+            prior_objs = set()
+            if cm.memory_type == "identity_fact" and cm.subject:
+                try:
+                    subj_l = (cm.subject or "").lower()
+                    for rec in self._capture_cache.as_list():
+                        if rec.get("memory_type") == "identity_fact" and (rec.get("subject") or "").lower() == subj_l:
+                            pobj = (rec.get("object") or "").lower()
+                            if pobj:
+                                prior_objs.add(pobj)
+                except Exception:
+                    prior_objs = set()
+            stats = self._capture_cache.update(cm)
+            meta = {
+                "memory_type": cm.memory_type,
+                "subject": (cm.subject or "").lower(),
+                "predicate": (cm.predicate or "").lower(),
+                "object": (cm.obj or "").lower(),
+                "raw_text": cm.raw_text,
+                "frequency": stats["frequency"],
+                "first_seen_ts": stats["first_seen_ts"],
+                "last_seen_ts": stats["last_seen_ts"],
+                "extracted_from_turn_id": user_turn.turn_id,
+            }
+            # Contradiction detection for identity facts (same subject different object values over time)
+            if cm.memory_type == "identity_fact" and meta["subject"] and meta["object"]:
+                try:
+                    obj_l = meta["object"]
+                    if prior_objs and obj_l not in prior_objs:
+                        meta["contradiction"] = True
+                        meta["contradicted_prior"] = list(prior_objs)[:5]
+                        metrics_registry.inc("captured_memory_contradictions_total")
+                except Exception:
+                    pass
+            # Frequency reinforcement: if frequency passes thresholds, mark reinforcement and slightly boost importance
+            try:
+                freq = stats.get("frequency", 0)
+                if freq in (2, 3, 5, 8):  # key reinforcement milestones
+                    meta["reinforced"] = True
+                    # Boost importance proportionally (capped)
+                    boost = 0.05 if freq == 2 else 0.07 if freq == 3 else 0.10 if freq == 5 else 0.12
+                    user_turn.importance = min(1.0, (user_turn.importance or 0.0) + boost)
+                    metrics_registry.inc("captured_memory_reinforcements_total")
+                    # Attempt STM refresh (rehearsal) if stm supports method
+                    stm_obj = getattr(self.consolidator, "stm", None) if self.consolidator is not None else None
+                    if stm_obj is not None:
+                        # If STM has method to update activation; else re-add item to refresh recency
+                        if hasattr(stm_obj, "refresh_item_activation"):
+                            try:
+                                key = f"{cm.memory_type}:{meta['subject']}:{meta['object']}"
+                                stm_obj.refresh_item_activation(key)  # type: ignore
+                            except Exception:
+                                pass
+                        elif hasattr(stm_obj, "add_item"):
+                            try:
+                                stm_obj.add_item(content=cm.content, metadata={**meta, "rehearsal": True})  # type: ignore
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            # Attempt to store in STM if accessible via consolidator
+            try:
+                stm_obj = None
+                if self.consolidator is not None:
+                    stm_obj = getattr(self.consolidator, "stm", None)
+                if stm_obj is not None and hasattr(stm_obj, "add_item"):
+                    stm_obj.add_item(content=cm.content, metadata=meta)  # type: ignore
+                # Fallback: if no add_item but store_memory exists
+                elif stm_obj is not None and hasattr(stm_obj, "store_memory"):
+                    stm_obj.store_memory(memory_id=f"cap-{user_turn.turn_id[:8]}-{meta['frequency']}", content=cm.content, importance=0.5)  # type: ignore
+            except Exception:
+                pass
+            # Semantic promotion (identity/preference/goal) when frequency threshold hit
+            try:
+                freq = meta.get("frequency", 0)
+                if cm.memory_type in ("identity_fact", "preference", "goal_intent") and freq in (3, 5):
+                    # Access semantic memory through context_builder if available
+                    sem = getattr(self.context_builder, "semantic", None)
+                    if sem is not None and hasattr(sem, "add_item"):
+                        promo_meta = {k: meta[k] for k in ("memory_type", "subject", "predicate", "object", "frequency") if k in meta}
+                        promo_meta.update({
+                            "promotion_reason": "frequency_threshold",
+                            "promotion_freq": freq,
+                            "source": "chat_capture",
+                        })
+                        try:
+                            sem.add_item(content=cm.content, metadata=promo_meta)  # type: ignore
+                            meta["promoted_semantic"] = True
+                            metrics_registry.inc("captured_memory_semantic_promotions_total")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            stored_captures.append({"content": cm.content, **meta})
+        # Optionally attach capture summary to metrics registry state for introspection
+        if stored_captures:
+            try:
+                metrics_registry.state["last_captured_memories"] = stored_captures[-5:]
+                metrics_registry.inc("captured_memory_units_total", len(stored_captures))
+            except Exception:
+                pass
 
         # --- Adaptive retrieval limits (temporary adjustment of max_context_items) ---
         cfg = self.context_builder.cfg
@@ -182,6 +295,13 @@ class ChatService:
             extra_due = []
 
         response_text = self._generate_placeholder_response(message)
+        # Before forming assistant response, check retrieval for simple questions
+        try:
+            answer = self._attempt_fact_answer(message)
+            if answer:
+                response_text = answer
+        except Exception:
+            pass
         assistant_turn = TurnRecord(
             role="assistant",
             content=response_text,
@@ -269,6 +389,8 @@ class ChatService:
             "user_turn_id": user_turn.turn_id,
             "assistant_turn_id": assistant_turn.turn_id,
             "response": assistant_turn.content,
+            # Newly exposed: most recent captured memory units extracted from this user message
+            "captured_memories": stored_captures,
             "metrics": {
                 "turn_latency_ms": built.metrics.turn_latency_ms,
                 "retrieval_time_ms": built.metrics.retrieval_time_ms,
@@ -692,3 +814,39 @@ class ChatService:
                 "promotion_age_alert_threshold": alert_threshold,
             }
         return base
+
+    def _attempt_fact_answer(self, message: str) -> Optional[str]:
+        msg = message.strip().lower()
+        # Supported patterns:
+        #  - who is X
+        #  - what is X
+        #  - tell me about X
+        #  - what does X do
+        subj = None
+        m = re.match(r"^(who|what) is ([^?]+)\??$", msg)
+        if m:
+            subj = m.group(2).strip()
+        if subj is None:
+            m2 = re.match(r"^tell me about ([^?]+)\??$", msg)
+            if m2:
+                subj = m2.group(1).strip()
+        if subj is None:
+            m3 = re.match(r"^what does ([^?]+) do\??$", msg)
+            if m3:
+                subj = m3.group(1).strip()
+        if subj is None:
+            return None
+        # Search capture cache (reverse for recency bias)
+        subj_l = subj.lower()
+        for rec in reversed(self._capture_cache.as_list()):
+            rsubj = rec.get("subject") or ""
+            if rsubj and (subj_l == rsubj or subj_l in rsubj):
+                mtype = rec.get("memory_type")
+                obj = rec.get("object")
+                if mtype == "identity_fact" and obj:
+                    return f"{subj.title()} is {obj}."
+                if mtype == "preference" and obj:
+                    return f"{subj.title()} likes {obj}."
+                if mtype == "goal_intent" and obj:
+                    return f"{subj.title()} intends to {obj}."
+        return None
