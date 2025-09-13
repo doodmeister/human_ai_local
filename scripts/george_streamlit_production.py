@@ -201,21 +201,24 @@ def initialize_session_state():
         st.session_state.attention_history = []
     if 'executive_data' not in st.session_state:
         st.session_state.executive_data = {}
-    # Aggregated captured memories cache keyed by composite key
-    if 'captured_memory_cache' not in st.session_state:
-        st.session_state.captured_memory_cache = {}
-    if 'captured_memory_list' not in st.session_state:
-        st.session_state.captured_memory_list = []  # ordered list for display
+    if 'per_session_captured_memory_cache' not in st.session_state:
+        st.session_state.per_session_captured_memory_cache = {}
+    if 'per_session_captured_memory_list' not in st.session_state:
+        st.session_state.per_session_captured_memory_list = {}
 
-def aggregate_captured_memories(captured_list):
-    """Aggregate captured memories into session_state caches.
+def aggregate_captured_memories(captured_list, session_id='default'):
+    """Aggregate captured memories into session_state caches per session.
 
     Ensures frequency/last_seen are updated and contradictions merged.
     """
     if not captured_list:
         return
-    cache = st.session_state.captured_memory_cache
-    ordered = st.session_state.captured_memory_list
+    if session_id not in st.session_state.per_session_captured_memory_cache:
+        st.session_state.per_session_captured_memory_cache[session_id] = {}
+    if session_id not in st.session_state.per_session_captured_memory_list:
+        st.session_state.per_session_captured_memory_list[session_id] = []
+    cache = st.session_state.per_session_captured_memory_cache[session_id]
+    ordered = st.session_state.per_session_captured_memory_list[session_id]
     for cm in captured_list:
         key = f"{cm.get('memory_type')}|{cm.get('subject')}|{cm.get('predicate')}|{cm.get('object')}"
         existing = cache.get(key)
@@ -236,16 +239,18 @@ def render_captured_memories_sidebar():
     """Render sidebar section listing captured memories with filters/search."""
     with st.sidebar:
         st.markdown("### 🧩 Captured Memories")
-        total = len(st.session_state.captured_memory_list)
+        sid = st.session_state.get('active_session_id', 'default')
+        captured_list = st.session_state.per_session_captured_memory_list.get(sid, [])
+        total = len(captured_list)
         if total == 0:
-            st.caption("No captured memories yet.")
+            st.caption("No captured memories yet in this session.")
             return
-        categories = sorted({cm.get('memory_type') for cm in st.session_state.captured_memory_list})
+        categories = sorted({cm.get('memory_type') for cm in captured_list})
         selected_categories = st.multiselect("Categories", categories, default=categories, key='mem_cat_select')
         search = st.text_input("Search", placeholder="substring filter", key='mem_search')
         show_contradictions_only = st.checkbox("Contradictions only", value=False, key='mem_contrad_only')
         filtered = []
-        for cm in st.session_state.captured_memory_list:
+        for cm in captured_list:
             if cm.get('memory_type') not in selected_categories:
                 continue
             if show_contradictions_only and not cm.get('contradiction'):
@@ -254,7 +259,7 @@ def render_captured_memories_sidebar():
             if search and search.lower() not in haystack:
                 continue
             filtered.append(cm)
-        contrad_count = sum(1 for cm in st.session_state.captured_memory_list if cm.get('contradiction'))
+        contrad_count = sum(1 for cm in captured_list if cm.get('contradiction'))
         st.metric("Stored", total)
         st.metric("Contradictions", contrad_count)
         for cm in reversed(filtered[-15:]):
@@ -372,6 +377,19 @@ def render_enhanced_chat():
                 st.write(f"Items ({preview.get('item_count')}):")
                 for it in preview['items']:
                     st.write(f"• [{it.get('source')}] {it.get('content')}")
+                # Show due reminders
+                due_res = GeorgeAPI.get("/agent/reminders/due")
+                if "error" not in due_res:
+                    due = due_res if isinstance(due_res, list) else due_res.get('reminders', [])
+                    if due:
+                        st.write("**Due Reminders (will be injected):**")
+                        for r in due:
+                            if isinstance(r, dict):
+                                st.write(f"• {r.get('content')}")
+                            else:
+                                st.write(f"• {r}")
+                else:
+                    st.caption("Could not check due reminders")
             else:
                 st.warning("No preview data returned")
 
@@ -407,11 +425,24 @@ def render_enhanced_chat():
             st.session_state.chat_history.append(asst_msg)
             st.session_state.per_session_history[sid].append(asst_msg)
             # Aggregate captured memories via helper
-            aggregate_captured_memories(response.get("captured_memories", []))
-        else:
-            st.error(f"Chat error: {response['error']}")
-    
-    # Display chat history
+            captured = response.get("captured_memories", [])
+            aggregate_captured_memories(captured, sid)
+            # STM Storage Feedback
+            if captured and include_memory:
+                try:
+                    stm_data = GeorgeAPI.get("/api/agent/memory/list/stm")
+                    if "error" not in stm_data and "memories" in stm_data:
+                        stm_count = len(stm_data["memories"])
+                        st.success(f"✅ {len(captured)} memories stored to STM (Total STM: {stm_count})")
+                        # Flag to refresh STM list in dashboard
+                        st.session_state['_refresh_stm_list'] = True
+                    else:
+                        st.warning("STM storage confirmed, but count unavailable")
+                except Exception as e:
+                    st.warning(f"STM feedback error: {e}")
+            # Force refresh chat metrics after turn
+            st.session_state['_force_chat_metrics_refresh'] = True
+            st.success("Response received!")
     sid = st.session_state.active_session_id
     session_history = st.session_state.per_session_history.get(sid, [])
     for message in reversed(session_history[-10:]):  # Show last 10 for active session
@@ -451,7 +482,26 @@ def render_enhanced_chat():
                         if memory_events:
                             st.write("**Memory Events:**")
                             for event in memory_events:
-                                st.write(f"• {event}")
+                                if isinstance(event, dict):
+                                    event_type = event.get('type', 'unknown')
+                                    source_system = event.get('source_system', 'unknown')
+                                    content = event.get('content', 'N/A')[:100]
+                                    with st.expander(f"[{event_type}] {source_system}: {content}"):
+                                        if 'provenance' in event:
+                                            prov = event['provenance']
+                                            if isinstance(prov, dict):
+                                                promoted = prov.get('promoted_from_stm', False)
+                                                st.write(f"**Provenance:** {'Promoted from STM' if promoted else 'Original'}")
+                                        if 'factors' in event:
+                                            factors = event['factors']
+                                            if isinstance(factors, list):
+                                                st.write("**Retrieval Factors:**")
+                                                for f in factors:
+                                                    if isinstance(f, dict):
+                                                        st.write(f"- {f.get('factor', 'unknown')}: {f.get('value', 0):.3f} (contrib: {f.get('contribution', 0):.3f})")
+                                        st.json(event)
+                                else:
+                                    st.write(f"• {event}")
 
                         captured = message.get("captured_memories") or []
                         if captured:
@@ -463,6 +513,53 @@ def render_enhanced_chat():
                                 mtype = cm.get('memory_type')
                                 freq = cm.get('frequency')
                                 st.write(f"• [{mtype}] {subj} {pred} {obj} (freq={freq})")
+                        
+                        # Enhanced Memory Context Display
+                        memory_context = message.get("memory_context") or []
+                        if memory_context:
+                            st.write("**Retrieved Memory Context:**")
+                            # Group by source_system
+                            stm_items = [item for item in memory_context if item.get('source_system') == 'stm']
+                            ltm_items = [item for item in memory_context if item.get('source_system') == 'ltm']
+                            other_items = [item for item in memory_context if item.get('source_system') not in ['stm', 'ltm']]
+                            
+                            if stm_items:
+                                st.write("**STM Sources:**")
+                                for item in stm_items[:5]:  # Limit to 5
+                                    composite = item.get('composite', 0)
+                                    factors = item.get('factors', [])
+                                    provenance = item.get('promoted_from_stm', False)
+                                    content = item.get('content', 'N/A')[:100]
+                                    with st.expander(f"STM: {content}... (Score: {composite:.3f})"):
+                                        st.write(f"**Provenance:** {'Promoted from STM' if provenance else 'Original STM'}")
+                                        if factors:
+                                            st.write("**Retrieval Factors:**")
+                                            for f in factors:
+                                                st.write(f"- {f.get('factor')}: {f.get('value', 0):.3f} (contrib: {f.get('contribution', 0):.3f})")
+                                        st.json(item)
+                            
+                            if ltm_items:
+                                st.write("**LTM Sources:**")
+                                for item in ltm_items[:5]:
+                                    composite = item.get('composite', 0)
+                                    factors = item.get('factors', [])
+                                    provenance = item.get('promoted_from_stm', False)
+                                    content = item.get('content', 'N/A')[:100]
+                                    with st.expander(f"LTM: {content}... (Score: {composite:.3f})"):
+                                        st.write(f"**Provenance:** {'Promoted from STM' if provenance else 'Original LTM'}")
+                                        if factors:
+                                            st.write("**Retrieval Factors:**")
+                                            for f in factors:
+                                                st.write(f"- {f.get('factor')}: {f.get('value', 0):.3f} (contrib: {f.get('contribution', 0):.3f})")
+                                        st.json(item)
+                            
+                            if other_items:
+                                st.write("**Other Sources:**")
+                                for item in other_items[:5]:
+                                    source = item.get('source_system', 'unknown')
+                                    content = item.get('content', 'N/A')[:100]
+                                    with st.expander(f"{source}: {content}..."):
+                                        st.json(item)
                         
                         if message.get("rationale"):
                             st.write("**Reasoning:**")
@@ -483,6 +580,13 @@ def render_memory_dashboard():
         st.write(f"**{selected_system} Memory Browser**")
         
     if selected_system in ["STM", "LTM"]:
+        # Refresh flag for STM
+        if selected_system == "STM" and st.session_state.get('_refresh_stm_list'):
+            st.session_state['_refresh_stm_list'] = False
+            st.info("STM list refreshed after recent storage")
+        # Manual refresh button
+        if st.button(f"🔄 Refresh {selected_system} List", key=f'refresh_{selected_system.lower()}_list'):
+            st.rerun()
         # Get memories from agent API
         memories_data = GeorgeAPI.get(f"/api/agent/memory/list/{selected_system.lower()}")
         if "error" not in memories_data and "memories" in memories_data:
@@ -568,9 +672,53 @@ def render_memory_dashboard():
                     st.rerun()
                 else:
                     st.error("Failed to store fact")
+    elif selected_system == "Prospective":
+        st.write("**Prospective Memory (Reminders)**")
+        # Create new reminder
+        with st.expander("Create New Reminder"):
+            reminder_content = st.text_input("Reminder Content", key='reminder_content')
+            due_seconds = st.number_input("Due in Seconds", min_value=10, max_value=86400, value=300, step=60, key='due_seconds')
+            if st.button("Create Reminder", key='create_reminder_btn') and reminder_content:
+                payload = {"content": reminder_content, "due_in_seconds": due_seconds}
+                res = GeorgeAPI.post("/agent/reminders", payload)
+                if "error" not in res:
+                    st.success(f"Reminder created: {res.get('id', 'unknown')}")
+                    st.rerun()
+                else:
+                    st.error(f"Failed to create reminder: {res['error']}")
+        # List all reminders
+        if st.button("List All Reminders", key='list_reminders_btn'):
+            res = GeorgeAPI.get("/agent/reminders")
+            if "error" not in res:
+                reminders = res if isinstance(res, list) else res.get('reminders', [])
+                st.write(f"Total reminders: {len(reminders)}")
+                for r in reminders:
+                    if isinstance(r, dict):
+                        status = "Triggered" if r.get('triggered_ts') else "Pending"
+                        st.write(f"• [{status}] {r.get('content')} (Due: {r.get('due_ts')})")
+                    else:
+                        st.write(f"• {r}")
+            else:
+                st.error(f"Failed to list reminders: {res['error']}")
+        # Get due reminders
+        if st.button("Get Due Reminders", key='get_due_reminders_btn'):
+            res = GeorgeAPI.get("/agent/reminders/due")
+            if "error" not in res:
+                due = res if isinstance(res, list) else res.get('reminders', [])
+                if due:
+                    st.write(f"Due reminders: {len(due)}")
+                    for r in due:
+                        if isinstance(r, dict):
+                            st.write(f"• {r.get('content')}")
+                        else:
+                            st.write(f"• {r}")
+                else:
+                    st.info("No due reminders")
+            else:
+                st.error(f"Failed to get due reminders: {res['error']}")
     else:
-            # Placeholder for other memory systems
-            st.info(f"{selected_system} memory browser coming in Phase 2")
+        # Placeholder for other memory systems
+        st.info(f"{selected_system} memory browser coming in Phase 2")
     
     with col2:
         # Memory health metrics
@@ -585,7 +733,16 @@ def render_memory_dashboard():
             stm_utilization = stm_data.get("capacity_utilization", 0.0)
             
             st.metric("STM Count", stm_count)
-            st.metric("STM Utilization", f"{stm_utilization:.1%}")
+            stm_util_pct = stm_utilization * 100
+            st.metric("STM Utilization", f"{stm_util_pct:.1f}%")
+            
+            # Adaptive Alert for high STM utilization
+            threshold = st.session_state.get('adaptive_settings', {}).get('stm_util_threshold', 0.85) * 100
+            if stm_util_pct > threshold:
+                alert_msg = f"STM utilization ({stm_util_pct:.1f}%) exceeds threshold ({threshold:.1f}%) - Retrieval may be limited"
+                if alert_msg not in [a['message'] for a in st.session_state.adaptive_alerts]:
+                    st.session_state.adaptive_alerts.append({'message': alert_msg, 'ts': datetime.now().strftime('%H:%M:%S')})
+                    st.session_state.adaptive_alerts = st.session_state.adaptive_alerts[-10:]
             
             # LTM metrics
             ltm_data = memory_status.get("ltm", {})
@@ -608,20 +765,54 @@ def render_memory_dashboard():
     
         # Export captured memories (available regardless of selected system)
         st.write("**Captured Memories Export**")
-        captured_list = st.session_state.get('captured_memory_list', [])
+        sid = st.session_state.get('active_session_id', 'default')
+        captured_list = st.session_state.per_session_captured_memory_list.get(sid, [])
         if captured_list:
             import json as _json
             export_json = _json.dumps(captured_list, indent=2, default=str)
             st.download_button(
                 label="⬇️ Download Captured Memories JSON",
                 data=export_json.encode('utf-8'),
-                file_name="captured_memories.json",
+                file_name=f"captured_memories_{sid}.json",
                 mime="application/json",
                 key='download_captured_memories'
             )
-            st.caption(f"{len(captured_list)} captured memory items available")
+            st.caption(f"{len(captured_list)} captured memory items available in session '{sid}'")
         else:
-            st.caption("No captured memories yet this session")
+            st.caption(f"No captured memories yet in session '{sid}'")
+        
+        # Adaptive Memory Controls
+        st.write("**Adaptive Memory Controls**")
+        with st.expander("Adaptive Behaviors"):
+            # Toggles for enabling adaptive behaviors
+            enable_adaptive_retrieval = st.checkbox("Enable Adaptive Retrieval Limits", value=True, key='enable_adaptive_retrieval')
+            enable_adaptive_consolidation = st.checkbox("Enable Adaptive Consolidation Thresholds", value=True, key='enable_adaptive_consolidation')
+            
+            # Threshold sliders (if backend supports setting them)
+            stm_util_threshold = st.slider("STM Utilization Threshold (%)", min_value=50, max_value=95, value=85, step=5, key='stm_util_threshold')
+            perf_degraded_threshold = st.slider("Performance Degraded Threshold (ms)", min_value=500, max_value=5000, value=2000, step=100, key='perf_degraded_threshold')
+            
+            if st.button("Apply Adaptive Settings", key='apply_adaptive_settings'):
+                # Here we could send to backend if endpoint exists, for now just store in session
+                st.session_state['adaptive_settings'] = {
+                    'enable_retrieval': enable_adaptive_retrieval,
+                    'enable_consolidation': enable_adaptive_consolidation,
+                    'stm_util_threshold': stm_util_threshold / 100.0,  # convert to fraction
+                    'perf_degraded_threshold': perf_degraded_threshold
+                }
+                st.success("Adaptive settings applied (local storage)")
+        
+        # Adaptive Alerts
+        if 'adaptive_alerts' not in st.session_state:
+            st.session_state.adaptive_alerts = []
+        alerts = st.session_state.adaptive_alerts
+        if alerts:
+            st.write("**Recent Adaptive Alerts**")
+            for alert in reversed(alerts[-5:]):
+                st.warning(f"⚠️ {alert['message']} ({alert['ts']})")
+            if st.button("Clear Alerts", key='clear_adaptive_alerts'):
+                st.session_state.adaptive_alerts = []
+                st.success("Alerts cleared")
 
     # Memory search (legacy simple) + Unified Search
     st.write("**Memory Search**")
@@ -1164,6 +1355,17 @@ def main():
                 p95 = perf_data.get('latency_p95_ms') if isinstance(perf_data, dict) else None
                 ema = perf_data.get('ema_turn_latency_ms') if isinstance(perf_data, dict) else None
                 tps = perf_data.get('chat_turns_per_sec') if isinstance(perf_data, dict) else None
+                # Consolidation metrics
+                stm_store_total = None
+                ltm_promotions_total = None
+                promotion_age_p95 = None
+                if isinstance(perf_data, dict) and 'consolidation' in perf_data:
+                    cons = perf_data['consolidation']
+                    if isinstance(cons, dict):
+                        counters = cons.get('counters', {})
+                        stm_store_total = counters.get('stm_store_total')
+                        ltm_promotions_total = counters.get('ltm_promotions_total')
+                        promotion_age_p95 = cons.get('promotion_age_p95_seconds')
                 # Derive attention/fatigue signals if present
                 att_focus = None
                 fatigue = None
@@ -1177,7 +1379,7 @@ def main():
                     att_focus = metrics_data.get('attention_focus')
                 if fatigue is None and isinstance(metrics_data, dict):
                     fatigue = metrics_data.get('fatigue')
-                st.session_state.chat_metrics_history.append({'ts': now, 'p95': p95, 'ema': ema, 'tps': tps, 'attention_focus': att_focus, 'fatigue': fatigue})
+                st.session_state.chat_metrics_history.append({'ts': now, 'p95': p95, 'ema': ema, 'tps': tps, 'attention_focus': att_focus, 'fatigue': fatigue, 'stm_store_total': stm_store_total, 'ltm_promotions_total': ltm_promotions_total, 'promotion_age_p95': promotion_age_p95})
                 st.session_state.chat_metrics_history = st.session_state.chat_metrics_history[-200:]
                 if metacog_data.get('history_tail'):
                     st.session_state.metacog_history_cache = metacog_data['history_tail']
@@ -1194,7 +1396,16 @@ def main():
             col1, col2, col3 = st.columns(3)
             perf = current.get('performance', {}) or {}
             with col1:
-                st.metric('Latency p95 (ms)', f"{perf.get('latency_p95_ms', 0):.1f}")
+                p95_val = perf.get('latency_p95_ms', 0)
+                st.metric('Latency p95 (ms)', f"{p95_val:.1f}")
+                # Alert if performance degraded
+                if perf.get('performance_degraded', False):
+                    alert_msg = f"Performance degraded (p95: {p95_val:.1f}ms > target)"
+                    if alert_msg not in [a['message'] for a in st.session_state.get('adaptive_alerts', [])]:
+                        if 'adaptive_alerts' not in st.session_state:
+                            st.session_state.adaptive_alerts = []
+                        st.session_state.adaptive_alerts.append({'message': alert_msg, 'ts': datetime.now().strftime('%H:%M:%S')})
+                        st.session_state.adaptive_alerts = st.session_state.adaptive_alerts[-10:]
             with col2:
                 st.metric('EMA (ms)', f"{perf.get('ema_turn_latency_ms', 0):.1f}")
             with col3:
@@ -1238,6 +1449,23 @@ def main():
                             st.write(ev)
             else:
                 st.caption(cons.get('reason','inactive'))
+            # Consolidation Metrics
+            perf = current.get('performance', {}) or {}
+            cons_metrics = perf.get('consolidation', {})
+            if cons_metrics:
+                st.markdown('**Consolidation Metrics**')
+                counters = cons_metrics.get('counters', {})
+                col_c1, col_c2, col_c3 = st.columns(3)
+                with col_c1:
+                    st.metric('STM Stores Total', counters.get('stm_store_total', 0))
+                with col_c2:
+                    st.metric('LTM Promotions Total', counters.get('ltm_promotions_total', 0))
+                with col_c3:
+                    age_p95 = cons_metrics.get('promotion_age_p95_seconds')
+                    if age_p95 is not None:
+                        st.metric('Promotion Age p95 (s)', f"{age_p95:.1f}")
+                    else:
+                        st.metric('Promotion Age p95 (s)', 'N/A')
             # API error panel
             if 'api_errors' in st.session_state and st.session_state.api_errors:
                 with st.expander('⚠️ Recent API Errors'):
