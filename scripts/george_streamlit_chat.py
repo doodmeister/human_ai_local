@@ -91,7 +91,35 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
                 with st.spinner("Running dream consolidation..."):
                     result = trigger_dream_cycle(st.session_state.api_base_url, cycle_type="light")
                 st.success("Dream cycle complete!")
-                with st.expander("Dream cycle results"):
+                
+                # Parse and display results nicely
+                dream_results = result.get("dream_results", {})
+                if dream_results:
+                    # Summary metrics
+                    memories_consolidated = dream_results.get("memories_consolidated", 0)
+                    candidates = dream_results.get("candidates_identified", 0)
+                    associations = dream_results.get("associations_created", 0)
+                    duration = dream_results.get("actual_duration", 0)
+                    
+                    st.metric("Memories Consolidated", memories_consolidated)
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Candidates", candidates)
+                    with col2:
+                        st.metric("Associations", associations)
+                    with col3:
+                        st.metric("Duration", f"{duration:.2f}s")
+                    
+                    # Cleanup info
+                    cleanup = dream_results.get("cleanup", {})
+                    if cleanup:
+                        with st.expander("Cleanup details"):
+                            st.write(f"Weak memories removed: {cleanup.get('weak_memories_removed', 0)}")
+                            st.write(f"Duplicates cleaned: {cleanup.get('duplicate_associations_cleaned', 0)}")
+                            st.write(f"Decay applied: {cleanup.get('decay_applied', False)}")
+                            st.write(f"Items decayed: {cleanup.get('items_decayed', 0)}")
+                
+                with st.expander("Full dream cycle results"):
                     st.json(result)
             except Exception as e:
                 st.error(f"Dream cycle failed: {e}")

@@ -1,1201 +1,602 @@
-# Human-AI Cognition Framework# Human-AI Cognition Framework
+# Human-AI Cognition Framework
 
+## Overview
+A production-grade, biologically-inspired cognitive architecture for human-like memory, attention, reasoning, and executive control in AI systems. Features persistent, explainable memory structures, modular processing, advanced neural integration, executive functioning, and comprehensive error handling.
 
+---
 
-## Overview## Overview
+## 🚀 Latest Update: Executive Functioning System (July 2025)
 
-A production-grade, biologically-inspired cognitive architecture for human-like memory, attention, reasoning, and executive control in AI systems. Features persistent, explainable memory structures with **interactive chat interface**, **dynamic memory controls**, and **real-time consolidation**.A production-grade, biologically-inspired cognitive architecture for human-like memory, attention, reasoning, and executive control in AI systems. Features persistent, explainable memory structures, modular processing, advanced neural integration, executive functioning, and comprehensive error handling.
+### Production-Grade Executive Control System
+The Executive Functioning System represents the "prefrontal cortex" of the cognitive architecture, providing strategic planning, decision-making, and resource management capabilities:
 
-
-
-**What makes this unique:**---
-
-- 🧠 **STM → LTM Pipeline**: Short-term memories naturally consolidate into long-term storage
-
-- 🎚️ **Dynamic Threshold Control**: Real-time slider to adjust what gets remembered## 🚀 Latest Update: Executive Functioning System (July 2025)
-
-- 🌙 **Dream Cycle**: One-click memory consolidation from STM to LTM
-
-- 📊 **Full Transparency**: See salience scores, memory hits, and consolidation decisions### Production-Grade Executive Control System
-
-- 🔧 **Production-Ready**: Thread-safe, error-handled, comprehensively testedThe Executive Functioning System represents the "prefrontal cortex" of the cognitive architecture, providing strategic planning, decision-making, and resource management capabilities:
-
-
-
----#### **Five Core Executive Components**
-
+#### **Five Core Executive Components**
 - **Goal Manager**: Hierarchical goal tracking with priority-based resource allocation
-
-## 🚀 Quick Start- **Task Planner**: Goal decomposition into executable tasks with dependency management  
-
+- **Task Planner**: Goal decomposition into executable tasks with dependency management  
 - **Decision Engine**: Multi-criteria decision making with confidence assessment
+- **Cognitive Controller**: Resource allocation and cognitive state monitoring
+- **Executive Agent**: Central orchestrator integrating all components
 
-### **Installation**- **Cognitive Controller**: Resource allocation and cognitive state monitoring
-
-```bash- **Executive Agent**: Central orchestrator integrating all components
-
-# 1. Clone and navigate to the repository
-
-cd human_ai_local#### **Key Executive Features**
-
+#### **Key Executive Features**
 - **Strategic Planning**: Long-term goal management with hierarchical parent-child relationships
-
-# 2. Create and activate virtual environment- **Multi-Criteria Decision Making**: Weighted scoring across multiple criteria with confidence assessment
-
-python -m venv venv- **Resource Management**: Dynamic allocation of attention, memory, processing, energy, and time
-
-source venv/Scripts/activate  # Windows Git Bash- **Cognitive Mode Management**: FOCUSED, MULTI_TASK, EXPLORATION, REFLECTION, RECOVERY modes
-
-# or: source venv/bin/activate  # Linux/Mac- **Performance Monitoring**: Real-time executive effectiveness tracking and optimization suggestions
-
+- **Multi-Criteria Decision Making**: Weighted scoring across multiple criteria with confidence assessment
+- **Resource Management**: Dynamic allocation of attention, memory, processing, energy, and time
+- **Cognitive Mode Management**: FOCUSED, MULTI_TASK, EXPLORATION, REFLECTION, RECOVERY modes
+- **Performance Monitoring**: Real-time executive effectiveness tracking and optimization suggestions
 - **Adaptive Behavior**: Learns and adapts based on performance feedback and outcomes
 
-# 3. Install dependencies
-
-pip install -r requirements.txt#### **Executive Processing Pipeline**
-
+#### **Executive Processing Pipeline**
 The executive system provides human-like cognitive control through:
 
-# 4. Set up environment variables
-
-cp .env.example .env1. **Input Analysis**: Intent recognition, complexity assessment, urgency detection
-
-# Edit .env and add your OpenAI API key2. **Goal Assessment**: Create/update hierarchical goals with priority management
-
-```3. **Task Planning**: Decompose goals into executable tasks with dependency resolution
-
+1. **Input Analysis**: Intent recognition, complexity assessment, urgency detection
+2. **Goal Assessment**: Create/update hierarchical goals with priority management
+3. **Task Planning**: Decompose goals into executable tasks with dependency resolution
 4. **Decision Making**: Multi-criteria analysis with confidence-weighted selection
-
-### **🚀 One-Command Startup (Recommended)**5. **Resource Allocation**: Dynamic cognitive resource distribution and monitoring
-
-```bash6. **Execution Monitoring**: Track progress, performance, and adapt strategies
-
-# Option 1: Git Bash / Linux / Mac7. **Reflection**: Periodic self-assessment and strategy optimization
-
-./start_george.sh
+5. **Resource Allocation**: Dynamic cognitive resource distribution and monitoring
+6. **Execution Monitoring**: Track progress, performance, and adapt strategies
+7. **Reflection**: Periodic self-assessment and strategy optimization
 
 #### **Production-Ready Implementation**
-
-# Option 2: Any terminal- **1,500+ Lines**: Production-grade code with comprehensive error handling
-
-python start_george.py- **Type Safety**: Full type annotations with runtime validation
-
-```- **Thread Safety**: Concurrent operations with proper locking mechanisms
-
+- **1,500+ Lines**: Production-grade code with comprehensive error handling
+- **Type Safety**: Full type annotations with runtime validation
+- **Thread Safety**: Concurrent operations with proper locking mechanisms
 - **Performance Optimization**: O(n log n) complexity for hierarchical operations
+- **Test Coverage**: 100% pass rate with comprehensive integration testing
 
-These scripts automatically:- **Test Coverage**: 100% pass rate with comprehensive integration testing
-
-- ✅ Detect and activate your virtual environment
-
-- ✅ Start the API server on http://localhost:8000#### **Integration with Cognitive Architecture**
-
-- ✅ Launch the Streamlit chat interface on http://localhost:8501- **Memory Integration**: Goals, tasks, and decisions stored across STM/LTM systems
-
-- ✅ Open your browser automatically- **Attention Coordination**: Dynamic attention allocation based on task priorities
-
+#### **Integration with Cognitive Architecture**
+- **Memory Integration**: Goals, tasks, and decisions stored across STM/LTM systems
+- **Attention Coordination**: Dynamic attention allocation based on task priorities
 - **Neural Enhancement**: DPAD network provides attention boosts for high-priority goals
+- **Dream State Support**: Background consolidation of executive experiences
+- **Real-Time Adaptation**: Continuous optimization based on cognitive performance
 
-### **🔧 Manual Startup (Advanced)**- **Dream State Support**: Background consolidation of executive experiences
-
-```bash- **Real-Time Adaptation**: Continuous optimization based on cognitive performance
-
-# Terminal 1: Start the backend API
-
-python start_server.py### **Executive System Results**
-
+### **Executive System Results**
 Comprehensive testing demonstrates:
-
-# Terminal 2: Start the Streamlit interface- **Strategic Thinking**: Hierarchical goal management with parent-child relationships
-
-python -m streamlit run scripts/george_streamlit_chat.py --server.port 8501- **Complex Decision Making**: Multi-criteria analysis with 0.58+ confidence scores
-
-```- **Resource Optimization**: Real-time cognitive load balancing and mode transitions
-
+- **Strategic Thinking**: Hierarchical goal management with parent-child relationships
+- **Complex Decision Making**: Multi-criteria analysis with 0.58+ confidence scores
+- **Resource Optimization**: Real-time cognitive load balancing and mode transitions
 - **Task Coordination**: Automated goal decomposition with dependency resolution
+- **Performance Monitoring**: Executive efficiency tracking with adaptation recommendations
 
-### **📍 Access Points**- **Performance Monitoring**: Executive efficiency tracking with adaptation recommendations
-
-- **Chat Interface**: http://localhost:8501 (Streamlit minimal chat)
-
-- **API Documentation**: http://localhost:8000/docs (Swagger UI)---
-
-- **Health Check**: http://localhost:8000/health
+---
 
 ## 📊 Consolidation & Performance Metrics (August 2025)
 
----
-
 ### Consolidation Pipeline Visibility
+The chat performance endpoint (`/agent/chat/performance`) now surfaces consolidation metrics alongside latency and throughput:
 
-## 💬 Chat Interface FeaturesThe chat performance endpoint (`/agent/chat/performance`) now surfaces consolidation metrics alongside latency and throughput:
-
-
-
-The minimal Streamlit interface (`scripts/george_streamlit_chat.py`) provides a clean, transparent window into the cognitive system:Returned structure (fields only):
-
+Returned structure (fields only):
 ```
-
-### **Core Functionality**{
-
-- **STM → LTM → LLM Pipeline**: Each message searches Short-Term Memory first, falls back to Long-Term Memory, then passes relevant context to the language model  "latency_p95_ms": <float>,
-
-- **Context Visibility**: See exactly which memory systems contributed to each response (STM/LTM/recent/attention/executive)  "target_p95_ms": <float|None>,
-
-- **Performance Metrics**: Real-time latency, memory hit counts, and fallback status  "performance_degraded": <bool>,
-
-  "ema_turn_latency_ms": <float>,
-
-### **Interactive Controls** (Sidebar)  "chat_turns_per_sec": <float>,
-
-  "consolidation": {
-
-#### **Memory Controls**    "counters": {
-
-- **🎚️ STM Consolidation Threshold Slider** (0.0 - 1.0)      "stm_store_total": <int>,        # Total user turns stored in STM
-
-  - **Lower values (0.25-0.35)**: Captures casual conversation      "ltm_promotions_total": <int>    # Successful promotions to LTM
-
-  - **Default (0.55)**: Balanced - captures moderately important messages    },
-
-  - **Higher values (0.70-0.80)**: Only captures emphatic, emotionally-charged messages    "promotion_age_p95_seconds": <float> # p95 age (s) of promoted turns (STM dwell time)
-
-  - Real-time adjustment - no server restart needed!  }
-
-}
-
-- **🌙 Dream Cycle Button**```
-
-  - Triggers STM → LTM consolidation on demand
-
-  - Promotes memories that meet criteria:## 🧭 Metacognitive Adaptation & Self-Monitoring (August 2025)
-
-    - Rehearsals ≥ 2 (mentioned multiple times)
-
-    - Age ≥ 5 secondsRecent enhancements added adaptive, self-regulating behaviors to the chat pipeline:
-
-    - Importance ≥ 0.4
-
-  - Shows detailed results in expandable section**Snapshot System**
-
-- Periodic metacog snapshots every `metacog_turn_interval` turns (dynamic 2–10 range)
-
-#### **Chat Options**- Snapshot fields: performance latency p95 + degraded flag, consolidation selectivity, STM utilization/capacity, promotion age p95, last consolidation status
-
-- ✅ Include memory retrieval- Stored to LTM (best-effort) with `type=meta_reflection` and maintained in an in-memory ring buffer
-
-- ✅ Include attention signals
-
-- 🔍 Include trace details (debug mode)**Adaptive Controls**
-
-- 💭 Request reflection- Adaptive retrieval limit: temporary reduction of `max_context_items` when performance degraded or STM utilization ≥85%
-
-- Adaptive consolidation thresholds: temporary salience tightening under load/degradation
-
-### **Transparency Features**- Dynamic snapshot interval modulation: tightens under pressure, relaxes during stability
-
-
-
-#### **Context Used** (per message)**Advisory Context Injection**
-
-Each response shows exactly what memory items were retrieved:- Injects explicit metacog advisory items (`source_system=metacog`) when performance degraded or STM high utilization for explainability
-
-```
-
-1. [stm] I went to the mall yesterday**Metrics & Observability**
-
-   reason: recent_activation_match- Counters: `metacog_snapshots_total`, `metacog_advisory_items_total`, `metacog_stm_high_util_events_total`, `metacog_performance_degraded_events_total`, `adaptive_retrieval_applied_total`, plus prospective reminder injection counters
-
-2. [ltm] User prefers outdoor activities- Performance endpoint now returns `metacog` section with counters + current dynamic interval
-
-   reason: semantic_similarity_0.82
-
-3. [recent] Previous conversation turn**Configuration**
-
-   reason: recent_context- Centralized via `ChatConfig` additions: `metacog_turn_interval`, `metacog_snapshot_history_size` (ring buffer)
-
-```- All adaptive behaviors are non-destructive—original configuration restored each turn after temporary adjustments
-
-
-
-#### **Captured Memories** (per message)**Testing**
-
-See what facts/preferences/goals the system extracted:- `test_chat_metacog_metrics.py`, `test_chat_adaptive_retrieval.py`, `test_chat_dynamic_metacog_interval.py` validate counters, retrieval reduction, and interval modulation
-
-```
-
-[fact] User visited the mall - frequency 2These features collectively provide real-time self-awareness and automatic load shedding to preserve latency and context quality.
-
-[preference] User enjoys shopping [reinforced]
-
-```## ⏰ Prospective Memory Reminders (In-Memory Beta)
-
-
-
-#### **Debug Metrics** (per message)An initial lightweight Prospective Memory module enables scheduling future intentions ("reminders") that automatically surface in chat context when due.
-
-```
-
-latency 1468 ms; context hits STM=2 LTM=1; salience=0.48; ### Capabilities
-
-valence=0.35; importance=0.52; consolidation: stored- Add reminders with relative due time (seconds from now)
-
-```- List all / only pending reminders
-
-- Retrieve due reminders (one-shot triggering)
-
----- Automatic injection of due reminders into chat context (rank 0) for explainability
-
-
-
-## 🏗️ Architecture Overview### In-Memory Model
-
-Implemented as a fast, non-persistent singleton (`ProspectiveMemory`) distinct from the vector-based persistent system (which remains intact for future expansion). Each reminder:
-
-### **Memory Systems**```
-
 {
+  "latency_p95_ms": <float>,
+  "target_p95_ms": <float|None>,
+  "performance_degraded": <bool>,
+  "ema_turn_latency_ms": <float>,
+  "chat_turns_per_sec": <float>,
+  "consolidation": {
+    "counters": {
+      "stm_store_total": <int>,        # Total user turns stored in STM
+      "ltm_promotions_total": <int>    # Successful promotions to LTM
+    },
+    "promotion_age_p95_seconds": <float> # p95 age (s) of promoted turns (STM dwell time)
+  }
+}
+```
 
-#### **Short-Term Memory (STM)**  "id": "uuid",
+## 🧭 Metacognitive Adaptation & Self-Monitoring (August 2025)
 
-- **Implementation**: `VectorShortTermMemory` with ChromaDB  "content": "Send weekly report",
+Recent enhancements added adaptive, self-regulating behaviors to the chat pipeline:
 
-- **Capacity**: 7 items (Miller's magical number)  "due_ts": <epoch_seconds>,
+**Snapshot System**
+- Periodic metacog snapshots every `metacog_turn_interval` turns (dynamic 2–10 range)
+- Snapshot fields: performance latency p95 + degraded flag, consolidation selectivity, STM utilization/capacity, promotion age p95, last consolidation status
+- Stored to LTM (best-effort) with `type=meta_reflection` and maintained in an in-memory ring buffer
 
-- **Activation Model**: Recency + frequency + salience weighting  "due_in_seconds": <float>,
+**Adaptive Controls**
+- Adaptive retrieval limit: temporary reduction of `max_context_items` when performance degraded or STM utilization ≥85%
+- Adaptive consolidation thresholds: temporary salience tightening under load/degradation
+- Dynamic snapshot interval modulation: tightens under pressure, relaxes during stability
 
-- **Decay**: Biologically-realistic forgetting curve  "created_ts": <epoch_seconds>,
+**Advisory Context Injection**
+- Injects explicit metacog advisory items (`source_system=metacog`) when performance degraded or STM high utilization for explainability
 
-- **Eviction**: LRU (Least Recently Used)  "triggered_ts": <epoch_seconds|null>,
+**Metrics & Observability**
+- Counters: `metacog_snapshots_total`, `metacog_advisory_items_total`, `metacog_stm_high_util_events_total`, `metacog_performance_degraded_events_total`, `adaptive_retrieval_applied_total`, plus prospective reminder injection counters
+- Performance endpoint now returns `metacog` section with counters + current dynamic interval
 
+**Configuration**
+- Centralized via `ChatConfig` additions: `metacog_turn_interval`, `metacog_snapshot_history_size` (ring buffer)
+- All adaptive behaviors are non-destructive—original configuration restored each turn after temporary adjustments
+
+**Testing**
+- `test_chat_metacog_metrics.py`, `test_chat_adaptive_retrieval.py`, `test_chat_dynamic_metacog_interval.py` validate counters, retrieval reduction, and interval modulation
+
+These features collectively provide real-time self-awareness and automatic load shedding to preserve latency and context quality.
+
+## ⏰ Prospective Memory Reminders (In-Memory Beta)
+
+An initial lightweight Prospective Memory module enables scheduling future intentions ("reminders") that automatically surface in chat context when due.
+
+### Capabilities
+- Add reminders with relative due time (seconds from now)
+- List all / only pending reminders
+- Retrieve due reminders (one-shot triggering)
+- Automatic injection of due reminders into chat context (rank 0) for explainability
+
+### In-Memory Model
+Implemented as a fast, non-persistent singleton (`ProspectiveMemory`) distinct from the vector-based persistent system (which remains intact for future expansion). Each reminder:
+```
+{
+  "id": "uuid",
+  "content": "Send weekly report",
+  "due_ts": <epoch_seconds>,
+  "due_in_seconds": <float>,
+  "created_ts": <epoch_seconds>,
+  "triggered_ts": <epoch_seconds|null>,
   "metadata": { }
+}
+```
 
-#### **Long-Term Memory (LTM)**}
-
-- **Implementation**: `VectorLongTermMemory` with ChromaDB```
-
-- **Storage**: Persistent vector embeddings
-
-- **Retrieval**: Semantic similarity search### Injection Behavior
-
-- **Decay**: Gradual importance degradation over timeOn each chat turn, any newly due reminders (not previously triggered) are:
-
-- **Clustering**: Automatic semantic grouping1. Marked triggered (single-shot semantics)
-
+### Injection Behavior
+On each chat turn, any newly due reminders (not previously triggered) are:
+1. Marked triggered (single-shot semantics)
 2. Counted in metrics
+3. Pushed into context items with fields:
+```
+{
+  "source_system": "prospective",
+  "source_id": <reminder id>,
+  "reason": "due_reminder",
+  "content": <reminder content>,
+  "rank": 0
+}
+```
 
-#### **Consolidation Pipeline**3. Pushed into context items with fields:
-
-``````
-
-User Input → Salience Scoring → STM Storage Decision{
-
-                                      ↓  "source_system": "prospective",
-
-                                 Rehearsal Tracking  "source_id": <reminder id>,
-
-                                      ↓  "reason": "due_reminder",
-
-                              Dream Cycle / Promotion  "content": <reminder content>,
-
-                                      ↓  "rank": 0
-
-                                  LTM Storage}
-
-``````
-
-
-
-**Consolidation Criteria:**### API Endpoints
-
-- **Salience threshold**: User-adjustable via slider (default 0.55)```
-
-- **Valence threshold**: Emotional intensity ≥ 0.60POST /agent/reminders
-
-- **Rehearsal count**: Referenced ≥ 2 times  body: { "content": "Water the plants", "due_in_seconds": 300 }
-
-- **Age requirement**: Exists ≥ 5 seconds  -> 201 { reminder payload }
-
-- **Importance floor**: Base importance ≥ 0.4
+### API Endpoints
+```
+POST /agent/reminders
+  body: { "content": "Water the plants", "due_in_seconds": 300 }
+  -> 201 { reminder payload }
 
 GET /agent/reminders
+  -> 200 [ reminder payloads including triggered ]
 
-### **Core Components**  -> 200 [ reminder payloads including triggered ]
-
-
-
-#### **ChatService** (`src/chat/chat_service.py`)GET /agent/reminders/due
-
-- Orchestrates chat turns and memory capture  -> 200 [ newly due (one-shot) reminders triggered at request time ]
-
-- Manages consolidation decisions```
-
-- Tracks performance metrics
+GET /agent/reminders/due
+  -> 200 [ newly due (one-shot) reminders triggered at request time ]
+```
 
 ### Metrics
-
-#### **ContextBuilder** (`src/chat/context_builder.py`)New counters exposed via metrics registry:
-
-- Retrieval pipeline: STM → LTM → Episodic → Fallback```
-
-- Scoring and ranking of context itemsprospective_reminders_created_total    # Incremented on POST create
-
-- Timeout management for degraded performanceprospective_reminders_triggered_total  # Incremented when a reminder becomes due (either via /due or chat turn)
-
+New counters exposed via metrics registry:
+```
+prospective_reminders_created_total    # Incremented on POST create
+prospective_reminders_triggered_total  # Incremented when a reminder becomes due (either via /due or chat turn)
 prospective_reminders_injected_total   # Incremented when due reminders are injected into chat context
+```
 
-#### **MemoryConsolidator** (`src/memory/consolidation/consolidator.py`)```
-
-- STM storage with threshold gating
-
-- Rehearsal tracking for promotion### Design Notes & Next Steps
-
-- Age and frequency-based promotion to LTM- Keeps heavy vector ProspectiveMemorySystem untouched; future merge will unify persistence & semantic search.
-
+### Design Notes & Next Steps
+- Keeps heavy vector ProspectiveMemorySystem untouched; future merge will unify persistence & semantic search.
 - Current beta focuses on deterministic scheduling and visibility for turn-level reasoning.
+- Planned: persistence, natural-language scheduling ("in 5 minutes"), recurring reminders, promotion to LTM upon completion.
 
-#### **CognitiveAgent** (`src/core/cognitive_agent.py`)- Planned: persistence, natural-language scheduling ("in 5 minutes"), recurring reminders, promotion to LTM upon completion.
-
-- Integrates memory, attention, and processing subsystems
-
-- Provides unified interface to memory systems---
-
-- Manages cognitive state and fatigue### Promotion Provenance
-
+---
+### Promotion Provenance
 Promoted LTM items now carry a `promoted_from_stm` provenance flag (appears in:
+1. Context item scores (`promoted_from_stm: 1.0`)
+2. Provenance details trace (`trace.provenance_details[].promoted_from_stm`)
 
-### **Chat Pipeline Flow**1. Context item scores (`promoted_from_stm: 1.0`)
-
-```2. Provenance details trace (`trace.provenance_details[].promoted_from_stm`)
-
-1. User Input
-
-   ↓Example provenance entry:
-
-2. Salience & Valence Estimation```json
-
-   ↓{
-
-3. Memory Capture (facts/preferences/goals)  "source_id": "ltm-turn-abc123",
-
-   ↓  "source_system": "ltm",
-
-4. Context Retrieval (STM → LTM → Episodic → Fallback)  "reason": "semantic_match",
-
-   ↓  "composite": 0.8421,
-
-5. Attention Allocation & Scoring  "factors": [
-
-   ↓    {"factor": "similarity", "weight": 0.4, "value": 0.91, "contribution": 0.364, "category": "retrieval"},
-
-6. LLM Generation with Context    {"factor": "activation", "weight": 0.3, "value": 0.73, "contribution": 0.219, "category": "retrieval"},
-
-   ↓    {"factor": "recency", "weight": 0.2, "value": 0.55, "contribution": 0.110, "category": "retrieval"},
-
-7. Consolidation Decision (store in STM if threshold met)    {"factor": "salience", "weight": 0.1, "value": 0.49, "contribution": 0.049, "category": "retrieval"}
-
-   ↓  ],
-
-8. Response with Metrics  "promoted_from_stm": true,
-
-```  "composite_vs_factor_sum_delta": 0.0001
-
+Example provenance entry:
+```json
+{
+  "source_id": "ltm-turn-abc123",
+  "source_system": "ltm",
+  "reason": "semantic_match",
+  "composite": 0.8421,
+  "factors": [
+    {"factor": "similarity", "weight": 0.4, "value": 0.91, "contribution": 0.364, "category": "retrieval"},
+    {"factor": "activation", "weight": 0.3, "value": 0.73, "contribution": 0.219, "category": "retrieval"},
+    {"factor": "recency", "weight": 0.2, "value": 0.55, "contribution": 0.110, "category": "retrieval"},
+    {"factor": "salience", "weight": 0.1, "value": 0.49, "contribution": 0.049, "category": "retrieval"}
+  ],
+  "promoted_from_stm": true,
+  "composite_vs_factor_sum_delta": 0.0001
 }
+```
 
----```
-
-
-
-## 🎯 Key Features### Age & Rehearsal Gating
-
+### Age & Rehearsal Gating
 Promotion requires simultaneously:
+- Rehearsals >= policy.min_rehearsals_for_promotion
+- Age (seconds since first seen) >= policy.min_age_seconds
 
-### **1. Dynamic Memory Control**- Rehearsals >= policy.min_rehearsals_for_promotion
+These safeguards prevent premature promotion and make the promotion age histogram meaningful.
 
-- **Real-time threshold adjustment**: Change consolidation criteria without code changes- Age (seconds since first seen) >= policy.min_age_seconds
+### Operational Uses
+- `promotion_age_p95_seconds` provides a stability signal (rising values may indicate lowered rehearsal frequency or throttled promotions)
+- `stm_store_total / ltm_promotions_total` ratio approximates consolidation selectivity
+- Provenance flag allows downstream explanation layers to highlight durable memories.
 
-- **Transparent scoring**: See exact salience/valence/importance values
+---
+### API Schema (Performance & Consolidation)
 
-- **Consolidation visibility**: Know when and why memories are storedThese safeguards prevent premature promotion and make the promotion age histogram meaningful.
+Minimal OpenAPI-style fragments for new observability endpoints:
+
+```yaml
+paths:
+  /agent/chat/performance:
+    get:
+      summary: Chat performance & consolidation metrics
+      responses:
+        '200':
+          description: Performance snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  latency_p95_ms: { type: number }
+                  performance_degraded: { type: boolean }
+                  ema_turn_latency_ms: { type: number }
+                  chat_turns_per_sec: { type: number }
+                  consolidation:
+                    type: object
+                    properties:
+                      counters:
+                        type: object
+                        properties:
+                          stm_store_total: { type: integer }
+                          ltm_promotions_total: { type: integer }
+                      promotion_age_p95_seconds: { type: number }
+                      selectivity_ratio: { type: number }
+                      recent_promotion_age_seconds:
+                        type: object
+                        properties:
+                          count: { type: integer }
+                          avg: { type: number }
+                          values:
+                            type: array
+                            items: { type: number }
+                      promotion_age_alert: { type: boolean }
+                      promotion_age_alert_threshold: { type: number }
+  /agent/chat/consolidation/status:
+    get:
+      summary: Consolidation subsystem status
+      responses:
+        '200':
+          description: Current consolidation counters and recent events
+```
 
 
+## 🧠 Complete STM & Attention Integration (July 2025)
 
-### **2. Cognitive Realism**### Operational Uses
+### Production-Grade Short-Term Memory System
+The Short-Term Memory (STM) system has been completely modernized with a robust, production-grade implementation:
 
-- **7-item STM capacity**: Based on cognitive psychology research- `promotion_age_p95_seconds` provides a stability signal (rising values may indicate lowered rehearsal frequency or throttled promotions)
+#### **Vector-Based STM with ChromaDB**
+- **VectorShortTermMemory**: Production-grade STM using ChromaDB vector database for semantic storage
+- **Capacity Management**: Biologically-inspired 7-item capacity with LRU eviction
+- **Activation-Based Decay**: Realistic forgetting mechanism based on recency, frequency, and salience
+- **Semantic Retrieval**: Vector embeddings enable meaning-based memory search
+- **Type Safety**: Full type annotations with comprehensive validation and error handling
 
-- **Activation decay**: Realistic forgetting curves- `stm_store_total / ltm_promotions_total` ratio approximates consolidation selectivity
+#### **Integrated Attention Mechanism**
+- **Active Attention Allocation**: Real attention mechanism integrated into cognitive processing pipeline
+- **Neural Enhancement**: DPAD neural network provides attention boosts (+0.200 enhancement)
+- **Cognitive Load Tracking**: Real-time monitoring of fatigue, cognitive load, and attention capacity
+- **Focus Management**: Tracks attention items, switches, and available processing capacity
+- **Biologically Realistic**: Fatigue accumulation, attention recovery, and capacity limits
 
-- **Rehearsal effects**: Repeated mentions strengthen memories- Provenance flag allows downstream explanation layers to highlight durable memories.
+#### **Core Architecture Improvements**
+- **Unified Configuration**: Centralized `MemorySystemConfig` dataclass for consistent system configuration
+- **Robust Error Handling**: Comprehensive exception hierarchy with `VectorSTMError`, `MemorySystemError`, and specialized exceptions
+- **Thread Safety**: Full thread-safe operations with proper locking mechanisms and connection pooling
+- **Input Validation**: Comprehensive input validation with detailed error messages
+- **Logging**: Structured logging with performance monitoring and operation tracking
 
-- **Age-gating**: Prevents premature consolidation
+#### **Cognitive Agent Processing Pipeline**
+The main cognitive processing loop now includes full STM and attention integration:
+
+1. **Sensory Processing**: Raw input processed through entropy/salience scoring
+2. **Memory Retrieval**: Proactive recall searches both STM and LTM for context
+3. **Attention Allocation**: Neural-enhanced attention with cognitive load tracking
+4. **Response Generation**: LLM integration with memory context and attention weighting
+5. **Memory Consolidation**: Interaction storage in STM with importance-based routing
+6. **Cognitive State Update**: Real-time fatigue, attention focus, and efficiency tracking
+
+#### **STM-Specific Features**
+- **ChromaDB Integration**: Persistent vector storage with embedding-based similarity search
+- **Memory Item Structure**: Rich metadata including importance, attention scores, emotional valence
+- **Proactive Recall**: Context-aware memory search using conversation history
+- **Capacity Enforcement**: Automatic LRU eviction when 7-item limit reached
+- **Activation Calculation**: Sophisticated scoring based on recency, frequency, and salience
+- **Associative Search**: Direct association-based memory retrieval
+
+#### **Attention Mechanism Features**
+- **Real-Time Allocation**: Dynamic attention distribution based on novelty, priority, and effort
+- **Neural Enhancement**: DPAD network provides consistent +0.200 attention boosts
+- **Focus Tracking**: Maintains list of items currently in attentional focus
+- **Cognitive Load Management**: Monitors processing capacity and available resources
+- **Fatigue Modeling**: Realistic attention fatigue with recovery mechanisms
+- **Rest Functionality**: Cognitive breaks to reduce fatigue and restore capacity
+
+#### **Enhanced API Design**
+- **Result Objects**: Structured `MemoryOperationResult` and `ConsolidationStats` for detailed operation feedback
+- **Protocol-Based Design**: Type-safe protocols for `MemorySearchable` and `MemoryStorable` interfaces
+- **Lazy Loading**: Memory systems initialized on-demand for improved startup performance
+- **Comprehensive Status**: Detailed system status with uptime, operation counts, and configuration
+
+#### **Prospective Memory Evolution**
+- **Persistent Vector Storage**: ChromaDB-based persistent storage with GPU-accelerated embeddings
+- **Semantic Search**: Advanced semantic search capabilities for finding related intentions
+- **Automatic Migration**: Due reminders automatically migrate to LTM with outcome tracking
+- **API Integration**: RESTful API endpoints for reminder management and processing
+
+
+### **STM & Attention Integration Results**
+Based on comprehensive testing, the integrated system demonstrates:
+
+- **Perfect Reliability**: 0.0% error rate with 13+ operations in testing
+- **Biologically Realistic**: 7-item STM capacity with realistic activation patterns
+- **Neural Enhancement**: Consistent +0.200 attention boosts from DPAD network
+- **Semantic Storage**: Vector embeddings enable meaning-based memory retrieval
+- **Cognitive Load Tracking**: Real-time monitoring of attention capacity (0.000 → 0.862 observed)
+- **Proactive Recall**: Context-aware memory search using conversation history
+- **Automatic Management**: LRU eviction and activation-based decay working correctly
+- **Memory Consolidation**: Each interaction properly stored with attention weighting
+
+### **Production Features**
+- **Resource Management**: Proper cleanup and shutdown procedures with ChromaDB connection management
+- **Health Monitoring**: System health checks and diagnostic reporting for both STM and attention
+- **Performance Optimization**: Connection pooling, caching, and efficient memory usage
+- **Security**: Input sanitization and validation throughout the STM system
+- **Monitoring**: Comprehensive metrics and logging for production deployment
+- **Type Safety**: Full type annotations with `VectorShortTermMemory`, `MemoryItem`, and `AttentionMechanism`
 
 ---
 
-### **3. Production Quality**### API Schema (Performance & Consolidation)
-
-- **Thread-safe**: Proper locking for concurrent operations
-
-- **Error handling**: Comprehensive exception management with fallbacksMinimal OpenAPI-style fragments for new observability endpoints:
-
-- **Performance monitoring**: P95 latency tracking, throughput metrics
-
-- **Adaptive behavior**: Adjusts retrieval limits under load```yaml
-
-paths:
-
-### **4. Explainability**  /agent/chat/performance:
-
-- **Full provenance**: Track memory source (STM/LTM/recent/attention/executive)    get:
-
-- **Scoring breakdown**: See why items were selected for context      summary: Chat performance & consolidation metrics
-
-- **Consolidation status**: "stored" vs "skipped" with reasons      responses:
-
-- **Debug metrics**: Complete visibility into decision-making        '200':
-
-          description: Performance snapshot
-
----          content:
-
-            application/json:
-
-## 📡 API Endpoints              schema:
-
-                type: object
-
-### **Chat Endpoints** (`/agent/*`)                properties:
-
-                  latency_p95_ms: { type: number }
-
-#### `POST /agent/chat`                  performance_degraded: { type: boolean }
-
-Primary chat interface with memory retrieval and consolidation.                  ema_turn_latency_ms: { type: number }
-
-                  chat_turns_per_sec: { type: number }
-
-**Request:**                  consolidation:
-
-```json                    type: object
-
-{                    properties:
-
-  "message": "I went to the mall yesterday",                      counters:
-
-  "session_id": "user123",                        type: object
-
-  "consolidation_salience_threshold": 0.35,                        properties:
-
-  "flags": {                          stm_store_total: { type: integer }
-
-    "include_memory": true,                          ltm_promotions_total: { type: integer }
-
-    "include_attention": true,                      promotion_age_p95_seconds: { type: number }
-
-    "include_trace": false,                      selectivity_ratio: { type: number }
-
-    "reflection": false                      recent_promotion_age_seconds:
-
-  }                        type: object
-
-}                        properties:
-
-```                          count: { type: integer }
-
-                          avg: { type: number }
-
-**Response:**                          values:
-
-```json                            type: array
-
-{                            items: { type: number }
-
-  "response": "That sounds great! How was your experience?",                      promotion_age_alert: { type: boolean }
-
-  "context_items": [                      promotion_age_alert_threshold: { type: number }
-
-    {  /agent/chat/consolidation/status:
-
-      "source_system": "stm",    get:
-
-      "content": "User enjoys shopping",      summary: Consolidation subsystem status
-
-      "rank": 1,      responses:
-
-      "reason": "high_activation",        '200':
-
-      "scores": {"composite": 0.82}          description: Current consolidation counters and recent events
-
-    }```
-
-  ],
-
-  "captured_memories": [
-
-    {## 🧠 Complete STM & Attention Integration (July 2025)
-
-      "content": "User visited mall",
-
-      "memory_type": "fact",### Production-Grade Short-Term Memory System
-
-      "frequency": 1The Short-Term Memory (STM) system has been completely modernized with a robust, production-grade implementation:
-
-    }
-
-  ],#### **Vector-Based STM with ChromaDB**
-
-  "metrics": {- **VectorShortTermMemory**: Production-grade STM using ChromaDB vector database for semantic storage
-
-    "turn_latency_ms": 1450,- **Capacity Management**: Biologically-inspired 7-item capacity with LRU eviction
-
-    "stm_hits": 2,- **Activation-Based Decay**: Realistic forgetting mechanism based on recency, frequency, and salience
-
-    "ltm_hits": 1,- **Semantic Retrieval**: Vector embeddings enable meaning-based memory search
-
-    "user_salience": 0.48,- **Type Safety**: Full type annotations with comprehensive validation and error handling
-
-    "user_valence": 0.12,
-
-    "user_importance": 0.52,#### **Integrated Attention Mechanism**
-
-    "consolidation_status": "stored"- **Active Attention Allocation**: Real attention mechanism integrated into cognitive processing pipeline
-
-  }- **Neural Enhancement**: DPAD neural network provides attention boosts (+0.200 enhancement)
-
-}- **Cognitive Load Tracking**: Real-time monitoring of fatigue, cognitive load, and attention capacity
-
-```- **Focus Management**: Tracks attention items, switches, and available processing capacity
-
-- **Biologically Realistic**: Fatigue accumulation, attention recovery, and capacity limits
-
-#### `POST /agent/dream/start`
-
-Trigger STM → LTM consolidation cycle.#### **Core Architecture Improvements**
-
-- **Unified Configuration**: Centralized `MemorySystemConfig` dataclass for consistent system configuration
-
-**Request:**- **Robust Error Handling**: Comprehensive exception hierarchy with `VectorSTMError`, `MemorySystemError`, and specialized exceptions
-
-```json- **Thread Safety**: Full thread-safe operations with proper locking mechanisms and connection pooling
-
-{- **Input Validation**: Comprehensive input validation with detailed error messages
-
-  "cycle_type": "light"- **Logging**: Structured logging with performance monitoring and operation tracking
-
-}
-
-```#### **Cognitive Agent Processing Pipeline**
-
-The main cognitive processing loop now includes full STM and attention integration:
-
-**Response:**
-
-```json1. **Sensory Processing**: Raw input processed through entropy/salience scoring
-
-{2. **Memory Retrieval**: Proactive recall searches both STM and LTM for context
-
-  "dream_results": {3. **Attention Allocation**: Neural-enhanced attention with cognitive load tracking
-
-    "cycle_type": "light",4. **Response Generation**: LLM integration with memory context and attention weighting
-
-    "promoted_count": 3,5. **Memory Consolidation**: Interaction storage in STM with importance-based routing
-
-    "method": "consolidator_fallback"6. **Cognitive State Update**: Real-time fatigue, attention focus, and efficiency tracking
-
-  }
-
-}#### **STM-Specific Features**
-
-```- **ChromaDB Integration**: Persistent vector storage with embedding-based similarity search
-
-- **Memory Item Structure**: Rich metadata including importance, attention scores, emotional valence
-
-#### `GET /agent/chat/performance`- **Proactive Recall**: Context-aware memory search using conversation history
-
-Retrieve performance and consolidation metrics.- **Capacity Enforcement**: Automatic LRU eviction when 7-item limit reached
-
-- **Activation Calculation**: Sophisticated scoring based on recency, frequency, and salience
-
-**Response:**- **Associative Search**: Direct association-based memory retrieval
-
-```json
-
-{#### **Attention Mechanism Features**
-
-  "latency_p95_ms": 1850.5,- **Real-Time Allocation**: Dynamic attention distribution based on novelty, priority, and effort
-
-  "performance_degraded": false,- **Neural Enhancement**: DPAD network provides consistent +0.200 attention boosts
-
-  "chat_turns_per_sec": 0.42,- **Focus Tracking**: Maintains list of items currently in attentional focus
-
-  "consolidation": {- **Cognitive Load Management**: Monitors processing capacity and available resources
-
-    "counters": {- **Fatigue Modeling**: Realistic attention fatigue with recovery mechanisms
-
-      "stm_store_total": 45,- **Rest Functionality**: Cognitive breaks to reduce fatigue and restore capacity
-
-      "ltm_promotions_total": 12
-
-    },#### **Enhanced API Design**
-
-    "promotion_age_p95_seconds": 120.5- **Result Objects**: Structured `MemoryOperationResult` and `ConsolidationStats` for detailed operation feedback
-
-  }- **Protocol-Based Design**: Type-safe protocols for `MemorySearchable` and `MemoryStorable` interfaces
-
-}- **Lazy Loading**: Memory systems initialized on-demand for improved startup performance
-
-```- **Comprehensive Status**: Detailed system status with uptime, operation counts, and configuration
-
-
-
-#### Other Endpoints#### **Prospective Memory Evolution**
-
-- `GET /agent/chat/consolidation/status` - Consolidation subsystem status- **Persistent Vector Storage**: ChromaDB-based persistent storage with GPU-accelerated embeddings
-
-- `GET /agent/chat/preview` - Preview context without generation- **Semantic Search**: Advanced semantic search capabilities for finding related intentions
-
-- `GET /agent/chat/metacog/status` - Metacognitive snapshot- **Automatic Migration**: Due reminders automatically migrate to LTM with outcome tracking
-
-- `POST /agent/reminders` - Create prospective memory reminders- **API Integration**: RESTful API endpoints for reminder management and processing
-
-- `GET /agent/reminders/due` - Check due reminders
-
-
-
----### **STM & Attention Integration Results**
-
-Based on comprehensive testing, the integrated system demonstrates:
-
-## 🔧 Configuration
-
-- **Perfect Reliability**: 0.0% error rate with 13+ operations in testing
-
-### **Core Settings** (`src/core/config.py`)- **Biologically Realistic**: 7-item STM capacity with realistic activation patterns
-
-- **Neural Enhancement**: Consistent +0.200 attention boosts from DPAD network
-
-#### **ChatConfig**- **Semantic Storage**: Vector embeddings enable meaning-based memory retrieval
-
-```python- **Cognitive Load Tracking**: Real-time monitoring of attention capacity (0.000 → 0.862 observed)
-
-class ChatConfig:- **Proactive Recall**: Context-aware memory search using conversation history
-
-    max_recent_turns: int = 8- **Automatic Management**: LRU eviction and activation-based decay working correctly
-
-    max_context_items: int = 16- **Memory Consolidation**: Each interaction properly stored with attention weighting
-
-    stm_activation_min: float = 0.15
-
-    ltm_similarity_threshold: float = 0.62### **Production Features**
-
-    consolidation_salience_threshold: float = 0.55  # Adjustable via API- **Resource Management**: Proper cleanup and shutdown procedures with ChromaDB connection management
-
-    consolidation_valence_threshold: float = 0.60- **Health Monitoring**: System health checks and diagnostic reporting for both STM and attention
-
-    performance_target_p95_ms: int = 1000- **Performance Optimization**: Connection pooling, caching, and efficient memory usage
-
-```- **Security**: Input sanitization and validation throughout the STM system
-
-- **Monitoring**: Comprehensive metrics and logging for production deployment
-
-#### **MemoryConfig**- **Type Safety**: Full type annotations with `VectorShortTermMemory`, `MemoryItem`, and `AttentionMechanism`
-
-```python
-
-class MemoryConfig:---
-
-    stm_capacity: int = 7  # Miller's magical number
-
-    stm_decay_threshold: float = 0.1## 🧠 Enhanced Long-Term Memory with Biologically-Inspired Features (June 2025)
-
-    ltm_similarity_threshold: float = 0.7
-
-    consolidation_interval_hours: int = 8### Advanced LTM Capabilities
-
-```The Long-Term Memory (LTM) system has been significantly enhanced with biologically-inspired features that mirror human memory processes:
-
-
-
-### **Environment Variables** (`.env`)#### 1. Salience & Recency Weighting in Retrieval
-
-```bash- **Dynamic Retrieval Scoring**: Memory retrieval now considers both content relevance and temporal/access patterns
-
-# Required- **Exponential Decay Model**: Recent and frequently accessed memories receive higher priority in search results
-
-OPENAI_API_KEY=sk-your-key-here- **Access Pattern Learning**: System learns which memories are most valuable based on usage patterns
-
-
-
-# Optional - ChromaDB Configuration#### 2. Memory Decay & Forgetting
-
-CHROMA_PERSIST_DIR=./data/memory_stores/chroma- **Biological Forgetting Curves**: Implements Ebbinghaus-style forgetting with configurable decay rates
-
-STM_COLLECTION=stm_collection- **Importance-Based Preservation**: More important memories resist decay longer
-
-LTM_COLLECTION=ltm_collection- **Confidence Degradation**: Memory confidence naturally decreases over time without reinforcement
-
+## 🧠 Enhanced Long-Term Memory with Biologically-Inspired Features (June 2025)
+
+### Advanced LTM Capabilities
+The Long-Term Memory (LTM) system has been significantly enhanced with biologically-inspired features that mirror human memory processes:
+
+#### 1. Salience & Recency Weighting in Retrieval
+- **Dynamic Retrieval Scoring**: Memory retrieval now considers both content relevance and temporal/access patterns
+- **Exponential Decay Model**: Recent and frequently accessed memories receive higher priority in search results
+- **Access Pattern Learning**: System learns which memories are most valuable based on usage patterns
+
+#### 2. Memory Decay & Forgetting
+- **Biological Forgetting Curves**: Implements Ebbinghaus-style forgetting with configurable decay rates
+- **Importance-Based Preservation**: More important memories resist decay longer
+- **Confidence Degradation**: Memory confidence naturally decreases over time without reinforcement
 - **Selective Pruning**: Old, rarely accessed memories automatically lose strength
 
-# Optional - Performance Tuning
-
-DISABLE_SEMANTIC_MEMORY=0  # Set to 1 to skip heavy semantic ops#### 3. Consolidation Tracking
-
-```- **STM→LTM Transfer Monitoring**: Tracks when and how memories move from short-term to long-term storage
-
+#### 3. Consolidation Tracking
+- **STM→LTM Transfer Monitoring**: Tracks when and how memories move from short-term to long-term storage
 - **Consolidation Metadata**: Records consolidation timestamps, sources, and transfer statistics
-
----- **Query Methods**: Retrieve recently consolidated memories and analyze consolidation patterns
-
+- **Query Methods**: Retrieve recently consolidated memories and analyze consolidation patterns
 - **Performance Analytics**: Detailed statistics on memory consolidation efficiency
 
-## 🧪 Testing
-
 #### 4. Meta-Cognitive Feedback
+- **Self-Monitoring**: System tracks its own memory performance and retrieval patterns
+- **Health Diagnostics**: Automatic assessment of memory system health and performance
+- **Usage Statistics**: Comprehensive metrics on search success rates, timing, and efficiency
+- **Recommendations Engine**: System provides suggestions for memory management optimization
 
-### **Run All Tests**- **Self-Monitoring**: System tracks its own memory performance and retrieval patterns
-
-```bash- **Health Diagnostics**: Automatic assessment of memory system health and performance
-
-pytest -q- **Usage Statistics**: Comprehensive metrics on search success rates, timing, and efficiency
-
-```- **Recommendations Engine**: System provides suggestions for memory management optimization
-
-
-
-### **Test Specific Components**#### 5. Emotionally Weighted Consolidation
-
-```bash- **Emotional Significance**: Memories with strong emotional content (positive or negative) are prioritized for consolidation
-
-# Chat integration- **Multi-Factor Scoring**: Combines importance, access frequency, emotional weight, and recency for consolidation decisions
-
-pytest tests/test_chat_factory_integration.py -v- **Adaptive Thresholds**: Emotional memories may be consolidated even with lower traditional importance scores
-
+#### 5. Emotionally Weighted Consolidation
+- **Emotional Significance**: Memories with strong emotional content (positive or negative) are prioritized for consolidation
+- **Multi-Factor Scoring**: Combines importance, access frequency, emotional weight, and recency for consolidation decisions
+- **Adaptive Thresholds**: Emotional memories may be consolidated even with lower traditional importance scores
 - **Trauma/Joy Preservation**: Both traumatic and highly positive experiences receive enhanced consolidation
 
-# Memory consolidation
-
-pytest tests/test_chat_consolidation_thresholds.py -v#### 6. Cross-System Query & Linking
-
+#### 6. Cross-System Query & Linking
 - **Bidirectional Associations**: Create and query links between LTM and other memory systems (STM, episodic)
-
-# STM/LTM retrieval- **Semantic Clustering**: Automatically identify and group related memories by content and tags
-
-pytest tests/test_chat_adaptive_retrieval.py -v- **Cross-System Suggestions**: AI-powered recommendations for linking memories across different systems
-
+- **Semantic Clustering**: Automatically identify and group related memories by content and tags
+- **Cross-System Suggestions**: AI-powered recommendations for linking memories across different systems
 - **Association Networks**: Build rich networks of related memories for enhanced recall and context
 
-# Salience scoring
-
-pytest tests/test_chat_emotion_salience_ranking.py -v### Testing & Validation
-
-```- **Comprehensive Test Suite**: Individual tests for each enhanced feature
-
+### Testing & Validation
+- **Comprehensive Test Suite**: Individual tests for each enhanced feature
 - **Integration Testing**: End-to-end testing of all features working together
+- **Performance Benchmarks**: Validation of enhanced retrieval speed and accuracy
+- **Biological Validation**: Tests confirm human-like memory behavior patterns
 
-### **Coverage Report**- **Performance Benchmarks**: Validation of enhanced retrieval speed and accuracy
-
-```bash- **Biological Validation**: Tests confirm human-like memory behavior patterns
-
-pytest --cov=src --cov-report=html
-
-```### Key Benefits
-
+### Key Benefits
 - **Human-Like Memory**: More realistic forgetting and remembering patterns
-
----- **Improved Efficiency**: Better memory management through automated decay and consolidation
-
+- **Improved Efficiency**: Better memory management through automated decay and consolidation
 - **Enhanced Recall**: Smarter retrieval based on usage patterns and emotional significance
-
-## 📁 Project Structure- **Self-Optimization**: System continuously improves its own memory management
-
+- **Self-Optimization**: System continuously improves its own memory management
 - **Rich Associations**: Better context and relationship understanding across memories
 
-```
+---
 
-human_ai_local/---
+## 🚀 Recent Major Update: Unified Memory Interface & Episodic Memory Improvements (June 2025)
 
-├── src/
+### Unified Memory Interface
+- **All major memory modules (STM, LTM, Episodic, Semantic)** now implement a consistent, type-safe interface via a shared `BaseMemorySystem` class (`src/memory/base.py`).
+- **Unified API methods** for all memory systems:
+  - `store(...)`: Store a new memory (returns memory ID)
+  - `retrieve(memory_id)`: Retrieve a memory as a dict
+  - `delete(memory_id)`: Delete a memory by ID
+  - `search(query, **kwargs)`: Search for memories (returns list of dicts)
+- All memory modules return dicts and use unified parameter names for easier integration and testing.
 
-│   ├── chat/                      # Chat service & pipeline## 🚀 Recent Major Update: Unified Memory Interface & Episodic Memory Improvements (June 2025)
+### Episodic Memory System Enhancements
+- **Fallback search**: Robust fallback logic using word overlap heuristics and debug output if ChromaDB is unavailable or returns no results.
+- **Related memory logic**: Improved detection of related memories (temporal, cross-reference, semantic) with debug output for explainability.
+- **New/Updated Public API Methods**:
+  - `get_related_memories(memory_id, relationship_types=None, limit=10)`
+  - `get_autobiographical_timeline(life_period=None, start_date=None, end_date=None, limit=50)`
+  - `consolidate_memory(memory_id, strength_increment=0.1)`
+  - `get_memory_statistics()`
+  - `clear_memory(older_than=None, importance_threshold=None)`
+  - `get_consolidation_candidates(min_importance=0.5, max_consolidation=0.9, limit=10)`
+  - `clear_all_memories()` (for test isolation)
+- **Debug output**: All fallback and related memory logic now prints detailed debug information for transparency and troubleshooting.
 
-│   │   ├── chat_service.py        # Main orchestrator
-
-│   │   ├── context_builder.py     # Retrieval pipeline### Unified Memory Interface
-
-│   │   ├── emotion_salience.py    # Salience/valence scoring- **All major memory modules (STM, LTM, Episodic, Semantic)** now implement a consistent, type-safe interface via a shared `BaseMemorySystem` class (`src/memory/base.py`).
-
-│   │   └── scoring.py             # Context item ranking- **Unified API methods** for all memory systems:
-
-│   ├── memory/                    # Memory subsystems  - `store(...)`: Store a new memory (returns memory ID)
-
-│   │   ├── stm/                   # Short-term memory  - `retrieve(memory_id)`: Retrieve a memory as a dict
-
-│   │   │   └── vector_stm.py      # Vector-based STM  - `delete(memory_id)`: Delete a memory by ID
-
-│   │   ├── ltm/                   # Long-term memory  - `search(query, **kwargs)`: Search for memories (returns list of dicts)
-
-│   │   │   └── vector_ltm.py      # Persistent LTM- All memory modules return dicts and use unified parameter names for easier integration and testing.
-
-│   │   └── consolidation/         # STM → LTM pipeline
-
-│   │       └── consolidator.py    # Promotion logic### Episodic Memory System Enhancements
-
-│   ├── interfaces/api/            # REST API- **Fallback search**: Robust fallback logic using word overlap heuristics and debug output if ChromaDB is unavailable or returns no results.
-
-│   │   └── chat_endpoints.py      # Chat & dream endpoints- **Related memory logic**: Improved detection of related memories (temporal, cross-reference, semantic) with debug output for explainability.
-
-│   ├── core/                      # Core configuration- **New/Updated Public API Methods**:
-
-│   │   ├── config.py              # System configuration  - `get_related_memories(memory_id, relationship_types=None, limit=10)`
-
-│   │   ├── cognitive_agent.py     # Main agent class  - `get_autobiographical_timeline(life_period=None, start_date=None, end_date=None, limit=50)`
-
-│   │   └── agent_singleton.py     # Singleton instance  - `consolidate_memory(memory_id, strength_increment=0.1)`
-
-│   └── attention/                 # Attention mechanisms  - `get_memory_statistics()`
-
-│       └── attention_mechanism.py # Fatigue & focus  - `clear_memory(older_than=None, importance_threshold=None)`
-
-├── scripts/  - `get_consolidation_candidates(min_importance=0.5, max_consolidation=0.9, limit=10)`
-
-│   └── george_streamlit_chat.py   # Minimal chat UI  - `clear_all_memories()` (for test isolation)
-
-├── tests/                         # Comprehensive test suite- **Debug output**: All fallback and related memory logic now prints detailed debug information for transparency and troubleshooting.
-
-├── start_server.py                # API server startup
-
-├── start_george.py                # Combined startup script### Testing & Reliability
-
-└── requirements.txt               # Python dependencies- **Integration tests** for vector LTM and episodic memory updated to use the new interface and auto-generated summaries.
-
-```- **Test isolation**: All tests clear persistent and in-memory data before each run for clean, isolated test runs.
-
+### Testing & Reliability
+- **Integration tests** for vector LTM and episodic memory updated to use the new interface and auto-generated summaries.
+- **Test isolation**: All tests clear persistent and in-memory data before each run for clean, isolated test runs.
 - **All episodic memory integration tests pass.**
 
 ---
 
----
-
-## 🎨 Customization Guide
-
 ## Unified Memory Interface and Episodic Memory Enhancements (June 2025)
 
-### **Adjust Consolidation Thresholds**
-
 ### Unified Memory Interface
-
-**Option 1: Via UI Slider** (Recommended)- All major memory modules (STM, LTM, Episodic, Semantic) now implement a consistent, type-safe interface via a shared `BaseMemorySystem` class (`src/memory/base.py`).
-
-- Open chat interface at http://localhost:8501- Unified public API methods: `store`, `retrieve`, `delete`, `search` (all return dicts, use unified parameter names).
-
-- Adjust slider in sidebar: "STM Consolidation Threshold"- All memory modules inherit from `BaseMemorySystem` and enforce type annotations for robust, modular design.
-
-- Changes apply immediately to all new messages
+- All major memory modules (STM, LTM, Episodic, Semantic) now implement a consistent, type-safe interface via a shared `BaseMemorySystem` class (`src/memory/base.py`).
+- Unified public API methods: `store`, `retrieve`, `delete`, `search` (all return dicts, use unified parameter names).
+- All memory modules inherit from `BaseMemorySystem` and enforce type annotations for robust, modular design.
 
 ### Episodic Memory System Improvements
-
-**Option 2: Via Code** (Persistent)- Major refactor of `EpisodicMemorySystem` (`src/memory/episodic/episodic_memory.py`):
-
-Edit `src/core/config.py`:  - Robust fallback search logic (word overlap, text match) with detailed debug output for explainability.
-
-```python  - Enhanced related memory logic (cross-reference, temporal, semantic) with debug output.
-
-@dataclass  - All required public API methods implemented and exposed:
-
-class ChatConfig:    - `get_related_memories`
-
-    consolidation_salience_threshold: float = 0.35  # Lower = more memories    - `get_autobiographical_timeline`
-
-    consolidation_valence_threshold: float = 0.50   # Emotional intensity    - `consolidate_memory`
-
-```    - `get_memory_statistics`
-
+- Major refactor of `EpisodicMemorySystem` (`src/memory/episodic/episodic_memory.py`):
+  - Robust fallback search logic (word overlap, text match) with detailed debug output for explainability.
+  - Enhanced related memory logic (cross-reference, temporal, semantic) with debug output.
+  - All required public API methods implemented and exposed:
+    - `get_related_memories`
+    - `get_autobiographical_timeline`
+    - `consolidate_memory`
+    - `get_memory_statistics`
     - `clear_memory`
-
-### **Modify Salience Calculation**    - `get_consolidation_candidates`
-
+    - `get_consolidation_candidates`
     - `clear_all_memories` (for test isolation)
+- All methods return type-safe results and provide debug output for fallback/related memory logic.
 
-Edit `src/chat/emotion_salience.py`:- All methods return type-safe results and provide debug output for fallback/related memory logic.
+### Testing and Test Isolation
+- Integration tests for vector LTM and episodic memory updated to use the new interface.
+- Test isolation: persistent and in-memory data cleared before each run to ensure clean test runs.
+- All episodic memory integration tests pass.
 
-```python
+### Documentation
+- This section documents the new unified memory interface, episodic memory improvements, new public API methods, and updated testing strategy.
+- See `src/memory/base.py` for the base interface and `src/memory/episodic/episodic_memory.py` for the full implementation and debug logic.
 
-def estimate_salience_and_valence(text: str) -> Tuple[float, float]:### Testing and Test Isolation
+---
 
-    # Adjust weights:- Integration tests for vector LTM and episodic memory updated to use the new interface.
+## 🚀 Major Update: Unified Memory, Procedural Memory, and CLI Integration (June 2025)
 
-    # - length_factor weight (currently 0.4)- Test isolation: persistent and in-memory data cleared before each run to ensure clean test runs.
-
-    # - punctuation_boost (0.07 per ! or ?)- All episodic memory integration tests pass.
-
-    # - uppercase_ratio boost (0.6)
-
-    # - intensifier_boost (0.05 per word)### Documentation
-
-    - This section documents the new unified memory interface, episodic memory improvements, new public API methods, and updated testing strategy.
-
-    salience = max(0.0, min(1.0,- See `src/memory/base.py` for the base interface and `src/memory/episodic/episodic_memory.py` for the full implementation and debug logic.
-
-        0.25 +                        # Base salience
-
-        length_factor * 0.4 +         # Adjust this weight---
-
-        punctuation_boost +
-
-        emphasis_boost +## 🚀 Major Update: Unified Memory, Procedural Memory, and CLI Integration (June 2025)
-
-        intensifier_boost
-
-    ))### Procedural Memory System
-
-```- **ProceduralMemory** is now fully integrated with STM and LTM. Procedures (skills, routines, action sequences) can be stored as either short-term or long-term memories.
-
+### Procedural Memory System
+- **ProceduralMemory** is now fully integrated with STM and LTM. Procedures (skills, routines, action sequences) can be stored as either short-term or long-term memories.
 - Unified API: Store, retrieve, search, use, delete, and clear procedural memories via the same interface as other memory types.
-
-### **Add Custom Memory Types**- **Persistence:** Procedures stored in LTM are persistent across runs; STM procedures are in-memory only.
-
+- **Persistence:** Procedures stored in LTM are persistent across runs; STM procedures are in-memory only.
 - **Tested:** Comprehensive tests ensure correct storage, retrieval, and deletion from both STM and LTM.
 
-Extend `src/chat/memory_capture.py` to extract new types:
-
-```python### CLI Integration
-
-# Add to MemoryCapture._extract_memories()- The `george_cli.py` script now supports procedural memory management:
-
-if "deadline" in text.lower() or "due" in text.lower():  - `/procedure add` — interactively add a new procedure (description, steps, tags, STM/LTM)
-
-    memories.append(CapturedMemory(  - `/procedure list` — list all stored procedures
-
-        content=text,  - `/procedure search <query>` — search procedures by description/steps
-
-        memory_type="deadline",  - `/procedure use <id>` — increment usage and display steps for a procedure
-
-        importance=0.7  - `/procedure delete <id>` — delete a procedure by ID
-
-    ))  - `/procedure clear` — remove all procedural memories
-
-```
+### CLI Integration
+- The `george_cli.py` script now supports procedural memory management:
+  - `/procedure add` — interactively add a new procedure (description, steps, tags, STM/LTM)
+  - `/procedure list` — list all stored procedures
+  - `/procedure search <query>` — search procedures by description/steps
+  - `/procedure use <id>` — increment usage and display steps for a procedure
+  - `/procedure delete <id>` — delete a procedure by ID
+  - `/procedure clear` — remove all procedural memories
 
 ### Metacognitive Reflection & Self-Monitoring (June 2025)
-
-### **Customize Dream Cycle Behavior**- **Agent-level self-reflection:** The agent can periodically or manually analyze its own memory health, usage, and performance.
-
+- **Agent-level self-reflection:** The agent can periodically or manually analyze its own memory health, usage, and performance.
 - **Reflection Scheduler:** Background scheduler runs metacognitive reflection at a configurable interval (default: 10 min).
-
-Edit `src/memory/consolidation/consolidator.py`:- **Manual Reflection:** Trigger a reflection at any time via CLI or API.
-
-```python- **Reporting:** Reflection reports include LTM/STM stats, health diagnostics, and recommendations for memory management.
-
-@dataclass- **CLI Integration:**
-
-class ConsolidationPolicy:  - `/reflect` — manually trigger a reflection and print summary
-
-    min_rehearsals_for_promotion: int = 1  # Lower = faster promotion  - `/reflection status` — show last 3 reflection reports
-
-    min_age_seconds: float = 2.0           # Lower = immediate promotion  - `/reflection start [interval]` — start scheduler (interval in minutes)
-
-    promotion_importance_floor: float = 0.3 # Lower = more permissive  - `/reflection stop` — stop scheduler
-
-```
+- **Manual Reflection:** Trigger a reflection at any time via CLI or API.
+- **Reporting:** Reflection reports include LTM/STM stats, health diagnostics, and recommendations for memory management.
+- **CLI Integration:**
+  - `/reflect` — manually trigger a reflection and print summary
+  - `/reflection status` — show last 3 reflection reports
+  - `/reflection start [interval]` — start scheduler (interval in minutes)
+  - `/reflection stop` — stop scheduler
 
 
+---
 
-------
-
-
-
-## 🔍 Troubleshooting
 
 ## API Endpoints (Selected)
 
-### **No STM Hits Even with Low Threshold**
+Core chat & cognition service endpoints (FastAPI):
 
-- **Check debug metrics**: Look at `user_salience` value in responseCore chat & cognition service endpoints (FastAPI):
-
-- **Verify threshold**: Ensure slider value < calculated salience
-
-- **Check consolidation status**: Should show "stored" not "skipped"- `POST /agent/chat` – Process a chat message (optional streaming via `stream=true`)
-
-- **Restart server**: Changes to code require backend restart- `GET /agent/chat/preview` – Deterministic context preview (no generation)
-
+- `POST /agent/chat` – Process a chat message (optional streaming via `stream=true`)
+- `GET /agent/chat/preview` – Deterministic context preview (no generation)
 - `GET /agent/chat/metrics` – Metrics snapshot (light by default)
+- `GET /agent/chat/performance` – Performance status (latency p95, degradation flag)
+- `GET /agent/chat/consolidation/status` – Consolidation subsystem status, counters, recent events (inactive flag if not configured)
 
-### **Memories Not Promoting to LTM**- `GET /agent/chat/performance` – Performance status (latency p95, degradation flag)
-
-- **Trigger dream cycle**: Click 🌙 button or wait for automatic promotion- `GET /agent/chat/consolidation/status` – Consolidation subsystem status, counters, recent events (inactive flag if not configured)
-
-- **Check rehearsal count**: Memory needs to be referenced ≥2 times
-
-- **Verify age**: Memory must exist for ≥5 seconds## CLI Commands
-
-- **Check results**: Dream cycle shows `promoted_count` in response
+## CLI Commands
 
 ### **Memory Operations**
-
-### **High Latency / Slow Responses**```bash
-
-- **Check STM utilization**: When >85%, system throttles consolidation# Memory management
-
-- **Reduce context items**: Lower `max_context_items` in config/memory store <system> <content>     # Store memory in STM/LTM
-
-- **Enable fallback**: System automatically uses degraded mode if needed/memory search <system> <query>      # Search memories
-
-- **Monitor metrics**: Check `/agent/chat/performance` endpoint/memory list <system>                # List all memories
-
+```bash
+# Memory management
+/memory store <system> <content>     # Store memory in STM/LTM
+/memory search <system> <query>      # Search memories
+/memory list <system>                # List all memories
 /memory retrieve <system> <id>       # Retrieve specific memory
+/memory delete <system> <id>         # Delete memory
 
-### **ChromaDB Connection Errors**/memory delete <system> <id>         # Delete memory
-
-- **Check persistence directory**: Ensure `CHROMA_PERSIST_DIR` exists
-
-- **Permissions**: Verify write access to data directory# Procedural memory
-
-- **Clean slate**: Delete `data/memory_stores/chroma/` and restart/procedure add                       # Add new procedure interactively
-
+# Procedural memory
+/procedure add                       # Add new procedure interactively
 /procedure list                      # List all procedures
-
-### **Backend Not Starting**/procedure search <query>            # Search procedures
-
-```bash/procedure use <id>                  # Use procedure (increment usage)
-
-# Check if port 8000 is in use/procedure delete <id>               # Delete procedure by ID
-
-netstat -ano | findstr :8000  # Windows/procedure clear                     # Remove all procedural memories
-
-lsof -i :8000                 # Linux/Mac
+/procedure search <query>            # Search procedures
+/procedure use <id>                  # Use procedure (increment usage)
+/procedure delete <id>               # Delete procedure by ID
+/procedure clear                     # Remove all procedural memories
 
 # Prospective memory (reminders)
+/remind me to <task> at <YYYY-MM-DD HH:MM>
+/remind me to <task> in <minutes> minutes
+/reminders                           # List reminders
+/reminders process                   # Process due reminders
 
-# Kill existing process if needed/remind me to <task> at <YYYY-MM-DD HH:MM>
-
-# Then restart/remind me to <task> in <minutes> minutes
-
-python start_server.py/reminders                           # List reminders
-
-```/reminders process                   # Process due reminders
-
-
-
----# Metacognitive reflection
-
+# Metacognitive reflection
 /reflect                            # Trigger manual reflection
-
-## 📚 Additional Documentation/reflection status                   # Show reflection status
-
+/reflection status                   # Show reflection status
 /reflection start [interval]         # Start reflection scheduler
+/reflection stop                     # Stop reflection scheduler
+```
 
-- **`docs/ai.instructions.md`**: AI agent development guidelines/reflection stop                     # Stop reflection scheduler
-
-- **`docs/metacog_features.md`**: Metacognitive system details```
-
-- **`docs/roadmap.md`**: Future development plans
-
-- **`STARTUP_GUIDE.md`**: Detailed startup instructions### **API Endpoints**
-
-- **`CLEANUP_SUMMARY.md`**: Recent refactoring changes```bash
-
-- **`.github/copilot-instructions.md`**: Codebase working rules# Memory operations
-
+### **API Endpoints**
+```bash
+# Memory operations
 POST /memory/store                   # Store memory
-
----GET /memory/search                   # Search memories
-
+GET /memory/search                   # Search memories
 GET /memory/status                   # Get system status
 
-## 🤝 Contributing
-
 # Executive functions
-
-### **Development Workflow**POST /api/executive/goals            # Create a new goal
-
-1. Fork the repositoryGET /api/executive/goals             # List all goals
-
-2. Create a feature branch: `git checkout -b feature/my-feature`GET /api/executive/goals/{id}        # Get specific goal details
-
-3. Make changes with testsPUT /api/executive/goals/{id}        # Update a goal
-
-4. Run test suite: `pytest -q`DELETE /api/executive/goals/{id}     # Delete a goal
-
-5. Run linter: `ruff check src/`POST /api/executive/tasks            # Create tasks for a goal
-
-6. Submit pull requestGET /api/executive/tasks             # List all tasks
-
+POST /api/executive/goals            # Create a new goal
+GET /api/executive/goals             # List all goals
+GET /api/executive/goals/{id}        # Get specific goal details
+PUT /api/executive/goals/{id}        # Update a goal
+DELETE /api/executive/goals/{id}     # Delete a goal
+POST /api/executive/tasks            # Create tasks for a goal
+GET /api/executive/tasks             # List all tasks
 GET /api/executive/tasks/{id}        # Get specific task details
-
-### **Code Standards**PUT /api/executive/tasks/{id}        # Update task status
-
-- **Python 3.12+**: Use modern Python featuresPOST /api/executive/decisions        # Make a decision
-
-- **Type hints**: Full type annotations requiredGET /api/executive/decisions/{id}    # Get decision details
-
-- **Docstrings**: All public functions documentedGET /api/executive/resources         # Get resource allocation status
-
-- **Tests**: New features require test coveragePOST /api/executive/resources/allocate  # Allocate cognitive resources
-
-- **Linting**: Pass `ruff` checks before committingGET /api/executive/status            # Get comprehensive executive status
-
+PUT /api/executive/tasks/{id}        # Update task status
+POST /api/executive/decisions        # Make a decision
+GET /api/executive/decisions/{id}    # Get decision details
+GET /api/executive/resources         # Get resource allocation status
+POST /api/executive/resources/allocate  # Allocate cognitive resources
+GET /api/executive/status            # Get comprehensive executive status
 POST /api/executive/reflect          # Trigger executive reflection
+GET /api/executive/performance       # Get performance metrics
 
----GET /api/executive/performance       # Get performance metrics
-
-
-
-## 📄 License# Prospective memory
-
+# Prospective memory
 POST /prospective/store              # Add reminder
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.GET /prospective/due                 # Get due reminders
-
+GET /prospective/due                 # Get due reminders
 POST /prospective/process_due        # Process due reminders
 
----
-
 # Agent interaction
-
-## 🙏 AcknowledgmentsPOST /agent/chat                     # Chat with agent
-
+POST /agent/chat                     # Chat with agent
 GET /agent/status                    # Get agent status
-
-- **OpenAI**: GPT-4 language modelGET /agent/chat/performance          # Chat performance status (p95, target, degraded)
-
-- **ChromaDB**: Vector database infrastructure# System management
-
-- **Hugging Face**: Sentence transformersPOST /test/reset                     # Reset system (test only)
-
-- **Streamlit**: Interactive UI frameworkGET /health                          # Health check
-
-- **FastAPI**: Modern web framework```
-
-- **PyTorch**: Neural network components
+GET /agent/chat/performance          # Chat performance status (p95, target, degraded)
+# System management
+POST /test/reset                     # Reset system (test only)
+GET /health                          # Health check
+```
 
 ## Usage Example (Unified Memory API)
-
----```python
-
+```python
 # Example: Storing and searching episodic memory
+from src.memory.episodic.episodic_memory import EpisodicMemorySystem
 
-## 📞 Supportfrom src.memory.episodic.episodic_memory import EpisodicMemorySystem
-
-
-
-- **GitHub Issues**: Report bugs or request featuresmemsys = EpisodicMemorySystem()
-
-- **Documentation**: Check `docs/` directory for detailed guidesmem_id = memsys.store(detailed_content="Visited the science museum with friends.")
-
-- **API Docs**: Visit http://localhost:8000/docs when server is runningresult = memsys.retrieve(mem_id)
-
+memsys = EpisodicMemorySystem()
+mem_id = memsys.store(detailed_content="Visited the science museum with friends.")
+result = memsys.retrieve(mem_id)
 print(result)
 
----
-
 # Search
-
-**Human-AI Cognition Framework** - Building transparent, biologically-inspired AI with human-like memory and reasoning.results = memsys.search(query="museum")
-
+results = memsys.search(query="museum")
 for r in results:
-
-*Version 2.1.0 (October 2025) - Interactive Memory Control Update*    print(r)
-
+    print(r)
 ```
 
 ## Executive API Usage Examples
