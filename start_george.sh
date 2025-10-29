@@ -99,6 +99,6 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Start Streamlit (this will block until user presses Ctrl+C)
-$PYTHON_CMD -m streamlit run scripts/george_streamlit_production.py --server.port 8501 --server.address localhost
+$PYTHON_CMD -m streamlit run scripts/george_streamlit_chat.py --server.port 8501 --server.address localhost
 
 # Cleanup will be called by trap when Streamlit exits

@@ -1,4 +1,6 @@
 from __future__ import annotations
+import asyncio
+
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -8,14 +10,76 @@ from src.chat import ChatService, SessionManager, ContextBuilder
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from src.core.config import get_chat_config
 from src.chat.metrics import metrics_registry
+from src.core.agent_singleton import create_agent
+from src.memory.consolidation.consolidator import MemoryConsolidator, ConsolidationPolicy
 
 # Singleton scaffolds (replace with DI if project uses container)
-_session_manager = SessionManager()
-_context_builder = ContextBuilder(chat_config=get_chat_config().__dict__)
-_chat_service = ChatService(_session_manager, _context_builder)
+_session_manager = None
+_context_builder = None
+_chat_service = None
+_agent_instance = None
 _prospective = get_inmemory_prospective_memory()
 
 router = APIRouter(prefix="/agent", tags=["chat"])
+
+
+def get_chat_service() -> ChatService:
+    """Lazy initialization of ChatService with agent support."""
+    global _session_manager, _context_builder, _chat_service, _agent_instance
+
+    if _chat_service is not None:
+        return _chat_service
+
+    if _agent_instance is None:
+        _agent_instance = create_agent()
+
+    _session_manager = SessionManager()
+
+    chat_cfg = get_chat_config().to_dict()
+
+    stm = ltm = episodic = attention = executive = None
+    if _agent_instance is not None:
+        memory = getattr(_agent_instance, "memory", None)
+        if memory is not None:
+            try:
+                stm = memory.stm
+            except Exception:
+                stm = None
+            try:
+                ltm = memory.ltm
+            except Exception:
+                ltm = None
+            try:
+                episodic = memory.episodic
+            except Exception:
+                episodic = None
+        attention = getattr(_agent_instance, "attention", None)
+        executive = getattr(_agent_instance, "performance_optimizer", None)
+
+    _context_builder = ContextBuilder(
+        chat_config=chat_cfg,
+        stm=stm,
+        ltm=ltm,
+        episodic=episodic,
+        attention=attention,
+        executive=executive,
+    )
+
+    consolidator = None
+    if stm is not None or ltm is not None:
+        try:
+            consolidator = MemoryConsolidator(stm=stm, ltm=ltm, policy=ConsolidationPolicy())
+        except Exception:
+            consolidator = None
+
+    _chat_service = ChatService(
+        _session_manager,
+        _context_builder,
+        consolidator=consolidator,
+        agent=_agent_instance,
+    )
+
+    return _chat_service
 
 
 class ChatRequest(BaseModel):
@@ -23,23 +87,48 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     flags: Optional[Dict[str, bool]] = None
     stream: bool = False
+    consolidation_salience_threshold: Optional[float] = None
 
 
 @router.post("/chat")
 async def chat_endpoint(req: ChatRequest):
-    if req.stream:
-        async def _gen() -> AsyncGenerator[bytes, None]:
-            async for chunk in _chat_service.process_user_message_stream(
-                req.message,
-                session_id=req.session_id,
-                flags=req.flags,
-            ):
-                yield (f"{chunk}\n").encode("utf-8")
-        return StreamingResponse(_gen(), media_type="text/plain")
-    result = _chat_service.process_user_message(
-        req.message, session_id=req.session_id, flags=req.flags
-    )
-    return JSONResponse(result)
+    chat_svc = get_chat_service()
+    
+    # Temporarily override consolidation threshold if provided
+    original_threshold = None
+    if req.consolidation_salience_threshold is not None:
+        try:
+            adaptive_cfg = chat_svc.context_builder.cfg
+            original_threshold = adaptive_cfg.get("consolidation_salience_threshold")
+            adaptive_cfg["consolidation_salience_threshold"] = req.consolidation_salience_threshold
+        except Exception:
+            pass
+    
+    try:
+        if req.stream:
+            async def _gen() -> AsyncGenerator[bytes, None]:
+                async for chunk in chat_svc.process_user_message_stream(
+                    req.message,
+                    session_id=req.session_id,
+                    flags=req.flags,
+                ):
+                    yield (f"{chunk}\n").encode("utf-8")
+            return StreamingResponse(_gen(), media_type="text/plain")
+        result = await asyncio.to_thread(
+            chat_svc.process_user_message,
+            req.message,
+            req.session_id,
+            req.flags,
+        )
+        return JSONResponse(result)
+    finally:
+        # Restore original threshold
+        if original_threshold is not None:
+            try:
+                adaptive_cfg = chat_svc.context_builder.cfg
+                adaptive_cfg["consolidation_salience_threshold"] = original_threshold
+            except Exception:
+                pass
 
 
 @router.get("/chat/metrics")
@@ -56,7 +145,8 @@ async def chat_context_preview(message: str, session_id: Optional[str] = None):
     """
     Return lightweight deterministic context preview (no model generation).
     """
-    return _chat_service.get_context_preview(message=message, session_id=session_id)
+    chat_svc = get_chat_service()
+    return chat_svc.get_context_preview(message=message, session_id=session_id)
 
 
 @router.get("/chat/performance")
@@ -64,18 +154,20 @@ async def chat_performance_status():
     """
     Return current chat performance status (p95 latency, target, degradation flag).
     """
-    return _chat_service.performance_status()
+    chat_svc = get_chat_service()
+    return chat_svc.performance_status()
 
 
 @router.get("/chat/metacog/status")
 async def chat_metacog_status():
     """Return last metacognitive snapshot (if any)."""
-    snap = getattr(_chat_service, "_last_metacog_snapshot", None)
+    chat_svc = get_chat_service()
+    snap = getattr(chat_svc, "_last_metacog_snapshot", None)
     if not snap:
         return {"available": False}
     history = []
     try:
-        hist = getattr(_chat_service, "_metacog_history", None)
+        hist = getattr(chat_svc, "_metacog_history", None)
         if hist is not None:
             history = list(hist)[-10:]
     except Exception:
@@ -89,7 +181,8 @@ async def chat_consolidation_status():
 
     If consolidator not initialized returns inactive flag.
     """
-    cons = getattr(_chat_service, "consolidator", None)
+    chat_svc = get_chat_service()
+    cons = getattr(chat_svc, "consolidator", None)
     if not cons:
         return {"active": False, "reason": "consolidator_not_configured"}
     status = cons.status()
@@ -128,3 +221,54 @@ async def purge_triggered_reminders():
     """Delete all triggered (already fired) reminders from in-memory store."""
     removed = _prospective.purge_triggered()
     return {"purged": removed}
+
+
+# ---------------- Dream Cycle Endpoint ----------------
+
+class DreamRequest(BaseModel):
+    cycle_type: str = "light"  # light, deep, or rem
+
+
+@router.post("/dream/start")
+async def start_dream_cycle(dream_req: DreamRequest):
+    """
+    Trigger a dream state cycle for STM → LTM consolidation.
+    
+    This processes memories in STM that meet promotion criteria:
+    - Rehearsals >= 2 (referenced multiple times)
+    - Age >= 5 seconds
+    - Importance >= 0.4
+    """
+    if _agent_instance is None:
+        return {"error": "agent_not_initialized", "dream_results": None}
+    
+    try:
+        # Check if agent has dream processor
+        dream_proc = getattr(_agent_instance, "dream_processor", None)
+        if dream_proc is not None:
+            results = await dream_proc.enter_dream_cycle(dream_req.cycle_type)
+            return {"dream_results": results}
+        else:
+            # Fallback: use consolidator directly if available
+            chat_svc = get_chat_service()
+            cons = getattr(chat_svc, "consolidator", None)
+            if cons is None:
+                return {"error": "consolidator_not_available", "dream_results": None}
+            
+            # Manual promotion pass
+            promoted_count = 0
+            for turn_id, stats in list(cons._turn_stats.items()):
+                if stats.get("stm_id") and not stats.get("ltm_id"):
+                    cons._maybe_promote(turn_id, stats)
+                    if stats.get("ltm_id"):
+                        promoted_count += 1
+            
+            return {
+                "dream_results": {
+                    "cycle_type": dream_req.cycle_type,
+                    "promoted_count": promoted_count,
+                    "method": "consolidator_fallback"
+                }
+            }
+    except Exception as e:
+        return {"error": str(e), "dream_results": None}

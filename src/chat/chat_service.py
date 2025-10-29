@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 import time
 import asyncio
+from datetime import datetime
 from collections import deque
 from pydantic import BaseModel, Field
 try:  # Pydantic v2
@@ -36,10 +37,12 @@ class ChatService:
     def __init__(self,
                  session_manager: SessionManager,
                  context_builder: ContextBuilder,
-                 consolidator: Optional[Any] = None) -> None:
+                 consolidator: Optional[Any] = None,
+                 agent: Optional[Any] = None) -> None:
         self.sessions = session_manager
         self.context_builder = context_builder
         self.consolidator = consolidator
+        self.agent = agent
         # Memory capture modules (Phase 1)
         self._capture = MemoryCaptureModule()
         self._capture_cache = MemoryCaptureCache()
@@ -294,17 +297,19 @@ class ChatService:
         except Exception:
             extra_due = []
 
-        response_text = self._generate_placeholder_response(message)
+        assistant_content = self._invoke_agent_response(message, built)
         # Before forming assistant response, check retrieval for simple questions
         try:
             answer = self._attempt_fact_answer(message)
             if answer:
-                response_text = answer
+                assistant_content = answer
         except Exception:
             pass
+        if not assistant_content:
+            assistant_content = self._generate_placeholder_response(message)
         assistant_turn = TurnRecord(
             role="assistant",
-            content=response_text,
+            content=assistant_content,
             salience=salience * 0.5,
             emotional_valence=valence * 0.3,
             importance=importance * 0.5,
@@ -400,6 +405,11 @@ class ChatService:
                 "fallback_used": built.metrics.fallback_used,
                 "consolidation_time_ms": built.metrics.consolidation_time_ms,
                 "consolidated_user_turn": built.metrics.consolidated_user_turn,
+                # Debug: add consolidation decision info
+                "user_salience": user_turn.salience,
+                "user_valence": user_turn.emotional_valence,
+                "user_importance": user_turn.importance,
+                "consolidation_status": user_turn.consolidation_status,
             },
             "context_items": [
                 {
@@ -564,7 +574,12 @@ class ChatService:
         Yields dict chunks: first metadata, then token chunks, final summary.
         """
         flags = flags or {}
-        base = self.process_user_message(message, session_id=session_id, flags=flags)
+        base = await asyncio.to_thread(
+            self.process_user_message,
+            message,
+            session_id,
+            flags,
+        )
         full_text = base["response"]
         yield {"type": "meta", "session_id": base["session_id"], "user_turn_id": base["user_turn_id"]}
         for token in full_text.split():
@@ -578,6 +593,54 @@ class ChatService:
         length_factor = min(1.0, len(content.split()) / 30.0)
         emotional_weight = min(1.0, abs(valence))
         return max(salience * 0.5 + length_factor * 0.3 + emotional_weight * 0.2, salience * 0.6)
+
+    def _invoke_agent_response(self, message: str, built: Any) -> str:
+        """Invoke the configured agent to generate a response with context."""
+        if not self.agent or not hasattr(self.agent, "_generate_response"):
+            return "[LLM unavailable - agent not configured with ChatService]"
+
+        # Build a lightweight memory context payload for the agent
+        memory_context = []
+        try:
+            for item in list(getattr(built, "items", [])[:5]):
+                scores = getattr(item, "scores", {}) or {}
+                relevance = scores.get("composite") or scores.get("similarity", 0.0)
+                metadata = getattr(item, "metadata", {}) or {}
+                memory_context.append({
+                    "id": getattr(item, "source_id", ""),
+                    "content": getattr(item, "content", ""),
+                    "source": getattr(item, "source_system", "unknown"),
+                    "relevance": relevance,
+                    "timestamp": metadata.get("timestamp") or getattr(item, "timestamp", None),
+                })
+        except Exception:
+            memory_context = []
+
+        try:
+            result = self.agent._generate_response(
+                processed_input={"raw_input": message, "processed_at": datetime.now()},
+                memory_context=memory_context,
+                attention_scores={},
+            )
+            if asyncio.iscoroutine(result):
+                return str(self._run_coroutine_sync(result))
+            return str(result)
+        except Exception as exc:
+            if "result" in locals() and asyncio.iscoroutine(result):
+                try:
+                    result.close()
+                except Exception:
+                    pass
+            return f"Error generating response: {exc}"
+
+    def _run_coroutine_sync(self, coro: Any) -> Any:
+        """Execute a coroutine to completion from a synchronous context."""
+        try:
+            return asyncio.run(coro)
+        except RuntimeError:
+            # Running inside an active loop; caller should avoid this path.
+            coro.close()
+            raise
 
     def _generate_placeholder_response(self, user_text: str) -> str:
         # Deterministic placeholder for early integration testing.
@@ -680,6 +743,17 @@ class ChatService:
         # Prefer new consolidator if available
         if self.consolidator:
             try:
+                # Get current thresholds from config (may be overridden per-request)
+                cfg = getattr(self, "context_builder").cfg if hasattr(self, "context_builder") else {}
+                sal_thr = cfg.get("consolidation_salience_threshold", 0.55)
+                val_thr = cfg.get("consolidation_valence_threshold", 0.60)
+                
+                # Temporarily override policy thresholds to match request-level config
+                original_sal = self.consolidator.policy.salience_threshold
+                original_val = self.consolidator.policy.valence_threshold
+                self.consolidator.policy.salience_threshold = sal_thr
+                self.consolidator.policy.valence_threshold = val_thr
+                
                 ev = self.consolidator.record_turn(
                     turn_id=user_turn.turn_id,
                     salience=user_turn.salience or 0.0,
@@ -687,6 +761,11 @@ class ChatService:
                     importance=user_turn.importance or 0.0,
                     content=user_turn.content,
                 )
+                
+                # Restore original policy thresholds
+                self.consolidator.policy.salience_threshold = original_sal
+                self.consolidator.policy.valence_threshold = original_val
+                
                 # Mark rehearsal opportunity (assistant referencing user content)
                 self.consolidator.mark_rehearsal(user_turn.turn_id)
                 if ev.stored_in_stm:

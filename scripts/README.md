@@ -56,8 +56,8 @@ python ../start_george.py
 # Install requirements
 pip install streamlit plotly pandas requests
 
-# Production interface (recommended)
-streamlit run george_streamlit_production.py --server.port 8501
+# Minimal chat interface (recommended)
+streamlit run george_streamlit_chat.py --server.port 8501
 
 # Enhanced interface (full-featured)  
 streamlit run george_streamlit_enhanced.py --server.port 8502

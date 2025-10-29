@@ -13,8 +13,9 @@ sys.path.insert(0, str(project_root))
 
 try:
     from george_api_simple import app
-    from src.interfaces.api import chat_router
+    from src.interfaces.api.chat_endpoints import router as chat_router
 
+    # Mount the advanced chat router
     app.include_router(chat_router)
 
     print("✅ API app imported successfully")

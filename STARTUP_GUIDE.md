@@ -28,7 +28,7 @@ Features:
 venv/Scripts/python.exe start_server.py &
 
 # Wait a few seconds, then start frontend
-venv/Scripts/python.exe -m streamlit run scripts/george_streamlit_production.py --server.port 8501
+venv/Scripts/python.exe -m streamlit run scripts/george_streamlit_chat.py --server.port 8501
 ```
 
 ## 🛠️ Troubleshooting
@@ -71,9 +71,7 @@ python -c "import uvicorn; from george_api_simple import app; uvicorn.run(app, p
    - Documentation: http://localhost:8000/docs
 
 2. **Streamlit Interface starts** on http://localhost:8501
-   - Chat interface with George
-   - Memory and attention monitoring
-   - Executive function dashboard
+   - Minimal chat interface with memory context visibility
 
 3. **Initialization takes 10-60 seconds**
    - First time: Downloads models, creates databases

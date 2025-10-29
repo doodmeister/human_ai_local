@@ -20,7 +20,7 @@ python start_george.py
 python start_server.py
 
 # In another terminal, start frontend
-python -m streamlit run scripts/george_streamlit_production.py --server.port 8501
+python -m streamlit run scripts/george_streamlit_chat.py --server.port 8501
 ```
 
 ## 📁 Current Scripts
@@ -29,7 +29,7 @@ python -m streamlit run scripts/george_streamlit_production.py --server.port 850
 - **`start_server.py`** - Starts the George API server on port 8000
 - **`start_george.py`** - Python launcher that starts both backend and frontend
 - **`start_george.sh`** - Bash script for Git Bash/Linux/Mac users  
-- **`scripts/george_streamlit_production.py`** - Streamlit web interface
+- **`scripts/george_streamlit_chat.py`** - Streamlit chat interface (minimal)
 
 ### Configuration Files
 - **`STARTUP_GUIDE.md`** - Detailed startup instructions

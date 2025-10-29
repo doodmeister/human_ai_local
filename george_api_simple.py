@@ -83,6 +83,12 @@ class ProcessInputRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
 
+class ProactiveRecallRequest(BaseModel):
+    query: str
+    max_results: int = 5
+    min_relevance: float = 0.7
+    use_ai_summary: bool = False
+
 @app.post("/api/agent/process")
 async def process_input(request: ProcessInputRequest):
     """Process user input through the cognitive agent"""
@@ -93,15 +99,22 @@ async def process_input(request: ProcessInputRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
-@app.post("/api/agent/chat")
-async def chat(request: ChatRequest):
-    """Chat endpoint for Streamlit interface"""
+# Proactive recall endpoint for Streamlit UI
+@app.post("/agent/memory/proactive-recall")
+async def agent_proactive_recall(req: ProactiveRecallRequest):
+    """Perform proactive recall using the agent's memory system."""
     try:
         agent = get_agent()
-        response = await agent.process_input(request.message)
-        return {"response": response}
+        result = agent.memory.proactive_recall(
+            query=req.query,
+            max_results=req.max_results,
+            min_relevance=req.min_relevance,
+            use_ai_summary=req.use_ai_summary,
+            openai_client=getattr(agent, 'openai_client', None)
+        )
+        return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Proactive recall failed: {str(e)}")
 
 # Memory endpoints
 @app.get("/api/agent/memory/list/{system}")

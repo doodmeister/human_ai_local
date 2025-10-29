@@ -34,11 +34,37 @@ class SearchMemoryRequest(BaseModel):
     min_importance: Optional[float] = 0.0
     max_results: Optional[int] = 10
 
+class ProactiveRecallRequest(BaseModel):
+    query: str
+    max_results: Optional[int] = 5
+    min_relevance: Optional[float] = 0.7
+    use_ai_summary: Optional[bool] = False
+
+# Added FeedbackRequest model
 class FeedbackRequest(BaseModel):
     feedback_type: str
-    value: Any
+    value: float
     comment: Optional[str] = None
     user_id: Optional[str] = None
+
+@router.post("/memory/proactive-recall")
+def proactive_recall(req: ProactiveRecallRequest, request: Request):
+    """Perform proactive recall of relevant memories based on query"""
+    agent = request.app.state.agent
+    
+    try:
+        # Use the memory system's proactive_recall method
+        result = agent.memory.proactive_recall(
+            query=req.query,
+            max_results=req.max_results,
+            min_relevance=req.min_relevance,
+            use_ai_summary=req.use_ai_summary
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Proactive recall failed: {str(e)}")
+
+# Create FastAPI app for testing purposes (must be at end of file)
 
 # Helper to get the memory system
 def get_system(system: str, agent: CognitiveAgent):

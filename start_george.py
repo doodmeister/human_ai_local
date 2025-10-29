@@ -112,10 +112,15 @@ def start_frontend():
         
         # Start Streamlit
         subprocess.run([
-            python_cmd, "-m", "streamlit", "run", 
-            "scripts/george_streamlit_production.py",
-            "--server.port", str(STREAMLIT_PORT),
-            "--server.address", "localhost"
+            python_cmd,
+            "-m",
+            "streamlit",
+            "run",
+            "scripts/george_streamlit_chat.py",
+            "--server.port",
+            str(STREAMLIT_PORT),
+            "--server.address",
+            "localhost",
         ])
     except KeyboardInterrupt:
         print("\n🛑 Shutting down...")

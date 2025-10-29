@@ -1260,3 +1260,240 @@ class MemorySystem:
                 seen_content.add(content_repr)
 
         return unique_results[:max_results]
+
+    def proactive_recall(
+        self,
+        query: str,
+        max_results: int = 5,
+        min_relevance: float = 0.7,
+        context_window: int = 3,
+        use_ai_summary: bool = False,
+        openai_client = None
+    ) -> Dict[str, Any]:
+        """
+        Perform proactive recall of relevant memories based on current context.
+        
+        This method implements episodic memory proactive recall by:
+        1. Searching across all memory systems for relevant content
+        2. Prioritizing recent and emotionally salient memories
+        3. Providing contextual summaries for recall
+        
+        Args:
+            query: The current user input or context to recall against
+            max_results: Maximum number of memories to recall
+            min_relevance: Minimum relevance threshold for recall
+            context_window: Number of recent memories to consider for context
+            use_ai_summary: Whether to use AI (GPT-4.1) for enhanced summarization
+            openai_client: OpenAI client instance for AI summarization
+            
+        Returns:
+            Dictionary containing recalled memories with metadata
+        """
+        if not self.is_initialized():
+            logger.warning("Memory system not initialized for proactive recall")
+            return {"recalled_memories": [], "summary": "Memory system unavailable"}
+        
+        try:
+            # Perform hierarchical search
+            search_results = self.hierarchical_search(
+                query=query,
+                max_results=max_results * 2,  # Get more for filtering
+                max_per_system=max_results // 2
+            )
+            
+            # Filter and prioritize results
+            recalled_memories = []
+            for memory, score, source in search_results:
+                if score >= min_relevance:
+                    # Enhance with additional metadata
+                    enhanced_memory = {
+                        "content": self._extract_memory_content(memory, source),
+                        "score": score,
+                        "source": source,
+                        "timestamp": self._extract_timestamp(memory, source),
+                        "importance": self._extract_importance(memory, source),
+                        "emotional_valence": self._extract_emotional_valence(memory, source),
+                        "tags": self._extract_tags(memory, source)
+                    }
+                    recalled_memories.append(enhanced_memory)
+                    
+                    if len(recalled_memories) >= max_results:
+                        break
+            
+            # Generate summary if we have results
+            summary = ""
+            if recalled_memories:
+                summary = self._generate_recall_summary(recalled_memories, query, use_ai_summary, openai_client)
+            
+            return {
+                "recalled_memories": recalled_memories,
+                "summary": summary,
+                "query": query,
+                "total_found": len(recalled_memories)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in proactive recall: {e}")
+            return {"recalled_memories": [], "summary": f"Recall failed: {str(e)}"}
+
+    def _extract_memory_content(self, memory: Any, source: str) -> str:
+        """Extract readable content from memory object."""
+        try:
+            if source == 'Episodic':
+                return memory.detailed_content or memory.summary or str(memory)
+            elif source == 'Semantic':
+                if isinstance(memory, dict):
+                    return f"{memory.get('subject', '')} {memory.get('predicate', '')} {memory.get('object', '')}"
+                return str(memory)
+            elif isinstance(memory, dict):
+                return memory.get('content', str(memory))
+            elif hasattr(memory, 'content'):
+                return memory.content
+            else:
+                return str(memory)
+        except Exception:
+            return str(memory)
+
+    def _extract_timestamp(self, memory: Any, source: str) -> Optional[datetime]:
+        """Extract timestamp from memory object."""
+        try:
+            if source == 'Episodic':
+                return memory.timestamp
+            elif isinstance(memory, dict):
+                ts = memory.get('timestamp')
+                if isinstance(ts, str):
+                    return datetime.fromisoformat(ts)
+                return ts
+            elif hasattr(memory, 'timestamp'):
+                return memory.timestamp
+        except Exception:
+            pass
+        return None
+
+    def _extract_importance(self, memory: Any, source: str) -> float:
+        """Extract importance score from memory object."""
+        try:
+            if source == 'Episodic':
+                return memory.importance
+            elif isinstance(memory, dict):
+                return memory.get('importance', 0.5)
+            elif hasattr(memory, 'importance'):
+                return memory.importance
+        except Exception:
+            pass
+        return 0.5
+
+    def _extract_emotional_valence(self, memory: Any, source: str) -> float:
+        """Extract emotional valence from memory object."""
+        try:
+            if source == 'Episodic':
+                return memory.emotional_valence
+            elif isinstance(memory, dict):
+                return memory.get('emotional_valence', 0.0)
+            elif hasattr(memory, 'emotional_valence'):
+                return memory.emotional_valence
+        except Exception:
+            pass
+        return 0.0
+
+    def _extract_tags(self, memory: Any, source: str) -> List[str]:
+        """Extract tags from memory object."""
+        try:
+            if source == 'Episodic':
+                return memory.tags or []
+            elif isinstance(memory, dict):
+                return memory.get('tags', [])
+            elif hasattr(memory, 'tags'):
+                return memory.tags
+        except Exception:
+            pass
+        return []
+
+    def _generate_recall_summary(self, memories: List[Dict], query: str, use_ai: bool = False, openai_client = None) -> str:
+        """Generate a concise summary of recalled memories."""
+        if not memories:
+            return "No relevant memories recalled."
+        
+        # If AI summarization is requested and client is available
+        if use_ai and openai_client:
+            try:
+                return self._generate_ai_summary(memories, query, openai_client)
+            except Exception as e:
+                logger.warning(f"AI summarization failed: {e}, falling back to basic summary")
+        
+        # Basic statistical summary
+        return self._generate_basic_summary(memories)
+
+    def _generate_basic_summary(self, memories: List[Dict]) -> str:
+        """Generate a basic statistical summary of recalled memories."""
+        # Count by source
+        source_counts = {}
+        total_importance = 0
+        recent_count = 0
+        
+        for memory in memories:
+            source = memory.get('source', 'Unknown')
+            source_counts[source] = source_counts.get(source, 0) + 1
+            total_importance += memory.get('importance', 0.5)
+            
+            # Count recent memories (within last hour)
+            timestamp = memory.get('timestamp')
+            if timestamp and isinstance(timestamp, datetime):
+                if (datetime.now() - timestamp).total_seconds() < 3600:
+                    recent_count += 1
+        
+        avg_importance = total_importance / len(memories)
+        
+        summary_parts = []
+        summary_parts.append(f"Recalled {len(memories)} relevant memories")
+        
+        if source_counts:
+            source_str = ", ".join([f"{count} from {source}" for source, count in source_counts.items()])
+            summary_parts.append(f"from {source_str}")
+        
+        if recent_count > 0:
+            summary_parts.append(f"including {recent_count} recent items")
+        
+        if avg_importance > 0.7:
+            summary_parts.append("with high importance")
+        elif avg_importance > 0.4:
+            summary_parts.append("with moderate importance")
+        
+        return ". ".join(summary_parts) + "."
+
+    def _generate_ai_summary(self, memories: List[Dict], query: str, openai_client) -> str:
+        """Generate an AI-powered summary of recalled memories using GPT-4.1."""
+        # Prepare context for AI summarization
+        memory_texts = []
+        for i, memory in enumerate(memories[:5]):  # Limit to top 5 for token efficiency
+            content = memory.get('content', '')[:200]  # Truncate for brevity
+            source = memory.get('source', 'Unknown')
+            importance = memory.get('importance', 0.5)
+            memory_texts.append(f"{i+1}. [{source}] {content} (importance: {importance:.1f})")
+        
+        memories_text = "\n".join(memory_texts)
+        
+        prompt = f"""
+        Based on the user's query: "{query}"
+        
+        Here are the most relevant recalled memories:
+        {memories_text}
+        
+        Please provide a concise, natural summary (2-3 sentences) of what these memories suggest about the user's context or interests. Focus on patterns, themes, or key insights rather than listing individual items.
+        """
+        
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4.1-nano",  # Use the configured model
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that summarizes memory recall results concisely and insightfully."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=150
+            )
+            summary = response.choices[0].message.content.strip()
+            return summary if summary else self._generate_basic_summary(memories)
+        except Exception as e:
+            logger.error(f"AI summary generation failed: {e}")
+            return self._generate_basic_summary(memories)
