@@ -1,10 +1,12 @@
 """
 Simplified George API for testing - delayed agent initialization
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
+from typing import Optional
 import sys
 from pathlib import Path
+import threading
 
 # Add project root to path
 project_root = Path(__file__).parent
@@ -17,6 +19,10 @@ app = FastAPI(title="George Cognitive API", version="1.0.0")
 _agent = None
 _agent_initializing = False
 _initialization_error = None
+
+# Reflection state
+reflection_lock = threading.Lock()
+last_reflection_report = None
 
 def get_agent():
     """Lazy agent initialization"""
@@ -301,6 +307,61 @@ async def performance_analytics():
         return analytics
     except Exception as e:
         return {"error": str(e), "cognitive_efficiency": {}, "usage_statistics": {}, "trends": {}}
+
+# Reflection endpoints
+class ReflectionStartRequest(BaseModel):
+    interval: Optional[int] = None  # minutes
+
+@app.post("/reflect")
+async def reflect():
+    """Trigger agent-level metacognitive reflection and return the report."""
+    global last_reflection_report
+    try:
+        agent = get_agent()
+        with reflection_lock:
+            report = agent.reflect()
+            last_reflection_report = report
+        return {"status": "ok", "report": report}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reflection failed: {str(e)}")
+
+@app.get("/reflection/status")
+async def reflection_status():
+    """Get current reflection scheduler status"""
+    try:
+        agent = get_agent()
+        status = agent.get_reflection_status()
+        return {"status": status}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get reflection status: {str(e)}")
+
+@app.get("/reflection/report")
+async def reflection_report():
+    """Get the most recent reflection report"""
+    if last_reflection_report is None or last_reflection_report == {}:
+        raise HTTPException(status_code=404, detail="No reflection report available.")
+    return {"report": last_reflection_report}
+
+@app.post("/reflection/start")
+async def reflection_start(req: ReflectionStartRequest):
+    """Start periodic reflection scheduler"""
+    try:
+        agent = get_agent()
+        interval = req.interval if req.interval is not None else 10
+        agent.start_reflection_scheduler(interval_minutes=interval)
+        return {"status": "started", "interval_minutes": interval}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start reflection: {str(e)}")
+
+@app.post("/reflection/stop")
+async def reflection_stop():
+    """Stop periodic reflection scheduler"""
+    try:
+        agent = get_agent()
+        agent.stop_reflection_scheduler()
+        return {"status": "stopped"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stop reflection: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

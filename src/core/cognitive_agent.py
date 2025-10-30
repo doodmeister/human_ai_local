@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import uuid
 import os
-from openai import OpenAI
 from dotenv import load_dotenv
 import threading
 import time
@@ -21,10 +20,17 @@ from ..processing.sensory import SensoryInterface, SensoryProcessor
 from ..processing.dream import DreamProcessor
 from ..optimization.performance_optimizer import PerformanceOptimizer
 
+# Lazy import LLM provider to avoid circular dependencies
+def _lazy_import_llm():
+    try:
+        from ..model.llm_provider import LLMProviderFactory, LLMProvider
+        return LLMProviderFactory, LLMProvider
+    except ImportError as e:
+        print(f"[WARNING] Failed to import LLM provider: {e}")
+        return None, None
+
 # Load environment variables for LLM
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4.1-nano")
 
 # Default guiding system prompt for the agent
 DEFAULT_SYSTEM_PROMPT = (
@@ -66,14 +72,25 @@ class CognitiveAgent:
         # Stores recent conversation history for proactive recall
         self.conversation_context: List[Dict[str, Any]] = []
         
-        # LLM configuration - Initialize OpenAI client
+        # LLM configuration - Initialize LLM provider
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self.llm_conversation = []  # For LLM chat history
-        if not OPENAI_API_KEY:
-            print("[WARNING] OPENAI_API_KEY not set. LLM features will not work.")
-            self.openai_client = None
-        else:
-            self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        try:
+            LLMProviderFactory, LLMProvider = _lazy_import_llm()
+            if LLMProviderFactory is None:
+                self.llm_provider = None
+            else:
+                self.llm_provider = LLMProviderFactory.create_from_config(self.config.llm)
+                if not self.llm_provider.is_available():
+                    print(f"[WARNING] LLM provider '{self.config.llm.provider}' is not available. LLM features may not work.")
+                    self.llm_provider = None
+        except Exception as e:
+            print(f"[WARNING] Failed to initialize LLM provider: {e}. LLM features will not work.")
+            self.llm_provider = None
+        
+        # Backward compatibility: Keep openai_client reference for legacy code
+        self.openai_client = getattr(self.llm_provider, 'client', None) if hasattr(self.llm_provider, 'client') else None
         
         # Reflection state
         self.reflection_reports: List[Dict[str, Any]] = []
@@ -81,6 +98,10 @@ class CognitiveAgent:
         self._reflection_scheduler_running = False
         
         print(f"Cognitive agent initialized with session ID: {self.session_id}")
+        if self.llm_provider:
+            provider_name = self.config.llm.provider
+            model_name = self.config.llm.openai_model if provider_name == "openai" else self.config.llm.ollama_model
+            print(f"LLM provider: {provider_name} ({model_name})")
     
     def _initialize_components(self):
         """Initialize all cognitive architecture components"""
@@ -322,8 +343,9 @@ class CognitiveAgent:
         attention_scores: Dict[str, float]
     ) -> str:
         """Generate response using LLM with cognitive context"""
-        if not OPENAI_API_KEY:
-            return "[LLM unavailable: No API key configured.]"
+        if not self.llm_provider:
+            return "[LLM unavailable: No LLM provider configured.]"
+        
         # Build LLM messages
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -342,7 +364,7 @@ class CognitiveAgent:
         user_msg = processed_input['raw_input']
         messages.append({"role": "user", "content": user_msg})
         try:
-            response = await self._call_openai_chat(messages)
+            response = await self._call_llm_chat(messages)
             # Update LLM conversation history
             self.llm_conversation.append({"role": "user", "content": user_msg})
             self.llm_conversation.append({"role": "assistant", "content": response})
@@ -350,27 +372,21 @@ class CognitiveAgent:
         except Exception as e:
             return f"[ERROR] LLM call failed: {e}"
 
+    async def _call_llm_chat(self, messages):
+        """Call LLM provider chat completion API asynchronously."""
+        if not self.llm_provider:
+            raise Exception("LLM provider not initialized")
+        
+        llm_response = await self.llm_provider.chat_completion(
+            messages=messages,
+            temperature=self.config.llm.temperature,
+            max_tokens=self.config.llm.max_tokens,
+        )
+        return llm_response.content
+    
     async def _call_openai_chat(self, messages):
-        """Call OpenAI chat completion API asynchronously."""
-        if not self.openai_client:
-            raise Exception("OpenAI client not initialized - missing API key")
-            
-        import asyncio
-        loop = asyncio.get_event_loop()
-
-        def make_openai_call():
-            if not self.openai_client:
-                raise Exception("OpenAI client is None - API key not configured")
-            response = self.openai_client.chat.completions.create(
-                model=OPENAI_MODEL_NAME,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=512,
-            )
-            content = response.choices[0].message.content
-            return content.strip() if content is not None else ""
-
-        return await loop.run_in_executor(None, make_openai_call)
+        """Legacy method - redirects to _call_llm_chat for backward compatibility."""
+        return await self._call_llm_chat(messages)
 
     def set_system_prompt(self, prompt: str):
         """Set a new system prompt for the agent."""

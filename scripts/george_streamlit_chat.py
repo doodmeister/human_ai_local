@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import requests
 import streamlit as st
@@ -51,6 +51,13 @@ def trigger_dream_cycle(base_url: str, cycle_type: str = "light") -> Dict[str, A
     return resp.json()
 
 
+def trigger_reflection(base_url: str) -> Dict[str, Any]:
+    """Trigger agent-level metacognitive reflection and return the report."""
+    resp = requests.post(f"{base_url}/reflect", timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def ensure_state() -> None:
     """Initialize Streamlit session state fields used by the UI."""
     if "session_id" not in st.session_state:
@@ -65,6 +72,31 @@ def ensure_state() -> None:
         st.session_state.last_error = None
     if "salience_threshold" not in st.session_state:
         st.session_state.salience_threshold = 0.55  # Default from ChatConfig
+    # LLM provider settings
+    if "llm_provider" not in st.session_state:
+        st.session_state.llm_provider = "openai"
+    if "openai_model" not in st.session_state:
+        st.session_state.openai_model = "gpt-4.1-nano"
+    if "ollama_base_url" not in st.session_state:
+        st.session_state.ollama_base_url = "http://localhost:11434"
+    if "ollama_model" not in st.session_state:
+        st.session_state.ollama_model = "llama3.2"
+
+
+def update_llm_config(base_url: str, provider: str, openai_model: str, ollama_base_url: str, ollama_model: str) -> Dict[str, Any]:
+    """Update the backend LLM configuration"""
+    payload = {
+        "provider": provider,
+        "openai_model": openai_model,
+        "ollama_base_url": ollama_base_url,
+        "ollama_model": ollama_model,
+    }
+    try:
+        resp = requests.post(f"{base_url}/agent/config/llm", json=payload, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
@@ -74,6 +106,63 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
         api_url = st.text_input("API base URL", value=st.session_state.api_base_url)
         cleaned = (api_url or "").rstrip("/")
         st.session_state.api_base_url = cleaned or DEFAULT_API_BASE
+        
+        # LLM Provider Configuration
+        st.subheader("🤖 LLM Provider")
+        provider_changed = False
+        
+        new_provider = st.selectbox(
+            "Provider",
+            options=["openai", "ollama"],
+            index=0 if st.session_state.llm_provider == "openai" else 1,
+            help="Select between OpenAI API or locally-hosted Ollama"
+        )
+        
+        if new_provider != st.session_state.llm_provider:
+            st.session_state.llm_provider = new_provider
+            provider_changed = True
+        
+        if st.session_state.llm_provider == "openai":
+            new_openai_model = st.text_input(
+                "OpenAI Model",
+                value=st.session_state.openai_model,
+                help="e.g., gpt-4.1-nano, gpt-4o, gpt-3.5-turbo"
+            )
+            if new_openai_model != st.session_state.openai_model:
+                st.session_state.openai_model = new_openai_model
+                provider_changed = True
+        else:  # ollama
+            new_ollama_url = st.text_input(
+                "Ollama Base URL",
+                value=st.session_state.ollama_base_url,
+                help="URL of your local Ollama server"
+            )
+            new_ollama_model = st.text_input(
+                "Ollama Model",
+                value=st.session_state.ollama_model,
+                help="e.g., llama3.2, mistral, codellama"
+            )
+            if new_ollama_url != st.session_state.ollama_base_url:
+                st.session_state.ollama_base_url = new_ollama_url
+                provider_changed = True
+            if new_ollama_model != st.session_state.ollama_model:
+                st.session_state.ollama_model = new_ollama_model
+                provider_changed = True
+        
+        if provider_changed or st.button("🔄 Apply LLM Config"):
+            result = update_llm_config(
+                st.session_state.api_base_url,
+                st.session_state.llm_provider or "openai",
+                st.session_state.openai_model or "gpt-4.1-nano",
+                st.session_state.ollama_base_url or "http://localhost:11434",
+                st.session_state.ollama_model or "llama3.2",
+            )
+            if result.get("status") == "ok":
+                st.success("LLM configuration updated!")
+            else:
+                st.error(f"Failed to update config: {result.get('message', 'Unknown error')}")
+        
+        st.markdown("---")
         
         st.subheader("Memory Controls")
         st.session_state.salience_threshold = st.slider(
@@ -123,6 +212,67 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
                     st.json(result)
             except Exception as e:
                 st.error(f"Dream cycle failed: {e}")
+        
+        if st.button("🧠 Trigger Reflection", help="Run metacognitive self-analysis on memory health & performance"):
+            try:
+                with st.spinner("Running reflection analysis..."):
+                    result = trigger_reflection(st.session_state.api_base_url)
+                st.success("Reflection complete!")
+                
+                # Display the reflection report
+                report = result.get("report", {})
+                if report:
+                    # STM Stats
+                    stm_stats = report.get("stm_metacognitive_stats")
+                    if stm_stats:
+                        st.subheader("📊 Short-Term Memory Health")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            capacity_util = stm_stats.get("capacity_utilization", 0)
+                            st.metric("Capacity Utilization", f"{capacity_util*100:.1f}%")
+                            st.metric("Memory Count", stm_stats.get("memory_count", 0))
+                        with col2:
+                            error_rate = stm_stats.get("error_rate", 0)
+                            st.metric("Error Rate", f"{error_rate*100:.2f}%")
+                            avg_importance = stm_stats.get("avg_importance", 0)
+                            st.metric("Avg Importance", f"{avg_importance:.2f}")
+                    
+                    # LTM Health Report
+                    ltm_health = report.get("ltm_health_report")
+                    if ltm_health:
+                        st.subheader("🧠 Long-Term Memory Health")
+                        
+                        # Core metrics
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Memories", ltm_health.get("total_memories", 0))
+                        with col2:
+                            avg_conf = ltm_health.get("average_confidence", 0)
+                            st.metric("Avg Confidence", f"{avg_conf:.2f}")
+                        with col3:
+                            success_rate = ltm_health.get("search_success_rate", 0)
+                            st.metric("Search Success Rate", f"{success_rate*100:.1f}%")
+                        
+                        # Recommendations
+                        recommendations = ltm_health.get("recommendations", [])
+                        if recommendations:
+                            with st.expander("💡 Recommendations", expanded=True):
+                                for rec in recommendations:
+                                    st.info(rec)
+                        
+                        # Health status
+                        health_status = ltm_health.get("health_status", "unknown")
+                        status_color = {"good": "🟢", "warning": "🟡", "poor": "🔴"}.get(health_status, "⚪")
+                        st.write(f"**Overall Health:** {status_color} {health_status.upper()}")
+                    
+                    # Full report details
+                    with st.expander("Full reflection report"):
+                        st.json(report)
+                else:
+                    st.warning("No reflection data available")
+                    
+            except Exception as e:
+                st.error(f"Reflection failed: {e}")
         
         st.subheader("Chat Options")
         include_memory = st.checkbox("Include memory retrieval", value=True, key="include_memory")

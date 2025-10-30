@@ -58,6 +58,24 @@ class ProcessingConfig:
     batch_size: int = 32
 
 @dataclass
+class LLMConfig:
+    """Configuration for Language Model providers"""
+    provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "openai"))  # "openai" or "ollama"
+    
+    # OpenAI settings
+    openai_api_key: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_API_KEY"))
+    openai_model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL_NAME", "gpt-4.1-nano"))
+    
+    # Ollama settings
+    ollama_base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
+    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2"))
+    
+    # Common settings
+    temperature: float = 0.7
+    max_tokens: int = 512
+    timeout: int = 90
+
+@dataclass
 class AWSConfig:
     """Configuration for AWS services"""
     region: str = "us-east-1"
@@ -152,6 +170,7 @@ class CognitiveConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     attention: AttentionConfig = field(default_factory=AttentionConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     aws: AWSConfig = field(default_factory=AWSConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)

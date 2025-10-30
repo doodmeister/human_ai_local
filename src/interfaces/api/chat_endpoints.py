@@ -272,3 +272,57 @@ async def start_dream_cycle(dream_req: DreamRequest):
             }
     except Exception as e:
         return {"error": str(e), "dream_results": None}
+
+
+# ---------------- LLM Configuration Endpoint ----------------
+
+class LLMConfigUpdate(BaseModel):
+    provider: str  # "openai" or "ollama"
+    openai_model: Optional[str] = "gpt-4.1-nano"
+    ollama_base_url: Optional[str] = "http://localhost:11434"
+    ollama_model: Optional[str] = "llama3.2"
+
+
+@router.post("/config/llm")
+async def update_llm_config(config: LLMConfigUpdate):
+    """Update LLM provider configuration and reinitialize the agent's LLM provider."""
+    global _agent_instance
+    
+    try:
+        if _agent_instance is None:
+            _agent_instance = create_agent()
+        
+        if _agent_instance is None:
+            return {"status": "error", "message": "Agent not available"}
+        
+        # Update the config
+        _agent_instance.config.llm.provider = config.provider
+        if config.openai_model:
+            _agent_instance.config.llm.openai_model = config.openai_model
+        if config.ollama_base_url:
+            _agent_instance.config.llm.ollama_base_url = config.ollama_base_url
+        if config.ollama_model:
+            _agent_instance.config.llm.ollama_model = config.ollama_model
+        
+        # Reinitialize the LLM provider
+        from src.model.llm_provider import LLMProviderFactory
+        try:
+            new_provider = LLMProviderFactory.create_from_config(_agent_instance.config.llm)
+            if not new_provider.is_available():
+                return {
+                    "status": "warning",
+                    "message": f"Provider '{config.provider}' configured but not available. Check configuration."
+                }
+            _agent_instance.llm_provider = new_provider
+            _agent_instance.openai_client = getattr(new_provider, 'client', None) if hasattr(new_provider, 'client') else None
+            
+            model_name = config.openai_model if config.provider == "openai" else config.ollama_model
+            return {
+                "status": "ok",
+                "message": f"LLM provider updated to {config.provider} ({model_name})"
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to initialize provider: {str(e)}"}
+    
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

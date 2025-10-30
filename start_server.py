@@ -25,6 +25,9 @@ try:
     print("   GET  /api/agent/status - Get cognitive status")
     print("   POST /api/agent/process - Process user input")
     print("   GET  /api/agent/memory/list/{system} - List STM/LTM memories")
+    print("   POST /reflect - Trigger metacognitive reflection")
+    print("   GET  /reflection/status - Get reflection scheduler status")
+    print("   GET  /reflection/report - Get last reflection report")
     print()
     
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=False, log_level="info")
