@@ -92,6 +92,14 @@ class TfidfSearchStrategy(SearchStrategy):
     def _update_vectorizer(self, documents: Dict[str, str]) -> None:
         """Update TF-IDF vectorizer with current document corpus"""
         if not SKLEARN_AVAILABLE:
+            logger.debug("Skipping TF-IDF vectorizer update: sklearn not available")
+            return
+        
+        # Import here to satisfy type checker and ensure availability
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer as _TfidfVectorizer
+        except ImportError:
+            logger.error("TfidfVectorizer import failed despite SKLEARN_AVAILABLE=True")
             return
         
         corpus_hash = self._compute_corpus_hash(documents)
@@ -105,7 +113,7 @@ class TfidfSearchStrategy(SearchStrategy):
             corpus = [documents[doc_id] for doc_id in self.doc_ids]
             
             # Create and fit vectorizer
-            self.vectorizer = TfidfVectorizer(
+            self.vectorizer = _TfidfVectorizer(
                 max_features=self.max_features,
                 ngram_range=self.ngram_range,
                 stop_words='english',
@@ -143,8 +151,9 @@ class TfidfSearchStrategy(SearchStrategy):
             # Transform query
             query_vec = self.vectorizer.transform([query])
             
-            # Compute similarities
-            similarities = cosine_similarity(query_vec, self.doc_matrix)[0]
+            # Compute similarities (cosine_similarity is available since SKLEARN_AVAILABLE=True)
+            from sklearn.metrics.pairwise import cosine_similarity as _cosine_similarity
+            similarities = _cosine_similarity(query_vec, self.doc_matrix)[0]
             
             # Create results
             results = []
@@ -502,9 +511,6 @@ class TieredSearchStrategy:
         self.tfidf = TfidfSearchStrategy() if SKLEARN_AVAILABLE else None
         self.word_overlap = EnhancedWordOverlapStrategy()
         
-        logger.info(f"TieredSearchStrategy initialized with: "
-                   f"BM25=available, TF-IDF={'available' if SKLEARN_AVAILABLE else 'unavailable'}, "
-                   f"EnhancedWordOverlap=available")
     
     def search(self, query: str, documents: Dict[str, str], limit: int = 10,
                min_relevance: float = 0.3, min_results: int = 3) -> List[SearchResult]:
@@ -512,9 +518,9 @@ class TieredSearchStrategy:
         Search using tiered fallback strategy
         
         Args:
-            query: Search query
+            query: Search query string
             documents: Documents to search
-            limit: Maximum results
+            limit: Maximum results to return
             min_relevance: Minimum relevance threshold
             min_results: Minimum results needed before trying next tier
             
@@ -522,7 +528,7 @@ class TieredSearchStrategy:
             Best results from available strategies
         """
         if not documents:
-            return []
+            return [] 
         
         # Try BM25 first (best lexical search)
         results = self.bm25.search(query, documents, limit, min_relevance)

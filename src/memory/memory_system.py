@@ -35,7 +35,7 @@ from .stm import VectorShortTermMemory, STMConfiguration
 from .ltm import VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .semantic.semantic_memory import SemanticMemorySystem
-from .prospective.prospective_memory import ProspectiveMemorySystem, ProspectiveMemory, ProspectiveMemoryVectorStore
+from .prospective.prospective_memory import ProspectiveMemorySystem
 from .procedural.procedural_memory import ProceduralMemory
 
 if TYPE_CHECKING:

@@ -17,6 +17,14 @@ Repo-specific guidance for being productive immediately. Keep changes small, con
   - LTM: `ltm/vector_ltm.py` (ChromaDB; semantic clusters; decay; health report).
   - Prospective: `prospective/prospective_memory.py` (in-memory reminders injected into chat context).
   - Consolidation: `consolidation/consolidator.py` (STM→LTM promotion with age/rehearsal gating, counters).
+- Executive functions (`src/executive/`)
+  - Legacy: `decision_engine.py` (weighted scoring), `task_planner.py` (template-based), `goal_manager.py` (hierarchical goals).
+  - **Enhanced (Phase 1)**: `decision/` module with advanced algorithms:
+    - `ahp_engine.py`: Analytic Hierarchy Process for multi-criteria decisions (eigenvector method, consistency checking).
+    - `pareto_optimizer.py`: Multi-objective Pareto frontier analysis, trade-off visualization.
+    - `context_analyzer.py`: Dynamic weight adjustment based on cognitive load, time pressure, risk tolerance.
+    - `ml_decision_model.py`: Learn from decision outcomes using decision trees.
+    - Feature flags (`get_feature_flags()`) enable gradual rollout; falls back to legacy on error.
 - Attention: `src/attention/attention_mechanism.py` (fatigue, capacity, metrics).
 - Config: `src/core/config.py` (`get_chat_config().to_dict()` feeds `ContextBuilder`).
 - API: `start_server.py` loads FastAPI app (`george_api_simple.py`) and mounts chat routes from `src/interfaces/api/chat_endpoints.py`.
@@ -45,6 +53,7 @@ pytest -q
 - Prospective reminders appear as rank-0 items with `source_system="prospective"`; endpoints under `/agent/reminders*`.
 - Use `get_chat_config()` instead of hard-coded defaults; pass `.to_dict()` into `ContextBuilder`.
 - Chroma configuration via `.env` (see `.env.example`: `CHROMA_PERSIST_DIR`, `STM_COLLECTION`, `LTM_COLLECTION`).
+- **Executive decisions**: Enhanced decision module uses feature flags for gradual rollout. Import from `src.executive.decision` for AHP/Pareto strategies; legacy `DecisionEngine` remains as fallback. All strategies implement `DecisionStrategy` interface.
 
 ## Integration references
 - Chat endpoints: `/agent/chat`, `/agent/chat/preview`, `/agent/chat/performance`, `/agent/chat/metacog/status`, `/agent/chat/consolidation/status` (see `src/interfaces/api/chat_endpoints.py`).
@@ -55,5 +64,6 @@ pytest -q
 - New memory/retrieval providers should return `ContextItem`-compatible dicts and be safe to omit (lazy import, graceful fallback).
 - Prefer lazy imports for heavy deps (see `_lazy_import` in `src/chat/factory.py`).
 - Emit lightweight counters via `metrics_registry` instead of verbose logs.
+- **Executive module changes**: Enhanced decision algorithms are in `src/executive/decision/`. Use feature flags to enable/disable. Maintain backward compatibility with legacy `DecisionEngine`. See `docs/executive_refactoring_plan.md` for architecture and Phase 1-5 roadmap.
 
-If a workflow or pattern you rely on is missing/unclear, say which part and we’ll refine this doc.
+If a workflow or pattern you rely on is missing/unclear, say which part and we'll refine this doc.

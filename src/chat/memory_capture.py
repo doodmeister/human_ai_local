@@ -1,7 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any, Pattern
-import re, time
+import re
+import time
 
 @dataclass
 class CapturedMemory:

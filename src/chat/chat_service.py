@@ -20,7 +20,7 @@ from .provenance import build_item_provenance
 from .scoring import get_scoring_profile_version
 from .constants import PREVIEW_MAX_ITEMS, PREVIEW_MAX_CONTENT_CHARS
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
-from .memory_capture import MemoryCaptureModule, MemoryCaptureCache, CapturedMemory  # added import near top
+from .memory_capture import MemoryCaptureModule, MemoryCaptureCache  # added import near top
 import re  # added for fact question pattern
 
 

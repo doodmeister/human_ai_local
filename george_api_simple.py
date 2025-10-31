@@ -1,7 +1,7 @@
 """
 Simplified George API for testing - delayed agent initialization
 """
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import sys

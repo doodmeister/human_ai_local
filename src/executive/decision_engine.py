@@ -4,6 +4,15 @@ Decision Engine - Multi-criteria decision making
 This module provides sophisticated decision-making capabilities using
 multiple criteria, weighted scoring, and uncertainty handling. It supports
 both analytical and heuristic decision-making approaches.
+
+ENHANCED FEATURES (Phase 1):
+- Analytic Hierarchy Process (AHP) with eigenvector method
+- Pareto optimization for multi-objective decisions
+- Context-aware weight adjustment
+- ML learning from decision outcomes
+- Feature flags for gradual rollout
+
+See src/executive/decision/ for enhanced implementations.
 """
 
 from typing import Dict, List, Optional, Any, Callable, Tuple
@@ -12,6 +21,33 @@ from datetime import datetime
 from enum import Enum
 import uuid
 from abc import ABC, abstractmethod
+import logging
+
+# Enhanced decision imports (with graceful fallback)
+try:
+    from .decision import (
+        AHPStrategy as EnhancedAHPStrategy,
+        ParetoStrategy as EnhancedParetoStrategy,
+        EnhancedDecisionContext,
+        EnhancedDecisionResult,
+        get_feature_flags,
+        ContextAnalyzer,
+        MLDecisionModel,
+    )
+    ENHANCED_DECISION_AVAILABLE = True
+except ImportError as e:
+    ENHANCED_DECISION_AVAILABLE = False
+    logging.warning(f"Enhanced decision features not available: {e}")
+    # Ensure names are always bound to avoid static analyzer "possibly unbound"
+    EnhancedAHPStrategy = None  # type: ignore[assignment]
+    EnhancedParetoStrategy = None  # type: ignore[assignment]
+    EnhancedDecisionContext = None  # type: ignore[assignment]
+    EnhancedDecisionResult = None  # type: ignore[assignment]
+    get_feature_flags = None  # type: ignore[assignment]
+    ContextAnalyzer = None  # type: ignore[assignment]
+    MLDecisionModel = None  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
 
 class DecisionType(Enum):
     """Types of decisions"""
@@ -239,7 +275,7 @@ class WeightedScoringStrategy(DecisionStrategy):
         best_score = option_scores[best_option_id]
         
         # Calculate confidence based on score separation
-        sorted_scores = sorted(option_scores.values(), reverse=True)
+        sorted_scores = sorted(optionScores.values(), reverse=True)
         confidence = 0.5  # Base confidence
         if len(sorted_scores) > 1:
             score_gap = sorted_scores[0] - sorted_scores[1]
@@ -316,9 +352,226 @@ class AHPStrategy(DecisionStrategy):
         result.metadata['strategy'] = 'ahp_simplified'
         return result
 
+
+class EnhancedDecisionAdapter:
+    """
+    Adapter to use enhanced decision strategies with legacy DecisionEngine interface.
+    
+    Translates between legacy DecisionOption/DecisionCriterion and enhanced
+    EnhancedDecisionContext. Provides feature-flag controlled rollout with
+    fallback to legacy strategies on errors.
+    """
+    
+    def __init__(self):
+        self.context_analyzer = None
+        self.ml_model = None
+        self.feature_flags = None
+        
+        if ENHANCED_DECISION_AVAILABLE and ContextAnalyzer and MLDecisionModel and get_feature_flags:
+            try:
+                self.context_analyzer = ContextAnalyzer()
+                self.ml_model = MLDecisionModel()
+                self.feature_flags = get_feature_flags()
+            except Exception as e:
+                logging.warning(f"Failed to initialize enhanced decision components: {e}")
+        
+        self.logger = logging.getLogger(__name__)
+    
+    def to_enhanced_context(
+        self,
+        options: List['DecisionOption'],
+        criteria: List['DecisionCriterion'],
+        context: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """Convert legacy decision parameters to enhanced context."""
+        from .decision.base import EnhancedDecisionContext, CriteriaHierarchy
+        import inspect  # dynamic signature mapping to avoid unknown kwargs
+
+        # Build alternatives dict safely
+        alternatives_map = {}
+        for opt in options:
+            # Compute per-criterion values safely
+            crit_values: Dict[str, float] = {}
+            for c in criteria:
+                try:
+                    # Try evaluating on underlying object if present, else on option
+                    target = opt.data.get('task', opt) if isinstance(opt.data, dict) else opt
+                    val = float(c.evaluate(target))
+                except Exception:
+                    val = 0.5
+                crit_values[c.id] = val
+
+            # Safe extraction with fallbacks
+            def _from_opt_or_data(attr: str, data_key: str, default: float) -> float:
+                try:
+                    return float(getattr(opt, attr))
+                except Exception:
+                    if isinstance(opt.data, dict):
+                        try:
+                            return float(opt.data.get(data_key, default))
+                        except Exception:
+                            return default
+                    return default
+
+            alternatives_map[opt.id] = {
+                'description': opt.description,
+                'estimated_impact': _from_opt_or_data('estimated_impact', 'estimated_impact', 0.5),
+                'confidence': _from_opt_or_data('confidence', 'confidence', 0.8),
+                'risk': _from_opt_or_data('risk_level', 'risk', 0.3),
+                'criteria_values': crit_values,
+            }
+
+        # Build criteria hierarchy with dynamic child parameter detection
+        crit_params = inspect.signature(CriteriaHierarchy).parameters
+        child_param_name = next(
+            (p for p in ('criteria', 'children', 'subcriteria', 'sub_criteria') if p in crit_params),
+            None
+        )
+
+        def _build_criteria_node(name: str, weight: float, children_map: Dict[str, Any]):
+            kwargs = {'name': name, 'weight': weight}
+            if child_param_name:
+                kwargs[child_param_name] = children_map
+            return CriteriaHierarchy(**kwargs)
+
+        # Leaf nodes for provided criteria
+        leaf_nodes = {
+            c.id: _build_criteria_node(name=c.name, weight=c.weight, children_map={})
+            for c in criteria
+        }
+
+        # Root hierarchy node
+        hierarchy = _build_criteria_node(name="root", weight=1.0, children_map=leaf_nodes)
+
+        # Extract context metadata
+        ctx = context or {}
+
+        # Dynamically map kwargs to EnhancedDecisionContext signature
+        params = set(inspect.signature(EnhancedDecisionContext).parameters.keys())
+        kwargs: Dict[str, Any] = {}
+
+        # alternatives synonyms
+        if 'alternatives' in params:
+            kwargs['alternatives'] = alternatives_map
+        elif 'options' in params:
+            kwargs['options'] = alternatives_map
+        elif 'alternatives_data' in params:
+            kwargs['alternatives_data'] = alternatives_map
+
+        # criteria hierarchy synonyms
+        if 'criteria_hierarchy' in params:
+            kwargs['criteria_hierarchy'] = hierarchy
+        elif 'criteria' in params:
+            kwargs['criteria'] = hierarchy
+
+        # Optional context fields if supported by the constructor
+        for key, value in [
+            ('cognitive_load', ctx.get('cognitive_load', 0.5)),
+            ('time_pressure', ctx.get('time_pressure', 0.5)),
+            ('risk_tolerance', ctx.get('risk_tolerance', 0.5)),
+            ('decision_type', ctx.get('decision_type', 'operational')),
+            ('constraints', ctx.get('constraints', {})),
+            ('preferences', ctx.get('preferences', {})),
+            ('past_decisions', ctx.get('past_decisions', [])),
+            ('metadata', ctx),
+        ]:
+            if key in params:
+                kwargs[key] = value
+
+        return EnhancedDecisionContext(**kwargs)
+    
+    def from_enhanced_result(
+        self,
+        result: Any,
+        options: List['DecisionOption']
+    ) -> Dict[str, Any]:
+        """Convert enhanced decision result to legacy format."""
+        # Find the option that matches the selected alternative
+        selected_option = None
+        for opt in options:
+            if opt.id == result.selected_alternative:
+                selected_option = opt
+                break
+        
+        return {
+            'selected_option': selected_option,
+            'scores': result.scores,
+            'confidence': result.confidence,
+            'reasoning': result.reasoning,
+            'method': result.method,
+            'metadata': result.metadata
+        }
+    
+    def apply_ahp(
+        self,
+        options: List['DecisionOption'],
+        criteria: List['DecisionCriterion'],
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Apply AHP strategy with enhanced implementation."""
+        try:
+            # Check feature flag
+            if not (self.feature_flags and self.feature_flags.use_ahp):
+                raise RuntimeError("AHP feature disabled")
+            
+            # Convert to enhanced context
+            enhanced_ctx = self.to_enhanced_context(options, criteria, context)
+            
+            # Apply context adjustments if enabled
+            if self.feature_flags.use_context_adjustment and self.context_analyzer:
+                enhanced_ctx = self.context_analyzer.adjust_context(enhanced_ctx)
+            
+            # Execute enhanced AHP
+            strategy = EnhancedAHPStrategy()
+            result = strategy.decide(enhanced_ctx)
+            
+            # Record outcome for ML if enabled
+            if self.feature_flags.use_ml_learning and self.ml_model:
+                # Will be recorded after actual outcome is known
+                pass
+            
+            return self.from_enhanced_result(result, options)
+            
+        except Exception as e:
+            self.logger.warning(f"Enhanced AHP failed, using fallback: {e}")
+            raise  # Let caller handle fallback
+    
+    def apply_pareto(
+        self,
+        options: List['DecisionOption'],
+        criteria: List['DecisionCriterion'],
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Apply Pareto optimization strategy."""
+        try:
+            # Check feature flag
+            if not (self.feature_flags and self.feature_flags.use_pareto):
+                raise RuntimeError("Pareto feature disabled")
+            
+            # Convert to enhanced context
+            enhanced_ctx = self.to_enhanced_context(options, criteria, context)
+            
+            # Execute Pareto optimization
+            strategy = EnhancedParetoStrategy()
+            result = strategy.decide(enhanced_ctx)
+            
+            return self.from_enhanced_result(result, options)
+            
+        except Exception as e:
+            self.logger.warning(f"Enhanced Pareto failed, using fallback: {e}")
+            raise  # Let caller handle fallback
+
+
 class DecisionEngine:
     """
     Advanced decision-making engine with multiple strategies
+    
+    ENHANCED FEATURES (Phase 1):
+    Now supports advanced decision strategies via EnhancedDecisionAdapter:
+    - AHP with eigenvector method (strategy='ahp')
+    - Pareto optimization (strategy='pareto')
+    - Context-aware adjustments
+    - ML learning from outcomes
     """
     
     def __init__(self):
@@ -330,6 +583,16 @@ class DecisionEngine:
         self.decision_history: List[DecisionResult] = []
         self.criterion_templates: Dict[str, List[DecisionCriterion]] = {}
         self._load_default_criteria()
+        
+        # Enhanced decision adapter (Phase 1)
+        self.enhanced_adapter = EnhancedDecisionAdapter() if ENHANCED_DECISION_AVAILABLE else None
+        
+        # Add enhanced strategies if available
+        if self.enhanced_adapter and self.enhanced_adapter.feature_flags:
+            if self.enhanced_adapter.feature_flags.use_ahp:
+                self.strategies['ahp_enhanced'] = self._make_enhanced_strategy('ahp')
+            if self.enhanced_adapter.feature_flags.use_pareto:
+                self.strategies['pareto'] = self._make_enhanced_strategy('pareto')
     
     def _load_default_criteria(self) -> None:
         """Load default criterion templates"""
@@ -389,6 +652,64 @@ class DecisionEngine:
                 )
             ]
         }
+    
+    def _make_enhanced_strategy(self, strategy_type: str) -> DecisionStrategy:
+        """
+        Create a wrapper strategy that uses the enhanced decision adapter.
+        
+        Args:
+            strategy_type: 'ahp' or 'pareto'
+            
+        Returns:
+            DecisionStrategy that delegates to enhanced implementation
+        """
+        class EnhancedStrategyWrapper(DecisionStrategy):
+            """Wrapper to make enhanced strategies compatible with legacy interface"""
+            
+            def __init__(self, adapter, strat_type):
+                self.adapter = adapter
+                self.strategy_type = strat_type
+            
+            def decide(
+                self,
+                options: List[DecisionOption],
+                criteria: List[DecisionCriterion],
+                context: Optional[Dict[str, Any]] = None
+            ) -> DecisionResult:
+                """Execute enhanced strategy with fallback"""
+                try:
+                    # Dispatch to appropriate enhanced method
+                    if self.strategy_type == 'ahp':
+                        result_dict = self.adapter.apply_ahp(options, criteria, context)
+                    elif self.strategy_type == 'pareto':
+                        result_dict = self.adapter.apply_pareto(options, criteria, context)
+                    else:
+                        raise ValueError(f"Unknown enhanced strategy: {self.strategy_type}")
+                    
+                    # Convert to DecisionResult
+                    return DecisionResult(
+                        decision_id=str(uuid.uuid4()),
+                        recommended_option=result_dict['selected_option'],
+                        rationale=result_dict['reasoning'],
+                        confidence=result_dict['confidence'],
+                        timestamp=datetime.now(),
+                        metadata={
+                            'strategy': f"{self.strategy_type}_enhanced",
+                            'scores': result_dict['scores'],
+                            **result_dict.get('metadata', {})
+                        }
+                    )
+                    
+                except Exception as e:
+                    # Fallback to weighted scoring
+                    logger.warning(f"Enhanced {self.strategy_type} failed: {e}, using weighted scoring")
+                    fallback = WeightedScoringStrategy()
+                    result = fallback.decide(options, criteria, context)
+                    result.metadata['fallback_reason'] = str(e)
+                    result.metadata['original_strategy'] = f"{self.strategy_type}_enhanced"
+                    return result
+        
+        return EnhancedStrategyWrapper(self.enhanced_adapter, strategy_type)
     
     def make_decision(
         self,
@@ -591,3 +912,59 @@ class DecisionEngine:
             'strategy_usage': strategy_counts,
             'most_recent': self.decision_history[-1].timestamp.isoformat()
         }
+    
+    def record_decision_outcome(
+        self,
+        decision_id: str,
+        actual_outcome: float,
+        outcome_metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Record the actual outcome of a decision for ML learning.
+        
+        This enables the ML decision model to learn from past decisions
+        and improve future recommendations.
+        
+        Args:
+            decision_id: ID of the decision (from DecisionResult)
+            actual_outcome: Actual outcome score (0.0-1.0, higher is better)
+            outcome_metadata: Additional context about the outcome
+        """
+        if not self.enhanced_adapter or not self.enhanced_adapter.ml_model:
+            logger.debug("ML learning not available, skipping outcome recording")
+            return
+        
+        if not self.enhanced_adapter.feature_flags or not self.enhanced_adapter.feature_flags.use_ml_learning:
+            logger.debug("ML learning disabled via feature flag")
+            return
+        
+        # Find the decision in history
+        decision = None
+        for d in self.decision_history:
+            if d.decision_id == decision_id:
+                decision = d
+                break
+        
+        if not decision:
+            logger.warning(f"Decision {decision_id} not found in history")
+            return
+        
+        try:
+            # Record outcome in ML model
+            from .decision.base import DecisionOutcome
+            
+            outcome = DecisionOutcome(
+                decision_id=decision_id,
+                selected_alternative=decision.recommended_option.id if decision.recommended_option else "unknown",
+                actual_outcome=actual_outcome,
+                predicted_outcome=decision.confidence,
+                outcome_metadata=outcome_metadata or {},
+                timestamp=datetime.now()
+            )
+            
+            self.enhanced_adapter.ml_model.record_outcome(outcome)
+            logger.info(f"Recorded outcome for decision {decision_id}: {actual_outcome:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Failed to record decision outcome: {e}")
+

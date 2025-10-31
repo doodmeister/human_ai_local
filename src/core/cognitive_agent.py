@@ -5,7 +5,6 @@ Core Cognitive Agent - Central orchestrator for the cognitive architecture
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import uuid
-import os
 from dotenv import load_dotenv
 import threading
 import time

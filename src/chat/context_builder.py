@@ -11,7 +11,6 @@ from .models import (
     PipelineStageResult,
     ChatMetrics,
     BuiltContext,
-    TurnRecord,
 )
 from .conversation_session import ConversationSession
 from .scoring import score_and_rank

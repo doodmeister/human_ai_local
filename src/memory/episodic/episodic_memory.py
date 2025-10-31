@@ -49,15 +49,6 @@ except ImportError as e:
     ADVANCED_SEARCH_AVAILABLE = False
     logger.warning(f"Advanced search strategies not available: {e}")
 
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    SentenceTransformer = None
-
-logger = logging.getLogger(__name__)
-
 def _safe_first_list(val):
     if isinstance(val, list) and len(val) > 0 and isinstance(val[0], list):
         return val[0]

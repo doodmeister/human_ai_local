@@ -1,5 +1,6 @@
 # Ensure project root is on sys.path for pytest and scripts.
-import os, sys
+import os
+import sys
 root = os.path.abspath(os.path.dirname(__file__))
 src_path = os.path.join(root, 'src')
 # Ensure project root and src/ both resolvable for 'import src.*' in varied runners

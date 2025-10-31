@@ -6,7 +6,9 @@ Usage:
 Produces summary of key counters & interval evolution.
 """
 from __future__ import annotations
-import argparse, time, random
+import argparse
+import time
+import random
 from src.chat import ChatService, ContextBuilder, SessionManager
 from src.chat.metrics import metrics_registry
 from src.core.config import get_chat_config
