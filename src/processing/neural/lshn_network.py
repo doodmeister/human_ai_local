@@ -15,6 +15,9 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 import logging
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
 # Dummy classes for fallback
 class _DummyHopfield(nn.Module):
     def __init__(self, *args, **kwargs):
@@ -42,17 +45,15 @@ class _DummyHopfieldPooling(nn.Module):
 try:
     from hflayers import Hopfield, HopfieldLayer, HopfieldPooling
     HOPFIELD_AVAILABLE = True
-    print("LSHN DEBUG: Successfully imported hopfield-layers")
+    logger.debug("Successfully imported hopfield-layers")
 except Exception as e:
     HOPFIELD_AVAILABLE = False
     error_type = type(e).__name__
-    print(f"LSHN DEBUG: Failed to import hopfield-layers ({error_type}): {e}")
+    logger.debug(f"Failed to import hopfield-layers ({error_type}): {e}")
     logging.warning(f"hopfield-layers not available ({error_type}). LSHN functionality will be limited.")
     Hopfield = _DummyHopfield
     HopfieldLayer = _DummyHopfieldLayer
     HopfieldPooling = _DummyHopfieldPooling
-
-logger = logging.getLogger(__name__)
 
 @dataclass
 class LSHNConfig:

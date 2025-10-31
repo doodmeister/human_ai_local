@@ -3,12 +3,17 @@ from __future__ import annotations
 import abc
 import math
 import random
+import logging
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from time import monotonic
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING
 import json
 import os
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from .outcome import Outcome
 

@@ -1,5 +1,24 @@
 """
-Main entry point for the Human-AI Cognition Framework demonstration
+LEGACY CLI Demo Entry Point (Retained for Reference)
+
+This file provides a simple command-line interface for the Human-AI Cognition Framework.
+It demonstrates basic agent initialization and conversation flow.
+
+**STATUS: LEGACY / REFERENCE ONLY**
+For production use, see:
+- `start_george.py` - Streamlit UI interface
+- `start_server.py` - FastAPI REST API server
+
+This file is kept as:
+1. A minimal example of direct CognitiveAgent usage
+2. Reference for CLI-based interactions
+3. Quick testing without UI dependencies
+
+Usage:
+    python main.py
+
+Note: Requires all dependencies from requirements.txt.
+This may become outdated if core APIs change.
 """
 import asyncio
 import sys

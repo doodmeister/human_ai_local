@@ -1,8 +1,12 @@
 """Agent singleton helpers for API integration."""
 
 from typing import Optional
+import logging
 
 from src.core.cognitive_agent import CognitiveAgent
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 _agent_instance: Optional[CognitiveAgent] = None
 
@@ -12,9 +16,9 @@ def create_agent() -> CognitiveAgent:
     global _agent_instance
 
     if _agent_instance is None:
-        print("[agent] creating CognitiveAgent instance...")
+        logger.info("Creating CognitiveAgent instance...")
         _agent_instance = CognitiveAgent()
-        print("[agent] CognitiveAgent initialized")
+        logger.info("CognitiveAgent initialized")
 
     return _agent_instance
 

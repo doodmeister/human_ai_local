@@ -11,7 +11,11 @@ from datetime import datetime, timedelta
 from enum import Enum
 import threading
 import time
+import logging
 from collections import deque
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 from ..attention.attention_mechanism import AttentionMechanism
 from ..memory.memory_system import MemorySystem
@@ -220,7 +224,7 @@ class CognitiveController:
                 self._optimize_resource_allocation()
                 time.sleep(1.0)  # Update every second
             except Exception as e:
-                print(f"Error in monitoring loop: {e}")
+                logger.error(f"Error in monitoring loop: {e}")
                 time.sleep(5.0)  # Longer sleep on error
     
     def _update_cognitive_state(self) -> None:
@@ -294,7 +298,7 @@ class CognitiveController:
         # Adjust resource allocation for new mode
         self._adjust_resources_for_mode(new_mode)
         
-        print(f"Cognitive mode transition: {old_mode.value} -> {new_mode.value}")
+        logger.info(f"Cognitive mode transition: {old_mode.value} -> {new_mode.value}")
     
     def _adjust_resources_for_mode(self, mode: CognitiveMode) -> None:
         """Adjust resource allocation based on cognitive mode"""

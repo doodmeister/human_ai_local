@@ -68,6 +68,10 @@ temp_*/
 debug_*.py
 cleanup_*.py
 test_*.py
+quick_*.py
+simple_*.py
+temp_*.py
+scratch_*.py
 
 # Memory store data
 memory_stores/

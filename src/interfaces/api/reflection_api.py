@@ -27,7 +27,11 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 import threading
+import logging
 from contextlib import asynccontextmanager
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Import the cognitive agent and reflection logic
 
@@ -48,11 +52,11 @@ async def lifespan(app: FastAPI):
     """
     Application lifespan manager to create and shut down the agent.
     """
-    print("Application startup: Initializing CognitiveAgent...")
+    logger.info("Application startup: Initializing CognitiveAgent...")
     app.state.agent = create_agent()
     yield
     # Clean up the agent and its resources
-    print("Application shutdown: Cleaning up CognitiveAgent...")
+    logger.info("Application shutdown: Cleaning up CognitiveAgent...")
     # If the agent has a cleanup method, call it here.
     # For example: app.state.agent.shutdown()
     app.state.agent = None

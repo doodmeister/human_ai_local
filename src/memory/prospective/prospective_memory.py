@@ -27,15 +27,26 @@ except ImportError as e:
     ) from e
 
 class ProspectiveMemorySystem:
-    """Abstract marker / future interface for prospective memory systems.
-
-    Currently serves as a semantic placeholder allowing the project to distinguish
-    between the lightweight in-memory implementation (`ProspectiveMemory`) and the
-    vector / persistent implementation (`ProspectiveMemoryVectorStore`). In future
-    iterations this can become a Protocol / ABC with shared method signatures.
+    """Base marker class for prospective memory implementations.
+    
+    This is NOT dead code or a useless placeholder. It serves as:
+    1. A semantic base class allowing type hints and isinstance checks
+    2. A marker distinguishing prospective memory from other memory types
+    3. Foundation for future Protocol/ABC if multiple implementations diverge
+    
+    Current implementations:
+    - `ProspectiveMemory`: Lightweight in-memory reminders (no vectors)
+    - `ProspectiveMemoryVectorStore`: Full ChromaDB-backed with semantic search
+    
+    Both implementations are actively used:
+    - ProspectiveMemory: For basic reminder functionality in chat API
+    - Vector store: For context-aware prospective retrieval
+    
+    This class intentionally has no methods - subclasses define their own interfaces
+    appropriate to their storage mechanisms. If a common Protocol is needed in the
+    future, it can be added here.
     """
-    # Intentionally empty for now
-    ...
+    pass
 
 # ------------------- Lightweight In-Memory Prospective Memory -------------------
 

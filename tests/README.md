@@ -2,6 +2,20 @@
 
 This directory contains all tests for the Human-AI Cognition Framework, organized into logical categories for easy navigation and maintenance.
 
+## ⚠️ Important: Test File Naming Convention
+
+**Actual test files** that pytest should run MUST follow these patterns:
+- `test_*.py` - Files starting with "test_"
+- `*_test.py` - Files ending with "_test"
+
+**Utility/debug scripts** should NOT match these patterns to avoid confusion:
+- ✅ Use: `debug_*.py`, `util_*.py`, `script_*.py`
+- ❌ Avoid: `test_*.py` for non-test scripts
+
+Debug and one-off scripts have been removed from this directory. If you need temporary
+debugging scripts, create them in a `scratch/` subdirectory (gitignored) or use
+descriptive names like `debug_chromadb.py` which are excluded by `.gitignore`.
+
 ## Directory Structure
 
 ### 📦 `unit/` - Unit Tests

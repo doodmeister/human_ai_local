@@ -735,7 +735,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         """
         memory = self.retrieve_memory(memory_id)
         if not memory:
-            print(f"[DEBUG] Memory {memory_id} not found for related search.")
+            logger.debug(f"Memory {memory_id} not found for related search.")
             return []
         relationship_types = relationship_types or ["temporal", "cross_reference", "semantic"]
         results = []
@@ -744,7 +744,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
             for related_id in memory.related_episodes:
                 related_memory = self.retrieve_memory(related_id)
                 if related_memory:
-                    print(f"[DEBUG] Explicit related episode: {related_id}")
+                    logger.debug(f"Explicit related episode: {related_id}")
                     results.append(EpisodicSearchResult(
                         memory=related_memory,
                         relevance=0.9,
@@ -758,7 +758,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     continue
                 shared_stm = set(memory.associated_stm_ids) & set(mem.associated_stm_ids)
                 if shared_stm:
-                    print(f"[DEBUG] Shared STM cross-reference: {mem.id} shared_stm={shared_stm}")
+                    logger.debug(f"Shared STM cross-reference: {mem.id} shared_stm={shared_stm}")
                     relevance = min(0.8, len(shared_stm) * 0.2)
                     results.append(EpisodicSearchResult(
                         memory=mem,
@@ -768,7 +768,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     ))
                 shared_ltm = set(memory.associated_ltm_ids) & set(mem.associated_ltm_ids)
                 if shared_ltm:
-                    print(f"[DEBUG] Shared LTM cross-reference: {mem.id} shared_ltm={shared_ltm}")
+                    logger.debug(f"Shared LTM cross-reference: {mem.id} shared_ltm={shared_ltm}")
                     relevance = min(0.8, len(shared_ltm) * 0.2)
                     results.append(EpisodicSearchResult(
                         memory=mem,
@@ -784,7 +784,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     continue
                 time_diff = abs((memory.timestamp - mem.timestamp).total_seconds())
                 if time_diff <= time_window.total_seconds():
-                    print(f"[DEBUG] Temporal relationship: {mem.id} time_diff={time_diff}")
+                    logger.debug(f"Temporal relationship: {mem.id} time_diff={time_diff}")
                     relevance = 0.7 * (1.0 - time_diff / time_window.total_seconds())
                     results.append(EpisodicSearchResult(
                         memory=mem,
@@ -803,12 +803,11 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 )
                 for result in semantic_results:
                     if result.memory.id != memory_id:
-                        print(f"[DEBUG] Semantic related: {result.memory.id} relevance={result.relevance}")
+                        logger.debug(f"Semantic related: {result.memory.id} relevance={result.relevance}")
                         result.match_type = "semantic"
                         results.append(result)
             except Exception as e:
                 logger.warning(f"Semantic search for related memories failed: {e}")
-                print(f"[DEBUG] Semantic search for related memories failed: {e}")
         # Remove duplicates and sort by relevance
         seen_ids = set()
         unique_results = []
@@ -817,7 +816,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 seen_ids.add(result.memory.id)
                 unique_results.append(result)
         unique_results.sort(key=lambda x: x.relevance, reverse=True)
-        print(f"[DEBUG] get_related_memories returning {len(unique_results[:limit])} results.")
+        logger.debug(f"get_related_memories returning {len(unique_results[:limit])} results.")
         return unique_results[:limit]
 
     def get_autobiographical_timeline(self, life_period: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, limit: int = 50) -> List['EpisodicMemory']:
@@ -841,7 +840,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         if end_date:
             memories = [m for m in memories if m.timestamp <= end_date]
         memories.sort(key=lambda m: m.timestamp)
-        print(f"[DEBUG] get_autobiographical_timeline returning {len(memories[:limit])} results.")
+        logger.debug(f"get_autobiographical_timeline returning {len(memories[:limit])} results.")
         return memories[:limit]
 
     def consolidate_memory(self, memory_id: str, strength_increment: float = 0.1) -> bool:
@@ -857,12 +856,12 @@ class EpisodicMemorySystem(BaseMemorySystem):
         """
         memory = self.retrieve_memory(memory_id)
         if not memory:
-            print(f"[DEBUG] consolidate_memory: memory {memory_id} not found.")
+            logger.debug(f"consolidate_memory: memory {memory_id} not found.")
             return False
         before = memory.consolidation_strength
         memory.rehearse(strength_increment)
         after = memory.consolidation_strength
-        print(f"[DEBUG] consolidate_memory: {memory_id} strength {before} -> {after}")
+        logger.debug(f"consolidate_memory: {memory_id} strength {before} -> {after}")
         return after > before
 
     def get_memory_statistics(self) -> dict:
@@ -893,7 +892,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         }
         stats["consolidation_stats"] = {"mean": float(consolidation.mean()), "min": float(consolidation.min()), "max": float(consolidation.max())}
         stats["access_stats"] = {"mean": float(access.mean()), "min": int(access.min()), "max": int(access.max())}
-        print(f"[DEBUG] get_memory_statistics: {stats}")
+        logger.debug(f"get_memory_statistics: {stats}")
         return stats
 
     def clear_memory(self, older_than: Optional[timedelta] = None, importance_threshold: Optional[float] = None):
@@ -912,9 +911,9 @@ class EpisodicMemorySystem(BaseMemorySystem):
             elif importance_threshold is not None and mem.importance < importance_threshold:
                 to_remove.append(mem_id)
         for mem_id in to_remove:
-            print(f"[DEBUG] clear_memory: removing {mem_id}")
+            logger.debug(f"clear_memory: removing {mem_id}")
             self._memory_cache.pop(mem_id, None)
-        print(f"[DEBUG] clear_memory: removed {len(to_remove)} memories.")
+        logger.debug(f"clear_memory: removed {len(to_remove)} memories.")
 
     def get_consolidation_candidates(self, min_importance: float = 0.5, max_consolidation: float = 0.9, limit: int = 10) -> list:
         """
@@ -925,13 +924,13 @@ class EpisodicMemorySystem(BaseMemorySystem):
             if m.importance >= min_importance and m.consolidation_strength <= max_consolidation
         ]
         candidates.sort(key=lambda m: (-m.importance, m.consolidation_strength))
-        print(f"[DEBUG] get_consolidation_candidates returning {len(candidates[:limit])} candidates.")
+        logger.debug(f"get_consolidation_candidates returning {len(candidates[:limit])} candidates.")
         return candidates[:limit]
 
     def clear_all_memories(self):
         """Clear all episodic memories from the in-memory cache (for test isolation)."""
         self._memory_cache.clear()
-        print("[DEBUG] clear_all_memories: all in-memory episodic memories cleared.")
+        logger.debug("clear_all_memories: all in-memory episodic memories cleared.")
 
     def batch_consolidate_memories(self, min_importance: float = 0.5, max_consolidation: float = 0.9, limit: int = 20, strength_increment: float = 0.2, cluster: bool = True) -> dict:
         """

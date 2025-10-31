@@ -295,9 +295,22 @@ class AHPStrategy(DecisionStrategy):
         criteria: List[DecisionCriterion],
         context: Dict[str, Any]
     ) -> DecisionResult:
-        """Make decision using simplified AHP"""
+        """Make decision using simplified AHP
+        
+        FUTURE WORK: This currently falls back to weighted scoring.
+        Full AHP implementation would require:
+        1. Pairwise comparison matrices for criteria
+        2. Consistency ratio calculations
+        3. Priority vector derivation using eigenvector method
+        4. Sensitivity analysis for robust rankings
+        
+        For most use cases, the weighted scoring approach is sufficient.
+        Consider implementing full AHP only if:
+        - Need rigorous multi-criteria decision analysis
+        - Dealing with complex hierarchical decisions
+        - Require mathematical consistency checks
+        """
         # For now, fall back to weighted scoring
-        # TODO: Implement full AHP with pairwise comparisons
         weighted_strategy = WeightedScoringStrategy()
         result = weighted_strategy.decide(options, criteria, context)
         result.metadata['strategy'] = 'ahp_simplified'

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import threading
 import time
 import schedule
+import logging
 
 from .config import CognitiveConfig
 from ..memory.memory_system import MemorySystem, MemorySystemConfig
@@ -26,11 +27,14 @@ def _lazy_import_llm():
         from ..model.llm_provider import LLMProviderFactory, LLMProvider
         return LLMProviderFactory, LLMProvider
     except ImportError as e:
-        print(f"[WARNING] Failed to import LLM provider: {e}")
+        logger.warning(f"Failed to import LLM provider: {e}")
         return None, None
 
 # Load environment variables for LLM
 load_dotenv()
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Default guiding system prompt for the agent
 DEFAULT_SYSTEM_PROMPT = (
@@ -83,10 +87,10 @@ class CognitiveAgent:
             else:
                 self.llm_provider = LLMProviderFactory.create_from_config(self.config.llm)
                 if not self.llm_provider.is_available():
-                    print(f"[WARNING] LLM provider '{self.config.llm.provider}' is not available. LLM features may not work.")
+                    logger.warning(f"LLM provider '{self.config.llm.provider}' is not available. LLM features may not work.")
                     self.llm_provider = None
         except Exception as e:
-            print(f"[WARNING] Failed to initialize LLM provider: {e}. LLM features will not work.")
+            logger.warning(f"Failed to initialize LLM provider: {e}. LLM features will not work.")
             self.llm_provider = None
         
         # Backward compatibility: Keep openai_client reference for legacy code
@@ -97,11 +101,11 @@ class CognitiveAgent:
         self._reflection_scheduler_thread = None
         self._reflection_scheduler_running = False
         
-        print(f"Cognitive agent initialized with session ID: {self.session_id}")
+        logger.info(f"Cognitive agent initialized with session ID: {self.session_id}")
         if self.llm_provider:
             provider_name = self.config.llm.provider
             model_name = self.config.llm.openai_model if provider_name == "openai" else self.config.llm.ollama_model
-            print(f"LLM provider: {provider_name} ({model_name})")
+            logger.info(f"LLM provider: {provider_name} ({model_name})")
     
     def _initialize_components(self):
         """Initialize all cognitive architecture components"""
@@ -130,9 +134,9 @@ class CognitiveAgent:
                 cognitive_config=self.config,
                 model_save_path="./data/models/dpad"
             )
-            print("✓ Neural integration (DPAD) initialized")
+            logger.info("Neural integration (DPAD) initialized")
         except ImportError as e:
-            print(f"⚠ Neural integration disabled: {e}")
+            logger.info(f"Neural integration disabled: {e}")
             self.neural_integration = None
 
         # Dream processor (initialized after memory system and neural integration)
@@ -149,9 +153,9 @@ class CognitiveAgent:
             self.performance_optimizer = PerformanceOptimizer(
                 config=self.config.performance
             )
-            print("✓ Performance optimizer initialized")
+            logger.info("Performance optimizer initialized")
         
-        print("Cognitive components initialized")
+        logger.info("Cognitive components initialized")
     
     async def process_input(
         self,
@@ -171,7 +175,7 @@ class CognitiveAgent:
             Generated response
         """
         try:
-            print(f"Processing {input_type} input: {input_data[:100]}...")
+            logger.debug(f"Processing {input_type} input: {input_data[:100]}...")
             
             # Step 1: Sensory processing and filtering
             processed_input = await self._process_sensory_input(input_data, input_type)
@@ -193,7 +197,7 @@ class CognitiveAgent:
             return response
             
         except Exception as e:
-            print(f"Error in cognitive processing: {e}")
+            logger.error(f"Error in cognitive processing: {e}")
             return "I encountered an error while processing your request. Please try again."
     async def _process_sensory_input(self, input_data: str, input_type: str) -> Dict[str, Any]:
         """Process raw input through sensory processing module"""
@@ -214,7 +218,7 @@ class CognitiveAgent:
                 "processing_metadata": processed_sensory_data.processing_metadata
             }
         except Exception as e:
-            print(f"Error in sensory processing: {e}")
+            logger.error(f"Error in sensory processing: {e}")
             # Fallback to basic processing
             return {
                 "raw_input": input_data,
@@ -245,7 +249,7 @@ class CognitiveAgent:
             else:
                 proactive_query = processed_input["raw_input"]
 
-            print(f"Proactive memory search with query: '{proactive_query[:200]}...'")
+            logger.debug(f"Proactive memory search with query: '{proactive_query[:200]}...'")
 
             # Use memory system to search for relevant context
             memories = self.memory.search_memories(
@@ -275,7 +279,7 @@ class CognitiveAgent:
             return context_memories
             
         except Exception as e:
-            print(f"Error retrieving memory context: {e}")
+            logger.error(f"Error retrieving memory context: {e}")
             return []
 
     async def _calculate_attention_allocation(
@@ -424,10 +428,10 @@ class CognitiveAgent:
             if len(self.conversation_context) > 10:
                 self.conversation_context.pop(0)
 
-            print("Interaction consolidated into memory and conversation context updated.")
+            logger.debug("Interaction consolidated into memory and conversation context updated.")
 
         except Exception as e:
-            print(f"Error in memory consolidation: {e}")
+            logger.error(f"Error in memory consolidation: {e}")
 
     def store_fact(self, subject: str, predicate: str, object: str):
         """
@@ -440,9 +444,9 @@ class CognitiveAgent:
         """
         try:
             self.memory.store_fact(subject, predicate, object)
-            print(f"Stored fact: ({subject}, {predicate}, {object})")
+            logger.debug(f"Stored fact: ({subject}, {predicate}, {object})")
         except Exception as e:
-            print(f"Error storing fact: {e}")
+            logger.error(f"Error storing fact: {e}")
 
     def find_facts(
         self,
@@ -468,7 +472,7 @@ class CognitiveAgent:
                 for fact in results
             ]
         except Exception as e:
-            print(f"Error finding facts: {e}")
+            logger.error(f"Error finding facts: {e}")
             return []
 
     def delete_fact(self, subject: str, predicate: str, object: str) -> bool:
@@ -486,12 +490,12 @@ class CognitiveAgent:
         try:
             deleted = self.memory.delete_fact(subject, predicate, object)
             if deleted:
-                print(f"Deleted fact: ({subject}, {predicate}, {object})")
+                logger.debug(f"Deleted fact: ({subject}, {predicate}, {object})")
             else:
-                print(f"Fact not found for deletion: ({subject}, {predicate}, {object})")
+                logger.debug(f"Fact not found for deletion: ({subject}, {predicate}, {object})")
             return deleted
         except Exception as e:
-            print(f"Error deleting fact: {e}")
+            logger.error(f"Error deleting fact: {e}")
             return False
 
     def _update_cognitive_state(self, attention_scores: Dict[str, float]):
@@ -503,7 +507,7 @@ class CognitiveAgent:
         # Update attention focus list from attention mechanism
         self.attention_focus = self.attention.get_attention_focus()
         
-        print(f"DEBUG: Updated cognitive state - "
+        logger.debug(f"Updated cognitive state - "
               f"Fatigue: {self.current_fatigue:.3f}, "
               f"Cognitive Load: {attention_scores.get('cognitive_load', 0.0):.3f}, "
               f"Items in Focus: {attention_scores.get('items_in_focus', 0)}")
@@ -515,21 +519,21 @@ class CognitiveAgent:
             try:
                 memory_status = self.memory.get_status()
             except Exception as e:
-                print(f"Error getting memory status: {e}")
+                logger.error(f"Error getting memory status: {e}")
                 memory_status = {"error": str(e), "stm": {"vector_db_count": 0}, "ltm": {"vector_db_count": 0}}
             
             # Get attention mechanism status with fallback
             try:
                 attention_status = self.attention.get_attention_status()
             except Exception as e:
-                print(f"Error getting attention status: {e}")
+                logger.error(f"Error getting attention status: {e}")
                 attention_status = {"error": str(e), "available_capacity": 0.0, "cognitive_load": 0.0}
             
             # Get sensory processing statistics with fallback
             try:
                 sensory_stats = self.sensory_processor.get_processing_stats()
             except Exception as e:
-                print(f"Error getting sensory stats: {e}")
+                logger.error(f"Error getting sensory stats: {e}")
                 sensory_stats = {"error": str(e), "total_processed": 0, "filtered_count": 0}
 
             return {
@@ -550,7 +554,7 @@ class CognitiveAgent:
                 }
             }
         except Exception as e:
-            print(f"Critical error getting cognitive status: {e}")
+            logger.error(f"Critical error getting cognitive status: {e}")
             # Return minimal fallback status
             return {
                 "session_id": self.session_id,
@@ -567,7 +571,7 @@ class CognitiveAgent:
     
     async def enter_dream_state(self, cycle_type: str = "deep"):
         """Enter dream-state processing for memory consolidation"""
-        print(f"Entering {cycle_type} dream state for memory consolidation...")
+        logger.info(f"Entering {cycle_type} dream state for memory consolidation...")
         
         # Use the advanced dream processor
         dream_results = await self.dream_processor.enter_dream_cycle(cycle_type)
@@ -575,13 +579,13 @@ class CognitiveAgent:
         # Also allow attention to rest during dream state
         attention_rest = self.attention.rest_attention(duration_minutes=dream_results.get("actual_duration", 5))
         
-        print(f"Dream state results: {dream_results}")
-        print(f"Attention rest results: {attention_rest}")
+        logger.debug(f"Dream state results: {dream_results}")
+        logger.debug(f"Attention rest results: {attention_rest}")
         
         # Synchronize fatigue state
         self.current_fatigue = self.attention.current_fatigue
         
-        print("Advanced dream state processing completed")
+        logger.info("Advanced dream state processing completed")
         return dream_results
     
     def take_cognitive_break(self, duration_minutes: float = 1.0) -> Dict[str, Any]:
@@ -594,7 +598,7 @@ class CognitiveAgent:
         Returns:
             Break recovery metrics
         """
-        print(f"Taking cognitive break for {duration_minutes} minutes...")
+        logger.info(f"Taking cognitive break for {duration_minutes} minutes...")
         
         # Use attention mechanism's rest functionality
         rest_results = self.attention.rest_attention(duration_minutes)
@@ -602,7 +606,7 @@ class CognitiveAgent:
         # Synchronize fatigue state
         self.current_fatigue = self.attention.current_fatigue
         
-        print(f"Cognitive break completed. Fatigue reduced by {rest_results['fatigue_reduction']:.3f}")
+        logger.info(f"Cognitive break completed. Fatigue reduced by {rest_results['fatigue_reduction']:.3f}")
         
         return {
             "break_duration": duration_minutes,
@@ -627,7 +631,7 @@ class CognitiveAgent:
     
     async def shutdown(self):
         """Gracefully shutdown the cognitive agent"""
-        print("Shutting down cognitive agent...")
+        logger.info("Shutting down cognitive agent...")
         
         # Shutdown dream processor
         self.dream_processor.shutdown()
@@ -636,7 +640,7 @@ class CognitiveAgent:
         # Close connections
         # Clean up resources
         
-        print("Cognitive agent shutdown complete")
+        logger.info("Cognitive agent shutdown complete")
     
     def reflect(self) -> Dict[str, Any]:
         """
@@ -688,7 +692,7 @@ class CognitiveAgent:
         Uses the 'schedule' library for timing.
         """
         if self._reflection_scheduler_running:
-            print("Reflection scheduler already running.")
+            logger.info("Reflection scheduler already running.")
             return
         self._reflection_scheduler_running = True
         schedule.clear('reflection')
@@ -699,7 +703,7 @@ class CognitiveAgent:
                 time.sleep(1)
         self._reflection_scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
         self._reflection_scheduler_thread.start()
-        print(f"Started metacognitive reflection scheduler (every {interval_minutes} min)")
+        logger.info(f"Started metacognitive reflection scheduler (every {interval_minutes} min)")
 
     def stop_reflection_scheduler(self):
         """
@@ -707,14 +711,14 @@ class CognitiveAgent:
         """
         self._reflection_scheduler_running = False
         schedule.clear('reflection')
-        print("Stopped metacognitive reflection scheduler.")
+        logger.info("Stopped metacognitive reflection scheduler.")
 
     def manual_reflect(self) -> Dict[str, Any]:
         """
         Manually trigger a metacognitive reflection (CLI/API hook).
         Returns the reflection report.
         """
-        print("Manual metacognitive reflection triggered.")
+        logger.info("Manual metacognitive reflection triggered.")
         return self.reflect()
 
     def get_reflection_status(self) -> dict:
@@ -813,11 +817,11 @@ class CognitiveAgent:
                         "neural_enhanced": True
                     })
 
-                    print(f"🧠 Neural attention enhancement: +{neural_enhancement:.3f} "
+                    logger.debug(f"Neural attention enhancement: +{neural_enhancement:.3f} "
                           f"(novelty: {enhanced_novelty:.3f})")
 
             return attention_result
 
         except Exception as e:
-            print(f"⚠ Neural attention enhancement error: {e}")
+            logger.warning(f"Neural attention enhancement error: {e}")
             return attention_result  # Return original on error
