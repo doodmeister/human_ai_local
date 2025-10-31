@@ -41,6 +41,23 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Import advanced search strategies (after logger initialization)
+try:
+    from .search_strategies import TieredSearchStrategy, SearchResult as StrategySearchResult
+    ADVANCED_SEARCH_AVAILABLE = True
+except ImportError as e:
+    ADVANCED_SEARCH_AVAILABLE = False
+    logger.warning(f"Advanced search strategies not available: {e}")
+
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+    SentenceTransformer = None
+
+logger = logging.getLogger(__name__)
+
 def _safe_first_list(val):
     if isinstance(val, list) and len(val) > 0 and isinstance(val[0], list):
         return val[0]
@@ -289,6 +306,17 @@ class EpisodicMemorySystem(BaseMemorySystem):
         # In-memory cache
         self._memory_cache: Dict[str, EpisodicMemory] = {}
         self._load_from_json_backup()
+        
+        # Initialize advanced search strategies
+        self._search_strategy = None
+        if ADVANCED_SEARCH_AVAILABLE:
+            try:
+                from .search_strategies import TieredSearchStrategy as TSS
+                self._search_strategy = TSS()
+                logger.info("Advanced search strategies initialized (BM25, TF-IDF, Enhanced Word Overlap)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize advanced search strategies: {e}")
+                self._search_strategy = None
         
         logger.info("Episodic Memory System initialized")
     
@@ -682,11 +710,66 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         match_type="semantic",
                         search_metadata={"chroma_distance": distance}
                     ))
+                # Track metrics
+                try:
+                    from src.chat.metrics import metrics_registry
+                    metrics_registry.inc("episodic_search_tier_semantic")
+                except Exception:
+                    pass
                 return results[:limit]
             except Exception as e:
                 logger.warning(f"ChromaDB search failed: {e}")
-                # Fallback to cache search below
-        # Fallback: cache search
+                # Fallback to advanced search strategies below
+        
+        # Advanced fallback: Use TieredSearchStrategy (BM25 → TF-IDF → Enhanced Word Overlap)
+        if self._search_strategy is not None and self._memory_cache:
+            try:
+                # Prepare documents for search
+                documents = {}
+                doc_to_memory = {}
+                for memory in self._memory_cache.values():
+                    if life_period and memory.life_period != life_period:
+                        continue
+                    doc_text = f"{memory.summary} {memory.detailed_content}"
+                    documents[memory.id] = doc_text
+                    doc_to_memory[memory.id] = memory
+                
+                # Execute tiered search
+                search_results = self._search_strategy.search(
+                    query=query,
+                    documents=documents,
+                    limit=limit,
+                    min_relevance=min_relevance
+                )
+                
+                # Convert to EpisodicSearchResult
+                results = []
+                for search_result in search_results:
+                    memory = doc_to_memory.get(search_result.doc_id)
+                    if memory:
+                        memory.update_access()
+                        results.append(EpisodicSearchResult(
+                            memory=memory,
+                            relevance=search_result.relevance,
+                            match_type=search_result.match_type,
+                            search_metadata=search_result.metadata
+                        ))
+                
+                if results:
+                    logger.debug(f"Advanced search ({results[0].match_type}) returned {len(results)} results")
+                    # Track metrics if available
+                    try:
+                        from src.chat.metrics import metrics_registry
+                        metrics_registry.inc(f"episodic_search_tier_{results[0].match_type}")
+                    except Exception:
+                        pass
+                    return results
+                    
+            except Exception as e:
+                logger.error(f"Advanced search failed: {e}")
+                # Fall through to basic fallback
+        
+        # Basic fallback: Substring match (legacy behavior)
         query_lower = query.lower()
         for memory in self._memory_cache.values():
             text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
@@ -701,6 +784,15 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     match_type="text_match",
                     search_metadata={}
                 ))
+        
+        # Track basic fallback metrics
+        if results:
+            try:
+                from src.chat.metrics import metrics_registry
+                metrics_registry.inc("episodic_search_tier_text_match_basic")
+            except Exception:
+                pass
+        
         # Word overlap fallback if no results
         if not results:
             query_words = set(query_lower.split())
