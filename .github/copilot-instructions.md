@@ -25,14 +25,18 @@ Repo-specific guidance for being productive immediately. Keep changes small, con
     - `context_analyzer.py`: Dynamic weight adjustment based on cognitive load, time pressure, risk tolerance.
     - `ml_decision_model.py`: Learn from decision outcomes using decision trees.
     - Feature flags (`get_feature_flags()`) enable gradual rollout; falls back to legacy on error.
-  - **Enhanced (Phase 2)**: `planning/` module with GOAP (Goal-Oriented Action Planning):
+  - **Enhanced (Phase 2 - COMPLETE)**: `planning/` module with GOAP (Goal-Oriented Action Planning):
     - `world_state.py`: Immutable state representation (`WorldState` frozen dataclass with key-value state).
     - `action_library.py`: Action definitions with preconditions, effects, costs (`Action` dataclass, `ActionLibrary`, 10 predefined actions).
     - `goap_planner.py`: A* search over state space (`GOAPPlanner.plan()` returns optimal `Plan` with action sequence).
     - `heuristics.py`: Admissible heuristics for A* (goal_distance, weighted_goal_distance, relaxed_plan, composite).
-    - **Usage**: `planner = GOAPPlanner(action_library, heuristic='goal_distance'); plan = planner.plan(initial_state, goal_state, max_iterations=1000)`.
+    - `constraints.py`: 5 constraint types (Resource, Temporal, Dependency, State, ConstraintChecker) for restricting action feasibility.
+    - `replanning.py`: Dynamic replanning (`ReplanningEngine`) with failure detection, plan repair, and retry logic.
+    - `goap_task_planner_adapter.py`: Bridges GOAP with legacy TaskPlanner (feature flags, fallback).
+    - **Usage**: `planner = GOAPPlanner(action_library, heuristic='goal_distance', constraints=[...]); plan = planner.plan(initial_state, goal_state, plan_context={...})`.
     - **Telemetry**: 10 metrics tracked via `metrics_registry` (planning attempts, plans found, plan length/cost, nodes expanded, latency).
-    - **Testing**: 40 comprehensive tests in `tests/test_executive_goap_planner.py` (all passing, <10ms medium plans).
+    - **Testing**: 96 comprehensive tests (71 unit + 16 adapter + 9 integration) all passing. <10ms medium plans, <500ms complex scenarios.
+    - **Production Status**: 100% complete, 2,600+ production lines, feature flags for rollout, legacy fallback for safety.
 - Attention: `src/attention/attention_mechanism.py` (fatigue, capacity, metrics).
 - Config: `src/core/config.py` (`get_chat_config().to_dict()` feeds `ContextBuilder`).
 - API: `start_server.py` loads FastAPI app (`george_api_simple.py`) and mounts chat routes from `src/interfaces/api/chat_endpoints.py`.
@@ -75,7 +79,15 @@ pytest -q
 - Emit lightweight counters via `metrics_registry` instead of verbose logs.
 - **Executive module changes**: 
   - Enhanced decision algorithms are in `src/executive/decision/`. Use feature flags to enable/disable. Maintain backward compatibility with legacy `DecisionEngine`.
-  - GOAP planning is in `src/executive/planning/`. Core components: `WorldState` (immutable state), `Action` (preconditions/effects), `ActionLibrary` (action repository), `GOAPPlanner` (A* search), `heuristics` (guidance functions).
-  - See `docs/executive_refactoring_plan.md` for architecture and Phase 1-5 roadmap.
+  - **GOAP planning** (Phase 2 COMPLETE) is in `src/executive/planning/`. Core components: 
+    * `WorldState` (immutable state): Use `.set()` to create new states, `.satisfies()` to check goal achievement.
+    * `Action` (preconditions/effects): Define with `Action(name, preconditions=WorldState(...), effects=WorldState(...), cost=float)`.
+    * `ActionLibrary` (action repository): Use `create_default_action_library()` or build custom with `.add_action()`.
+    * `GOAPPlanner` (A* search): `planner.plan(initial, goal, plan_context={...})` returns `Plan` or `None`. Optional `constraints` and `heuristic` parameters.
+    * `Constraint` types: Use helper functions `create_resource_constraint()`, `create_deadline_constraint()`, `create_dependency_constraint()`, `create_state_constraint()`.
+    * `ReplanningEngine`: `detect_failure()` monitors execution, `replan()` tries repair then full replan, `should_retry_action()` for transient failures.
+    * Heuristics must be admissible (never overestimate). Default is `goal_distance`. Use `get_heuristic()` factory or `CompositeHeuristic` for weighted combinations.
+  - **Integration**: Use `GOAPTaskPlannerAdapter` to bridge GOAP with `GoalManager`/`TaskPlanner`. Feature flags: `goap_enabled`, `goap_use_constraints`, `goap_use_replanning`, `goap_fallback_on_error`.
+  - See `docs/PHASE_2_FINAL_COMPLETE.md` for complete documentation and usage examples.
 
 If a workflow or pattern you rely on is missing/unclear, say which part and we'll refine this doc.

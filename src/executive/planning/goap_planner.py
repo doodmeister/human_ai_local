@@ -125,6 +125,7 @@ class GOAPPlanner:
         self,
         action_library: ActionLibrary,
         heuristic: Optional[Callable[[WorldState, WorldState], float]] = None,
+        constraints: Optional[list] = None,
     ):
         """
         Initialize GOAP planner.
@@ -133,9 +134,11 @@ class GOAPPlanner:
             action_library: Library of available actions
             heuristic: Heuristic function (state, goal) -> estimated_cost
                       If None, uses simple goal distance heuristic
+            constraints: Optional list of Constraint objects to check during planning
         """
         self.action_library = action_library
         self.heuristic = heuristic or self._default_heuristic
+        self.constraints = constraints or []
         self._nodes_expanded = 0
         self._metrics = get_metrics_registry()
 
@@ -144,14 +147,16 @@ class GOAPPlanner:
         initial_state: WorldState,
         goal_state: WorldState,
         max_iterations: int = 1000,
+        plan_context: Optional[dict] = None,
     ) -> Optional[Plan]:
         """
         Find optimal action sequence from initial to goal state.
-
+        
         Args:
             initial_state: Starting world state
             goal_state: Desired world state (only specified keys must match)
             max_iterations: Maximum search iterations (prevents infinite loops)
+            plan_context: Optional planning context (for constraint checking)
 
         Returns:
             Plan object with action sequence, or None if no plan found
@@ -236,6 +241,16 @@ class GOAPPlanner:
             )
 
             for action in applicable_actions:
+                # Check constraints before applying action
+                if self.constraints:
+                    constraint_satisfied = True
+                    for constraint in self.constraints:
+                        if not constraint.is_satisfied(current.state, action, plan_context):
+                            constraint_satisfied = False
+                            break
+                    if not constraint_satisfied:
+                        continue  # Skip this action, violates constraints
+                
                 # Apply action to get next state
                 next_state = action.apply(current.state)
 

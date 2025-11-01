@@ -29,6 +29,24 @@ from .heuristics import (
     Heuristic,
     DEFAULT_HEURISTIC,
 )
+from .constraints import (
+    Constraint,
+    ResourceConstraint,
+    TemporalConstraint,
+    DependencyConstraint,
+    StateConstraint,
+    ConstraintChecker,
+    create_resource_constraint,
+    create_deadline_constraint,
+    create_time_window_constraint,
+    create_dependency_constraint,
+    create_state_constraint,
+)
+from .replanning import (
+    ReplanningEngine,
+    FailureReason,
+    PlanFailure,
+)
 
 __all__ = [
     "WorldState",
@@ -50,4 +68,18 @@ __all__ = [
     "get_heuristic",
     "Heuristic",
     "DEFAULT_HEURISTIC",
+    "Constraint",
+    "ResourceConstraint",
+    "TemporalConstraint",
+    "DependencyConstraint",
+    "StateConstraint",
+    "ConstraintChecker",
+    "create_resource_constraint",
+    "create_deadline_constraint",
+    "create_time_window_constraint",
+    "create_dependency_constraint",
+    "create_state_constraint",
+    "ReplanningEngine",
+    "FailureReason",
+    "PlanFailure",
 ]
