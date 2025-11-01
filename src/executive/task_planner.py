@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 import uuid
 
-from .goal_manager import Goal, GoalManager
+from .goal_manager import Goal, GoalManager, GoalPriority
 
 class TaskType(Enum):
     """Types of tasks"""
@@ -447,3 +447,303 @@ class TaskPlanner:
         
         # Return highest priority task
         return max(suitable_tasks, key=lambda t: t.priority_score)
+
+
+# ============================================================================
+# GOAP Planning Integration (Phase 2)
+# ============================================================================
+
+class GOAPTaskPlannerAdapter:
+    """
+    Adapter that integrates GOAP (Goal-Oriented Action Planning) with the
+    legacy TaskPlanner system.
+    
+    This adapter:
+    - Converts Goals → GOAP WorldState representations
+    - Uses GOAP planner to find optimal action sequences
+    - Converts GOAP Plans → Task sequences for execution
+    - Provides feature flags for gradual rollout
+    - Falls back to template-based planning on errors
+    
+    Phase 2 Integration Pattern (similar to Phase 1 DecisionEngine)
+    """
+    
+    def __init__(self, task_planner: TaskPlanner):
+        """
+        Initialize GOAP adapter with legacy task planner.
+        
+        Args:
+            task_planner: Legacy TaskPlanner instance for fallback
+        """
+        self.task_planner = task_planner
+        self.goap_available = False
+        self.goap_planner = None
+        self.action_library = None
+        self.feature_flags = None
+        
+        # Try to import GOAP components
+        try:
+            from .planning import (
+                WorldState,
+                GOAPPlanner,
+                create_default_action_library
+            )
+            from .planning.heuristics import get_heuristic
+            from .decision.base import get_feature_flags
+            
+            self.WorldState = WorldState
+            self.action_library = create_default_action_library()
+            self.goap_planner = GOAPPlanner(
+                action_library=self.action_library,
+                heuristic=get_heuristic('weighted_goal_distance')
+            )
+            self.feature_flags = get_feature_flags()
+            self.goap_available = True
+            
+        except ImportError as e:
+            # GOAP not available, will use legacy planning
+            self.goap_available = False
+    
+    def decompose_goal_with_goap(
+        self,
+        goal_id: str,
+        current_context: Optional[Dict[str, Any]] = None
+    ) -> List[str]:
+        """
+        Decompose a goal into tasks using GOAP planning.
+        
+        Args:
+            goal_id: Goal to decompose
+            current_context: Current world state context (optional)
+            
+        Returns:
+            List of created task IDs
+            
+        Raises:
+            ValueError: If goal not found or GOAP planning fails
+        """
+        # Check if GOAP is enabled
+        if not self._should_use_goap():
+            return self.task_planner.decompose_goal(goal_id)
+        
+        # Get goal from manager
+        goal = self.task_planner.goal_manager.get_goal(goal_id)
+        if not goal:
+            raise ValueError(f"Goal {goal_id} not found")
+        
+        try:
+            # Convert goal to GOAP world states
+            initial_state, goal_state = self._goal_to_world_states(goal, current_context)
+            
+            # Plan with GOAP
+            plan = self.goap_planner.plan(
+                initial_state=initial_state,
+                goal_state=goal_state,
+                max_iterations=1000
+            )
+            
+            if plan is None:
+                # No plan found, fallback to legacy
+                if self.feature_flags.fallback_to_legacy:
+                    return self.task_planner.decompose_goal(goal_id)
+                else:
+                    raise ValueError(f"GOAP planning failed for goal {goal_id}")
+            
+            # Convert GOAP plan to tasks
+            task_ids = self._plan_to_tasks(plan, goal)
+            
+            return task_ids
+            
+        except Exception as e:
+            # Error in GOAP planning, fallback if enabled
+            if self.feature_flags and self.feature_flags.fallback_to_legacy:
+                return self.task_planner.decompose_goal(goal_id)
+            else:
+                raise
+    
+    def _should_use_goap(self) -> bool:
+        """Check if GOAP planning should be used."""
+        return (
+            self.goap_available
+            and self.feature_flags is not None
+            and self.feature_flags.use_goap_planning
+        )
+    
+    def _goal_to_world_states(
+        self,
+        goal: Goal,
+        current_context: Optional[Dict[str, Any]] = None
+    ) -> tuple:
+        """
+        Convert a Goal to GOAP WorldStates (initial and goal).
+        
+        Args:
+            goal: Goal to convert
+            current_context: Current state context
+            
+        Returns:
+            Tuple of (initial_state, goal_state)
+        """
+        # Build initial state from current context
+        initial_dict = current_context or {}
+        
+        # Add default initial state if empty
+        if not initial_dict:
+            initial_dict = {
+                'has_goal_defined': True,
+                'goal_id': goal.id,
+                'goal_priority': goal.priority.value
+            }
+        
+        initial_state = self.WorldState(initial_dict)
+        
+        # Build goal state from goal's success criteria and context
+        goal_dict = {}
+        
+        # Map goal characteristics to GOAP goal states
+        if goal.success_criteria:
+            # Use success criteria to define goal state
+            for i, criterion in enumerate(goal.success_criteria):
+                # Convert success criteria to state keys
+                key = self._criterion_to_state_key(criterion, i)
+                goal_dict[key] = True
+        else:
+            # Generic goal completion state
+            goal_dict['goal_completed'] = True
+            goal_dict['goal_verified'] = True
+        
+        # Add priority-based flags for weighted heuristic
+        if goal.priority == GoalPriority.CRITICAL:
+            goal_dict['critical_goal_achieved'] = True
+        elif goal.priority == GoalPriority.URGENT or goal.priority == GoalPriority.HIGH:
+            goal_dict['important_goal_achieved'] = True
+        else:
+            goal_dict['optional_goal_achieved'] = True
+        
+        goal_state = self.WorldState(goal_dict)
+        
+        return initial_state, goal_state
+    
+    def _criterion_to_state_key(self, criterion: str, index: int) -> str:
+        """
+        Convert a success criterion string to a WorldState key.
+        
+        Args:
+            criterion: Success criterion text
+            index: Index in criteria list
+            
+        Returns:
+            State key string
+        """
+        # Simple heuristic: extract key words and create state key
+        # Examples:
+        # "Data gathered and analyzed" → "has_data_analyzed"
+        # "Report completed" → "has_report_completed"
+        
+        words = criterion.lower().split()
+        
+        # Remove common articles/connectors
+        filtered = [w for w in words if w not in ['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are']]
+        
+        if filtered:
+            # Use first 2-3 significant words
+            key_words = filtered[:min(3, len(filtered))]
+            key = 'has_' + '_'.join(key_words)
+        else:
+            # Fallback to generic key
+            key = f'criterion_{index}_met'
+        
+        return key
+    
+    def _plan_to_tasks(self, plan, goal: Goal) -> List[str]:
+        """
+        Convert a GOAP Plan to a sequence of Tasks.
+        
+        Args:
+            plan: GOAP Plan object
+            goal: Original Goal
+            
+        Returns:
+            List of created task IDs
+        """
+        task_ids = []
+        
+        for step in plan.steps:
+            action = step.action
+            
+            # Map GOAP action to TaskType
+            task_type = self._action_to_task_type(action.name)
+            
+            # Create task from GOAP action
+            task_id = self.task_planner.create_task(
+                title=self._action_to_task_title(action.name, goal.title),
+                description=f"GOAP action: {action.name}\nFor goal: {goal.description}",
+                task_type=task_type,
+                goal_id=goal.id,
+                estimated_duration=int(action.duration / 60) if action.duration > 0 else 30,
+                cognitive_load=action.cognitive_load / 10.0,  # Normalize to 0-1
+                resources_needed=action.resources,
+                instructions=[f"Execute GOAP action: {action.name}"],
+                success_criteria=[f"Action {action.name} completed successfully"]
+            )
+            
+            # Add dependencies (previous task in sequence)
+            if task_ids:
+                self.task_planner.tasks[task_id].dependencies.add(task_ids[-1])
+            
+            task_ids.append(task_id)
+        
+        return task_ids
+    
+    def _action_to_task_type(self, action_name: str) -> TaskType:
+        """Map GOAP action name to TaskType."""
+        action_lower = action_name.lower()
+        
+        # Check for planning first (before create)
+        if 'plan' in action_lower or 'break_down' in action_lower:
+            return TaskType.PLANNING
+        elif 'analyze' in action_lower or 'review' in action_lower:
+            return TaskType.ANALYSIS
+        elif 'create' in action_lower or 'draft' in action_lower or 'document' in action_lower:
+            return TaskType.CREATION
+        elif 'send' in action_lower or 'notify' in action_lower or 'schedule' in action_lower:
+            return TaskType.COMMUNICATION
+        elif 'test' in action_lower or 'verify' in action_lower:
+            return TaskType.VERIFICATION
+        elif 'gather' in action_lower or 'collect' in action_lower:
+            return TaskType.LEARNING
+        else:
+            return TaskType.EXECUTION
+    
+    def _action_to_task_title(self, action_name: str, goal_title: str) -> str:
+        """Create a human-readable task title from action name."""
+        # Convert snake_case to Title Case
+        words = action_name.replace('_', ' ').title()
+        return f"{words} for: {goal_title}"
+    
+    def get_planning_statistics(self) -> Dict[str, Any]:
+        """
+        Get statistics about GOAP planning usage.
+        
+        Returns:
+            Dictionary with planning statistics
+        """
+        stats = {
+            'goap_available': self.goap_available,
+            'goap_enabled': self._should_use_goap(),
+            'fallback_enabled': self.feature_flags.fallback_to_legacy if self.feature_flags else True
+        }
+        
+        # Add GOAP planner stats if available
+        if self.goap_available and self.goap_planner:
+            try:
+                from ..chat.metrics import metrics_registry
+                
+                stats['goap_planning_attempts'] = metrics_registry.get_counter('goap_planning_attempts_total')
+                stats['goap_plans_found'] = metrics_registry.get_counter('goap_plans_found_total')
+                stats['goap_plans_failed'] = metrics_registry.get_counter('goap_plans_not_found_total')
+                
+            except (ImportError, AttributeError):
+                pass
+        
+        return stats

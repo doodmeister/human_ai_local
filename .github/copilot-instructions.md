@@ -25,6 +25,14 @@ Repo-specific guidance for being productive immediately. Keep changes small, con
     - `context_analyzer.py`: Dynamic weight adjustment based on cognitive load, time pressure, risk tolerance.
     - `ml_decision_model.py`: Learn from decision outcomes using decision trees.
     - Feature flags (`get_feature_flags()`) enable gradual rollout; falls back to legacy on error.
+  - **Enhanced (Phase 2)**: `planning/` module with GOAP (Goal-Oriented Action Planning):
+    - `world_state.py`: Immutable state representation (`WorldState` frozen dataclass with key-value state).
+    - `action_library.py`: Action definitions with preconditions, effects, costs (`Action` dataclass, `ActionLibrary`, 10 predefined actions).
+    - `goap_planner.py`: A* search over state space (`GOAPPlanner.plan()` returns optimal `Plan` with action sequence).
+    - `heuristics.py`: Admissible heuristics for A* (goal_distance, weighted_goal_distance, relaxed_plan, composite).
+    - **Usage**: `planner = GOAPPlanner(action_library, heuristic='goal_distance'); plan = planner.plan(initial_state, goal_state, max_iterations=1000)`.
+    - **Telemetry**: 10 metrics tracked via `metrics_registry` (planning attempts, plans found, plan length/cost, nodes expanded, latency).
+    - **Testing**: 40 comprehensive tests in `tests/test_executive_goap_planner.py` (all passing, <10ms medium plans).
 - Attention: `src/attention/attention_mechanism.py` (fatigue, capacity, metrics).
 - Config: `src/core/config.py` (`get_chat_config().to_dict()` feeds `ContextBuilder`).
 - API: `start_server.py` loads FastAPI app (`george_api_simple.py`) and mounts chat routes from `src/interfaces/api/chat_endpoints.py`.
@@ -54,6 +62,7 @@ pytest -q
 - Use `get_chat_config()` instead of hard-coded defaults; pass `.to_dict()` into `ContextBuilder`.
 - Chroma configuration via `.env` (see `.env.example`: `CHROMA_PERSIST_DIR`, `STM_COLLECTION`, `LTM_COLLECTION`).
 - **Executive decisions**: Enhanced decision module uses feature flags for gradual rollout. Import from `src.executive.decision` for AHP/Pareto strategies; legacy `DecisionEngine` remains as fallback. All strategies implement `DecisionStrategy` interface.
+- **GOAP planning**: Import from `src.executive.planning`. `WorldState` is immutable (frozen dataclass); use `.set()` to create new states. Actions define preconditions/effects as `WorldState` objects. Heuristics must be admissible (never overestimate). `GOAPPlanner.plan()` returns `Plan` with optimal action sequence or `None` if no solution. Telemetry automatically tracked via `metrics_registry`. See 10 predefined actions in `action_library.create_default_action_library()` (analyze_data, gather_data, create_document, etc.).
 
 ## Integration references
 - Chat endpoints: `/agent/chat`, `/agent/chat/preview`, `/agent/chat/performance`, `/agent/chat/metacog/status`, `/agent/chat/consolidation/status` (see `src/interfaces/api/chat_endpoints.py`).
@@ -64,6 +73,9 @@ pytest -q
 - New memory/retrieval providers should return `ContextItem`-compatible dicts and be safe to omit (lazy import, graceful fallback).
 - Prefer lazy imports for heavy deps (see `_lazy_import` in `src/chat/factory.py`).
 - Emit lightweight counters via `metrics_registry` instead of verbose logs.
-- **Executive module changes**: Enhanced decision algorithms are in `src/executive/decision/`. Use feature flags to enable/disable. Maintain backward compatibility with legacy `DecisionEngine`. See `docs/executive_refactoring_plan.md` for architecture and Phase 1-5 roadmap.
+- **Executive module changes**: 
+  - Enhanced decision algorithms are in `src/executive/decision/`. Use feature flags to enable/disable. Maintain backward compatibility with legacy `DecisionEngine`.
+  - GOAP planning is in `src/executive/planning/`. Core components: `WorldState` (immutable state), `Action` (preconditions/effects), `ActionLibrary` (action repository), `GOAPPlanner` (A* search), `heuristics` (guidance functions).
+  - See `docs/executive_refactoring_plan.md` for architecture and Phase 1-5 roadmap.
 
 If a workflow or pattern you rely on is missing/unclear, say which part and we'll refine this doc.

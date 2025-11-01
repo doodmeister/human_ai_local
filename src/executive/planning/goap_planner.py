@@ -26,6 +26,30 @@ from .world_state import WorldState
 logger = logging.getLogger(__name__)
 
 
+def get_metrics_registry():
+    """
+    Get metrics registry with graceful fallback.
+    
+    Attempts to import from chat metrics system. If unavailable,
+    returns a dummy registry that silently ignores metrics.
+    """
+    try:
+        from ...chat.metrics import metrics_registry
+        return metrics_registry
+    except ImportError:
+        # Dummy registry for when chat system not available
+        class DummyRegistry:
+            def inc(self, *args, **kwargs):
+                pass
+            def observe(self, *args, **kwargs):
+                pass
+            def observe_hist(self, *args, **kwargs):
+                pass
+            def mark_event(self, *args, **kwargs):
+                pass
+        return DummyRegistry()
+
+
 @dataclass
 class PlanStep:
     """A single step in a plan (one action to execute)."""
@@ -113,6 +137,7 @@ class GOAPPlanner:
         self.action_library = action_library
         self.heuristic = heuristic or self._default_heuristic
         self._nodes_expanded = 0
+        self._metrics = get_metrics_registry()
 
     def plan(
         self,
@@ -133,10 +158,16 @@ class GOAPPlanner:
         """
         start_time = time.perf_counter()
         self._nodes_expanded = 0
+        
+        # Track planning attempt
+        self._metrics.inc("goap_planning_attempts_total")
 
         # Check if already at goal
         if initial_state.satisfies(goal_state):
             logger.info("Already at goal state, no planning needed")
+            self._metrics.inc("goap_plans_found_total")
+            self._metrics.observe("goap_plan_length", 0)
+            self._metrics.observe("goap_plan_cost", 0.0)
             return Plan(
                 steps=[],
                 initial_state=initial_state,
@@ -183,6 +214,14 @@ class GOAPPlanner:
                 plan = self._reconstruct_plan(
                     current, initial_state, goal_state, planning_time_ms
                 )
+                
+                # Track successful planning metrics
+                self._metrics.inc("goap_plans_found_total")
+                self._metrics.observe("goap_plan_length", len(plan.steps))
+                self._metrics.observe("goap_plan_cost", plan.total_cost)
+                self._metrics.observe("goap_nodes_expanded", plan.nodes_expanded)
+                self._metrics.observe_hist("goap_planning_latency_ms", plan.planning_time_ms)
+                
                 logger.info(
                     f"Plan found: {len(plan.steps)} steps, "
                     f"cost={plan.total_cost:.2f}, "
@@ -224,6 +263,13 @@ class GOAPPlanner:
 
         # No plan found
         planning_time_ms = (time.perf_counter() - start_time) * 1000
+        
+        # Track planning failure metrics
+        self._metrics.inc("goap_plans_not_found_total")
+        self._metrics.observe("goap_failed_iterations", iterations)
+        self._metrics.observe("goap_failed_nodes_expanded", self._nodes_expanded)
+        self._metrics.observe_hist("goap_failed_planning_latency_ms", planning_time_ms)
+        
         logger.warning(
             f"No plan found after {iterations} iterations, "
             f"expanded {self._nodes_expanded} nodes, "

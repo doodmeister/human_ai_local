@@ -302,6 +302,7 @@ class FeatureFlags:
         self.use_pareto: bool = False
         self.use_ml_learning: bool = False
         self.use_context_adjustment: bool = False
+        self.use_goap_planning: bool = False  # Phase 2: GOAP task planning
         self.fallback_to_legacy: bool = True
         
     def enable_all(self) -> None:
@@ -310,6 +311,7 @@ class FeatureFlags:
         self.use_pareto = True
         self.use_ml_learning = True
         self.use_context_adjustment = True
+        self.use_goap_planning = True
         self.fallback_to_legacy = False
     
     def disable_all(self) -> None:
@@ -318,6 +320,7 @@ class FeatureFlags:
         self.use_pareto = False
         self.use_ml_learning = False
         self.use_context_adjustment = False
+        self.use_goap_planning = False
         self.fallback_to_legacy = True
     
     def to_dict(self) -> Dict[str, bool]:
@@ -327,6 +330,7 @@ class FeatureFlags:
             'use_pareto': self.use_pareto,
             'use_ml_learning': self.use_ml_learning,
             'use_context_adjustment': self.use_context_adjustment,
+            'use_goap_planning': self.use_goap_planning,
             'fallback_to_legacy': self.fallback_to_legacy
         }
 

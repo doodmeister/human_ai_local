@@ -502,6 +502,27 @@ class EnhancedDecisionAdapter:
             'metadata': result.metadata
         }
     
+    def _invoke_enhanced_decide(
+        self,
+        strategy_obj: Any,
+        options: List['DecisionOption'],
+        criteria: List['DecisionCriterion'],
+        enhanced_ctx: Any,
+        context: Optional[Dict[str, Any]]
+    ) -> Any:
+        """Invoke strategy.decide with correct arity (enhanced vs legacy)."""
+        try:
+            import inspect
+            sig = inspect.signature(strategy_obj.decide)
+            # Bound methods do not include 'self' in signature
+            if len(sig.parameters) == 1:
+                return strategy_obj.decide(enhanced_ctx)  # enhanced API
+            else:
+                return strategy_obj.decide(options, criteria, context or {})  # legacy API
+        except Exception:
+            # Re-raise to let caller handle fallback paths
+            raise
+
     def apply_ahp(
         self,
         options: List['DecisionOption'],
@@ -522,8 +543,10 @@ class EnhancedDecisionAdapter:
                 enhanced_ctx = self.context_analyzer.adjust_context(enhanced_ctx)
             
             # Execute enhanced AHP
+            if EnhancedAHPStrategy is None:
+                raise RuntimeError("Enhanced AHP strategy unavailable")
             strategy = EnhancedAHPStrategy()
-            result = strategy.decide(enhanced_ctx)
+            result = self._invoke_enhanced_decide(strategy, options, criteria, enhanced_ctx, context)
             
             # Record outcome for ML if enabled
             if self.feature_flags.use_ml_learning and self.ml_model:
@@ -552,8 +575,10 @@ class EnhancedDecisionAdapter:
             enhanced_ctx = self.to_enhanced_context(options, criteria, context)
             
             # Execute Pareto optimization
+            if EnhancedParetoStrategy is None:
+                raise RuntimeError("Enhanced Pareto strategy unavailable")
             strategy = EnhancedParetoStrategy()
-            result = strategy.decide(enhanced_ctx)
+            result = self._invoke_enhanced_decide(strategy, options, criteria, enhanced_ctx, context)
             
             return self.from_enhanced_result(result, options)
             
@@ -952,16 +977,25 @@ class DecisionEngine:
         try:
             # Record outcome in ML model
             from .decision.base import DecisionOutcome
-            
+
+            # Derive required fields for DecisionOutcome
+            meta = outcome_metadata or {}
+            success_threshold = float(meta.get('success_threshold', 0.5))
+            success = float(actual_outcome) >= success_threshold
+            outcome_metrics = {
+                'actual_outcome': float(actual_outcome),
+                'predicted_outcome': float(decision.confidence),
+            }
+
             outcome = DecisionOutcome(
                 decision_id=decision_id,
-                selected_alternative=decision.recommended_option.id if decision.recommended_option else "unknown",
-                actual_outcome=actual_outcome,
-                predicted_outcome=decision.confidence,
-                outcome_metadata=outcome_metadata or {},
-                timestamp=datetime.now()
+                option_chosen=decision.recommended_option.id if decision.recommended_option else "unknown",
+                outcome_metrics=outcome_metrics,
+                success=success,
+                timestamp=datetime.now(),
+                metadata=meta,
             )
-            
+
             self.enhanced_adapter.ml_model.record_outcome(outcome)
             logger.info(f"Recorded outcome for decision {decision_id}: {actual_outcome:.2f}")
             
