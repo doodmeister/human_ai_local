@@ -201,7 +201,7 @@ class DependencyConstraint(Constraint):
     
     required_action: str
     dependent_action: str
-    required_state_key: Optional[str] = None  # WorldState key indicating completion
+    required_state_key: str = ""  # WorldState key indicating completion
     
     def __post_init__(self):
         if not self.required_state_key:
