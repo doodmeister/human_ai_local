@@ -29,6 +29,20 @@ from .decomposition import Method, DecompositionRule, create_default_methods, Or
 from .htn_manager import HTNManager, DecompositionResult
 from .htn_goal_manager_adapter import HTNGoalManagerAdapter
 from .htn_goap_bridge import HTNGOAPBridge, PlanningResult, create_default_bridge, plan_goal_with_goap
+from .priority_calculator import (
+    GoalPriorityCalculator, 
+    GoalContext, 
+    PriorityWeights, 
+    PriorityScore, 
+    PriorityFactor
+)
+from .conflict_detection import (
+    ConflictDetector,
+    Conflict,
+    ConflictReport,
+    ConflictType,
+    ConflictSeverity
+)
 
 __all__ = [
     "GoalType",
@@ -47,4 +61,15 @@ __all__ = [
     "PlanningResult",
     "create_default_bridge",
     "plan_goal_with_goap",
+    # Week 10: Goal Intelligence
+    "GoalPriorityCalculator",
+    "GoalContext",
+    "PriorityWeights",
+    "PriorityScore",
+    "PriorityFactor",
+    "ConflictDetector",
+    "Conflict",
+    "ConflictReport",
+    "ConflictType",
+    "ConflictSeverity",
 ]

@@ -42,6 +42,10 @@ from .htn_manager import HTNManager, DecompositionResult
 # Legacy imports
 from ..goal_manager import GoalManager, Goal as LegacyGoal, GoalStatus as LegacyGoalStatus, GoalPriority as LegacyGoalPriority
 
+# Goal intelligence imports
+from .priority_calculator import GoalPriorityCalculator, GoalContext, PriorityScore
+from .conflict_detection import ConflictDetector, ConflictReport
+
 
 class HTNGoalManagerAdapter:
     """
@@ -57,7 +61,9 @@ class HTNGoalManagerAdapter:
     def __init__(
         self,
         goal_manager: GoalManager,
-        htn_manager: Optional[HTNManager] = None
+        htn_manager: Optional[HTNManager] = None,
+        enable_priority_calculation: bool = True,
+        enable_conflict_detection: bool = True
     ):
         """
         Initialize adapter.
@@ -65,13 +71,35 @@ class HTNGoalManagerAdapter:
         Args:
             goal_manager: Legacy goal manager for storage/CRUD
             htn_manager: HTN manager for decomposition (creates default if None)
+            enable_priority_calculation: Enable dynamic priority calculation
+            enable_conflict_detection: Enable conflict detection
         """
         self.goal_manager = goal_manager
         self.htn_manager = htn_manager or HTNManager()
         
+        # Goal intelligence features (Week 10)
+        self.enable_priority_calculation = enable_priority_calculation
+        self.enable_conflict_detection = enable_conflict_detection
+        
+        if enable_priority_calculation:
+            self.priority_calculator = GoalPriorityCalculator()
+        else:
+            self.priority_calculator = None
+        
+        if enable_conflict_detection:
+            self.conflict_detector = ConflictDetector()
+        else:
+            self.conflict_detector = None
+        
         # Track HTN-specific metadata (not stored in legacy system)
         # Maps legacy goal_id -> HTN metadata
         self._htn_metadata: Dict[str, Dict[str, Any]] = {}
+        
+        # Track priority scores
+        self._priority_scores: Dict[str, PriorityScore] = {}
+        
+        # Track resource availability (for conflict detection)
+        self._available_resources: Dict[str, float] = {}
     
     # ====================
     # Goal Creation
@@ -441,3 +469,192 @@ class HTNGoalManagerAdapter:
                 if g.status == LegacyGoalStatus.FAILED
             ])
         }
+    
+    # ====================
+    # Goal Intelligence (Week 10)
+    # ====================
+    
+    def calculate_goal_priority(
+        self,
+        goal_id: str,
+        user_importance: float = 5.0,
+        system_importance: float = 5.0,
+        strategic_value: float = 5.0
+    ) -> Optional[PriorityScore]:
+        """
+        Calculate dynamic priority for a goal.
+        
+        Args:
+            goal_id: Goal to calculate priority for
+            user_importance: User-assigned importance (1-10)
+            system_importance: System-assigned importance (1-10)
+            strategic_value: Strategic value (1-10)
+            
+        Returns:
+            PriorityScore with detailed breakdown, or None if not enabled
+        """
+        if not self.enable_priority_calculation or not self.priority_calculator:
+            return None
+        
+        goal = self.goal_manager.get_goal(goal_id)
+        if not goal:
+            return None
+        
+        metadata = self._htn_metadata.get(goal_id, {})
+        
+        # Build goal context
+        context = GoalContext(
+            goal_id=goal_id,
+            deadline=goal.target_date,
+            user_importance=user_importance,
+            system_importance=system_importance,
+            strategic_value=strategic_value,
+            blocks_goals=self._get_blocked_by_goal(goal_id),
+            blocked_by_goals=goal.dependencies,
+            required_resources=metadata.get('required_resources'),
+            available_resources=self._available_resources,
+            created_at=goal.created_at
+        )
+        
+        # Calculate priority
+        score = self.priority_calculator.calculate_priority(context)
+        
+        # Cache the score
+        self._priority_scores[goal_id] = score
+        
+        return score
+    
+    def recalculate_all_priorities(
+        self,
+        importance_overrides: Optional[Dict[str, float]] = None
+    ) -> Dict[str, PriorityScore]:
+        """
+        Recalculate priorities for all goals.
+        
+        Args:
+            importance_overrides: Map of goal_id -> user_importance overrides
+            
+        Returns:
+            Dictionary mapping goal_id to PriorityScore
+        """
+        if not self.enable_priority_calculation:
+            return {}
+        
+        importance_overrides = importance_overrides or {}
+        scores = {}
+        
+        for goal_id in self._htn_metadata.keys():
+            user_importance = importance_overrides.get(goal_id, 5.0)
+            score = self.calculate_goal_priority(goal_id, user_importance=user_importance)
+            if score:
+                scores[goal_id] = score
+        
+        return scores
+    
+    def detect_conflicts(self) -> Optional[ConflictReport]:
+        """
+        Detect conflicts between all managed goals.
+        
+        Returns:
+            ConflictReport with all detected conflicts, or None if not enabled
+        """
+        if not self.enable_conflict_detection or not self.conflict_detector:
+            return None
+        
+        # Build contexts for all goals
+        contexts = []
+        for goal_id in self._htn_metadata.keys():
+            goal = self.goal_manager.get_goal(goal_id)
+            if not goal:
+                continue
+            
+            metadata = self._htn_metadata.get(goal_id, {})
+            
+            context = GoalContext(
+                goal_id=goal_id,
+                deadline=goal.target_date,
+                blocks_goals=self._get_blocked_by_goal(goal_id),
+                blocked_by_goals=goal.dependencies,
+                required_resources=metadata.get('required_resources'),
+                available_resources=self._available_resources,
+                created_at=goal.created_at
+            )
+            contexts.append(context)
+        
+        # Detect conflicts
+        report = self.conflict_detector.detect_all_conflicts(contexts)
+        return report
+    
+    def set_resource_availability(self, resource_id: str, amount: float):
+        """
+        Set available amount for a resource.
+        
+        Args:
+            resource_id: Resource identifier
+            amount: Available amount
+        """
+        self._available_resources[resource_id] = amount
+    
+    def update_resource_availability(self, resources: Dict[str, float]):
+        """
+        Update multiple resource availabilities.
+        
+        Args:
+            resources: Dictionary mapping resource_id to available amount
+        """
+        self._available_resources.update(resources)
+    
+    def get_prioritized_goals(
+        self,
+        filter_ready: bool = False
+    ) -> List[tuple[LegacyGoal, PriorityScore]]:
+        """
+        Get goals sorted by priority (highest first).
+        
+        Args:
+            filter_ready: Only return ready-to-execute primitive goals
+            
+        Returns:
+            List of (goal, priority_score) tuples sorted by priority
+        """
+        if not self.enable_priority_calculation:
+            return []
+        
+        # Recalculate priorities
+        self.recalculate_all_priorities()
+        
+        # Get goals
+        if filter_ready:
+            goals = self.get_ready_primitive_goals()
+        else:
+            goals = [self.goal_manager.get_goal(gid) for gid in self._htn_metadata.keys()]
+            goals = [g for g in goals if g is not None]
+        
+        # Pair with scores
+        goal_score_pairs = []
+        for goal in goals:
+            score = self._priority_scores.get(goal.id)
+            if score:
+                goal_score_pairs.append((goal, score))
+        
+        # Sort by priority (descending)
+        goal_score_pairs.sort(key=lambda x: x[1].final_score, reverse=True)
+        
+        return goal_score_pairs
+    
+    def _get_blocked_by_goal(self, goal_id: str) -> Set[str]:
+        """
+        Get set of goals that are blocked by this goal.
+        
+        Args:
+            goal_id: Goal that may block others
+            
+        Returns:
+            Set of goal IDs that depend on this goal
+        """
+        blocked = set()
+        for gid, metadata in self._htn_metadata.items():
+            goal = self.goal_manager.get_goal(gid)
+            if goal and goal_id in goal.dependencies:
+                blocked.add(gid)
+        return blocked
