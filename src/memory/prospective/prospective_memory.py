@@ -710,30 +710,29 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
 
             due_reminders = []
             for i, reminder_id in enumerate(ids):
-                raw_meta = metadatas[i] if i < len(metadatas) else {}
-                metadata = self._normalize_metadata(raw_meta)
-                document = documents[i] if i < len(documents) else ""
+                if i < len(metadatas):
+                    raw_meta = metadatas[i]
+                    metadata = self._normalize_metadata(raw_meta)
+                    document = documents[i] if i < len(documents) else ""
+                    
+                    if metadata.get("completed", False):
+                        continue
 
-                # Skip completed
-                if metadata.get("completed", False):
-                    continue
+                    due_time_str = metadata.get("due_time") or ""
+                    if not due_time_str:
+                        continue
 
-                # Check if due
-                due_time_str = metadata.get("due_time") or ""
-                if not due_time_str:
-                    continue
+                    try:
+                        due_time = datetime.fromisoformat(due_time_str)
+                        if due_time <= now:
+                            reminder = self._metadata_to_reminder(reminder_id, metadata, document)
+                            due_reminders.append(reminder)
 
-                try:
-                    due_time = datetime.fromisoformat(due_time_str)
-                    if due_time <= now:
-                        reminder = self._metadata_to_reminder(reminder_id, metadata, document)
-                        due_reminders.append(reminder)
-
-                        # Auto-complete on retrieval
-                        self.complete_reminder(reminder_id)
-                        self._increment_metric("prospective_reminders_triggered_total")
-                except (ValueError, TypeError):
-                    continue  # Skip malformed dates
+                            # Auto-complete on retrieval
+                            self.complete_reminder(reminder_id)
+                            self._increment_metric("prospective_reminders_triggered_total")
+                    except (ValueError, TypeError):
+                        continue  # Skip malformed dates
 
             return sorted(due_reminders, key=lambda r: r.due_time or datetime.min)
         except Exception:
@@ -752,26 +751,25 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
 
             upcoming = []
             for i, reminder_id in enumerate(ids):
-                raw_meta = metadatas[i] if i < len(metadatas) else {}
-                metadata = self._normalize_metadata(raw_meta)
-                document = documents[i] if i < len(documents) else ""
+                if i < len(metadatas):
+                    raw_meta = metadatas[i]
+                    metadata = self._normalize_metadata(raw_meta)
+                    document = documents[i] if i < len(documents) else ""
 
-                # Skip completed
-                if metadata.get("completed", False):
-                    continue
+                    if metadata.get("completed", False):
+                        continue
 
-                # Check if upcoming
-                due_time_str = metadata.get("due_time") or ""
-                if not due_time_str:
-                    continue
+                    due_time_str = metadata.get("due_time") or ""
+                    if not due_time_str:
+                        continue
 
-                try:
-                    due_time = datetime.fromisoformat(due_time_str)
-                    if due_time <= horizon:
-                        reminder = self._metadata_to_reminder(reminder_id, metadata, document)
-                        upcoming.append(reminder)
-                except (ValueError, TypeError):
-                    continue
+                    try:
+                        due_time = datetime.fromisoformat(due_time_str)
+                        if due_time <= horizon:
+                            reminder = self._metadata_to_reminder(reminder_id, metadata, document)
+                            upcoming.append(reminder)
+                    except (ValueError, TypeError):
+                        continue
 
             return sorted(upcoming, key=lambda r: r.due_time or datetime.min)
         except Exception:
@@ -797,15 +795,16 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
 
             reminders = []
             for i, reminder_id in enumerate(ids):
-                raw_meta = metadatas[i] if i < len(metadatas) else {}
-                metadata = self._normalize_metadata(raw_meta)
-                document = documents[i] if i < len(documents) else ""
+                if i < len(metadatas):
+                    raw_meta = metadatas[i]
+                    metadata = self._normalize_metadata(raw_meta)
+                    document = documents[i] if i < len(documents) else ""
 
-                if not include_completed and metadata.get("completed", False):
-                    continue
+                    if not include_completed and metadata.get("completed", False):
+                        continue
 
-                reminder = self._metadata_to_reminder(reminder_id, metadata, document)
-                reminders.append(reminder)
+                    reminder = self._metadata_to_reminder(reminder_id, metadata, document)
+                    reminders.append(reminder)
 
             return sorted(reminders, key=lambda r: r.due_time or datetime.max)
         except Exception:
@@ -888,11 +887,16 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
         try:
             result = self.collection.get()
             
+            ids = result.get('ids') or []
+            metadatas = result.get('metadatas') or []
+            
             to_delete = []
-            for i, reminder_id in enumerate(result['ids']):
-                metadata = result['metadatas'][i]
-                if metadata.get("completed", False):
-                    to_delete.append(reminder_id)
+            for i, reminder_id in enumerate(ids):
+                if i < len(metadatas):
+                    raw_meta = metadatas[i]
+                    metadata = self._normalize_metadata(raw_meta)
+                    if metadata.get("completed", False):
+                        to_delete.append(reminder_id)
             
             if to_delete:
                 self.collection.delete(ids=to_delete)
