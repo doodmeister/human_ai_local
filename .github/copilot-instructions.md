@@ -15,7 +15,15 @@ Repo-specific guidance for being productive immediately. Keep changes small, con
 - Memory systems (`src/memory/`)
   - STM: `stm/vector_stm.py` (ChromaDB + sentence-transformers; 7-item capacity; activation/decay; LRU).
   - LTM: `ltm/vector_ltm.py` (ChromaDB; semantic clusters; decay; health report).
-  - Prospective: `prospective/prospective_memory.py` (in-memory reminders injected into chat context).
+  - **Prospective (Week 11 - COMPLETE)**: `prospective/prospective_memory.py` - Unified interface with two implementations:
+    * `ProspectiveMemorySystem` ABC: Base interface with 10 methods (add_reminder, get_reminder, get_due_reminders, get_upcoming, list_reminders, search_reminders, complete_reminder, delete_reminder, purge_completed, clear).
+    * `InMemoryProspectiveMemory`: Lightweight, no external dependencies, perfect for testing/development.
+    * `VectorProspectiveMemory`: Full-featured with semantic search (requires sentence-transformers, chromadb).
+    * **Factory**: `create_prospective_memory(use_vector=False)` creates instance with graceful fallback. `get_prospective_memory()` provides singleton.
+    * **Backward Compatibility**: Legacy methods (check_due, upcoming, purge_triggered, to_dict) and aliases (ProspectiveMemory, ProspectiveMemoryVectorStore, get_inmemory_prospective_memory) work unchanged.
+    * **Configuration**: Set `use_vector_prospective=True` in `MemorySystemConfig` to use vector store. Lazy imports prevent crashes if optional dependencies missing.
+    * **Usage**: `pm = create_prospective_memory(use_vector=False); reminder = pm.add_reminder("Task", due_time=datetime.now() + timedelta(hours=1)); due = pm.get_due_reminders()`
+    * **Optional Dependencies**: sentence-transformers and chromadb required only for VectorProspectiveMemory. System falls back to InMemory with warning if unavailable.
   - Consolidation: `consolidation/consolidator.py` (STM→LTM promotion with age/rehearsal gating, counters).
 - Executive functions (`src/executive/`)
   - Legacy: `decision_engine.py` (weighted scoring), `task_planner.py` (template-based), `goal_manager.py` (hierarchical goals).
@@ -62,7 +70,7 @@ pytest -q
 - DI-by-presence: `build_chat_service()` constructs subsystems if importable; set `DISABLE_SEMANTIC_MEMORY=1` to skip heavy semantic memory.
 - Retrieval fallbacks: when using degraded paths, tag produced context items with a `reason` containing `fallback`.
 - Consolidation thresholds are temporary per turn and restored after; provenance/counters live in `src/chat/metrics.py` (`metrics_registry`).
-- Prospective reminders appear as rank-0 items with `source_system="prospective"`; endpoints under `/agent/reminders*`.
+- **Prospective reminders**: Appear as rank-0 items with `source_system="prospective"` in chat context. Endpoints under `/agent/reminders*`. Use `ProspectiveMemorySystem` interface for all implementations. For backward compat with old timestamp-based API: `add_reminder(content, seconds)` auto-converts to datetime; `list_reminders(include_triggered=True)` alias for `include_completed`; `check_due()`, `upcoming(seconds)`, `purge_triggered()` methods available.
 - Use `get_chat_config()` instead of hard-coded defaults; pass `.to_dict()` into `ContextBuilder`.
 - Chroma configuration via `.env` (see `.env.example`: `CHROMA_PERSIST_DIR`, `STM_COLLECTION`, `LTM_COLLECTION`).
 - **Executive decisions**: Enhanced decision module uses feature flags for gradual rollout. Import from `src.executive.decision` for AHP/Pareto strategies; legacy `DecisionEngine` remains as fallback. All strategies implement `DecisionStrategy` interface.
