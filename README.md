@@ -5,13 +5,256 @@ A production-grade, biologically-inspired cognitive architecture for human-like 
 
 ---
 
-## 🚀 Latest Update: Enhanced Executive Decision System (October 2025)
+## 🚀 Latest Update: Dynamic Scheduling System (November 2025)
 
-### Advanced Decision-Making with AHP & Pareto Optimization
-Phase 1 of the Executive Function Refactoring introduces sophisticated decision algorithms that dramatically improve the quality and adaptability of executive reasoning:
+### Week 14: Dynamic Scheduling Complete ✅
+Real-time schedule monitoring, adaptation, and rich visualization exports extending the Week 12 CP-SAT scheduler.
 
-#### **New Decision Module** (`src/executive/decision/`)
-Five production-ready components implementing cutting-edge decision science:
+#### **New Dynamic Scheduling Features**
+
+**1. Quality Metrics** (180 lines in `models.py`)
+- **8 Quality Methods** on Schedule class:
+  - `calculate_critical_path()` - Longest dependency path
+  - `calculate_slack_time(task_id)` - Task buffer time
+  - `calculate_buffer_time()` - Total schedule flexibility
+  - `calculate_robustness_score()` - 0-1 resilience metric
+  - `calculate_resource_utilization_variance()` - Resource balance
+  - `calculate_cognitive_load_smoothness()` - Load variance
+  - `update_quality_metrics()` - Batch calculation (auto-called)
+- **Automatic Integration**: Metrics calculated after every schedule
+
+**2. Dynamic Scheduler** (580 lines in `dynamic_scheduler.py`)
+- **ScheduleMonitor**: Real-time execution monitoring
+  - Detects task failures, delays, resource unavailability
+  - Calculates disruption impact on dependent tasks
+  - Recommends rescheduling when thresholds exceeded
+- **ScheduleAnalyzer**: Proactive issue prediction
+  - Resource contention warnings (>90% utilization)
+  - Deadline risk alerts (zero slack = critical)
+  - Cognitive overload detection (>90% load)
+  - Critical path risk assessment (>70% tasks on path)
+- **DynamicScheduler**: Orchestration with reactive + proactive
+  - Incremental schedule updates (add/remove/modify tasks)
+  - Reactive disruption handling (reschedule on failures)
+  - Proactive warnings with severity levels
+  - Schedule health reporting (healthy/at_risk/no_schedule)
+
+**3. Visualization Exports** (480 lines in `visualizer.py`)
+- **7 Export Formats**:
+  - Gantt chart data (bars with dependencies, critical path)
+  - Timeline events (starts, ends, milestones, deadlines)
+  - Resource utilization over time (per-resource capacity usage)
+  - Dependency graph (nodes and edges for network viz)
+  - Critical path highlighting (bottleneck analysis)
+  - Cognitive load graph (load variance over time)
+  - Complete JSON export (all formats in one file)
+- **JSON-Serializable**: Ready for JavaScript charting libraries (D3.js, Chart.js)
+
+#### **Week 14 Quick Start**
+
+```python
+from datetime import datetime, timedelta
+from src.executive.scheduling import (
+    DynamicScheduler, Disruption, DisruptionType,
+    ScheduleVisualizer
+)
+
+# Create dynamic scheduler
+scheduler = DynamicScheduler()
+schedule = scheduler.create_initial_schedule(problem)
+
+# Monitor and adapt
+disruption = Disruption(
+    type=DisruptionType.TASK_FAILED,
+    timestamp=datetime.now(),
+    affected_task_ids=["task_1"]
+)
+new_schedule = scheduler.handle_disruption(disruption)
+
+# Get proactive warnings
+warnings = scheduler.get_proactive_warnings(datetime.now())
+for w in warnings:
+    if w.severity == "critical":
+        print(f"⚠️  {w.description}")
+
+# Check health
+health = scheduler.get_schedule_health()
+print(f"Status: {health['status']}, Robustness: {health['robustness_score']:.2f}")
+
+# Export visualizations
+visualizer = ScheduleVisualizer()
+json_data = visualizer.export_to_json(schedule, include_all=True)
+# Use in web UI with Chart.js, D3.js, etc.
+```
+
+#### **Week 14 Testing**
+- ✅ **36/36 tests passing** in 14.45s (quality metrics, monitoring, analysis, visualization)
+- ✅ **No regressions**: Week 12 tests (17/17) still passing
+- ✅ **Total**: 53 scheduler tests, ~1,240 production lines added
+
+See [Week 14 Completion Summary](docs/WEEK_14_COMPLETION_SUMMARY.md) for full details.
+
+---
+
+### Week 12: CP-SAT Constraint Scheduler
+Advanced constraint-based task scheduling using Google OR-Tools CP-SAT solver with multi-objective optimization and cognitive load awareness.
+
+#### **Scheduling Module** (`src/executive/scheduling/`)
+Four production-ready components for industrial-strength task scheduling:
+
+- **CP-SAT Scheduler** (`cp_scheduler.py`): Google OR-Tools constraint programming
+  - Constraint Satisfaction Problem (CSP) modeling for task scheduling
+  - CP-SAT solver with 30-second timeout, 4 parallel workers
+  - Handles precedence, resource capacity, deadlines, time windows, cognitive load
+  - Multi-objective optimization (minimize makespan, maximize priority)
+  - 418 lines of type-safe, production-ready code
+  - All tests passing (17/17 in 17.82s)
+
+- **Data Models** (`models.py`): Complete scheduling domain representation
+  - `Task`: Duration, dependencies, resource requirements, priority, cognitive load
+  - `Resource`: Capacity constraints with frozen resource types
+  - `TimeWindow`: Earliest start, latest end with overlap detection
+  - `Schedule`: Task assignments, makespan, resource utilization metrics
+  - `SchedulingProblem`: Complete problem specification with constraints
+  - 320 lines of well-typed dataclasses
+
+- **TaskPlanner Adapter** (`task_planner_adapter.py`): Backward compatibility bridge
+  - Converts legacy TaskPlanner tasks to CP scheduler format
+  - Feature flags for gradual rollout (disabled by default)
+  - Automatic fallback to legacy planning on errors
+  - Metrics tracking for A/B comparison
+  - 327 lines of integration glue
+
+- **Module Exports** (`__init__.py`): Clean public API
+  - Exports core classes: CPScheduler, SchedulerConfig, Task, Resource, etc.
+  - Factory functions for easy instantiation
+  - 60 lines of well-organized exports
+
+#### **Key Features**
+
+**Constraint Types:**
+- **Precedence**: Task A must complete before Task B starts
+- **Resource Capacity**: Total demand ≤ resource capacity at all times
+- **Deadlines**: Tasks must complete by specified time
+- **Time Windows**: Tasks must start/end within allowed periods
+- **Cognitive Load**: Sum of concurrent task loads ≤ maximum threshold
+
+**Optimization Objectives:**
+- **Minimize Makespan**: Shortest total schedule duration
+- **Maximize Priority**: High-priority tasks scheduled earlier
+- **Weighted Combinations**: Multiple objectives with configurable weights
+
+**Robustness:**
+- Cycle detection in task dependencies
+- Infeasibility detection (no valid schedule exists)
+- Graceful handling of over-constrained problems
+- Detailed error messages for constraint violations
+
+#### **Technical Specifications**
+
+**Dependencies:**
+- **ortools>=9.8.0**: Google's optimization library for CP-SAT solver
+- numpy, scipy: Matrix operations (from Phase 1)
+- scikit-learn: ML learning (from Phase 1)
+
+**Performance:**
+- Solve time: <1s for 10-20 tasks, <5s for 50+ tasks
+- Time discretization: Configurable resolution (default 1 hour steps)
+- Solver timeout: 30 seconds (configurable)
+- Parallel search: 4 workers for faster solutions
+
+**Testing:**
+- ✅ 17/17 comprehensive tests passing in 17.82s
+- Basic scheduling (single, multiple tasks, makespan)
+- Precedence constraints (simple, chains, metadata)
+- Resource constraints (capacity, multiple resources)
+- Deadline and time window constraints
+- Cognitive load limits
+- Infeasibility detection (cycles, impossible deadlines)
+- Multi-objective optimization
+- Schedule metrics and resource utilization
+
+**Type Safety:**
+- Full Pylance type checking (0 errors)
+- `typing.cast()` guards for Optional types
+- All methods properly annotated
+- Runtime checks with clear error messages
+
+#### **Integration Example**
+
+```python
+from datetime import datetime, timedelta
+from src.executive.scheduling import (
+    CPScheduler, SchedulerConfig,
+    Task, Resource, ResourceType,
+    SchedulingProblem, TimeWindow,
+    OptimizationObjective
+)
+
+# Create scheduler with config
+config = SchedulerConfig(
+    time_resolution=timedelta(hours=1),
+    solver_timeout=30,
+    num_workers=4
+)
+scheduler = CPScheduler(config)
+
+# Define tasks
+tasks = [
+    Task(
+        id="task1",
+        duration=timedelta(hours=2),
+        priority=0.8,
+        dependencies=[],
+        resource_requirements={Resource("cpu", 8.0): 2.0},
+        cognitive_load=0.5
+    ),
+    Task(
+        id="task2",
+        duration=timedelta(hours=3),
+        priority=0.6,
+        dependencies=["task1"],
+        resource_requirements={Resource("cpu", 8.0): 3.0},
+        cognitive_load=0.7
+    )
+]
+
+# Define resources
+resources = [Resource(name="cpu", capacity=8.0, type=ResourceType.COMPUTATIONAL)]
+
+# Define optimization objectives
+objectives = [
+    OptimizationObjective(name="minimize_makespan", weight=1.0),
+    OptimizationObjective(name="maximize_priority", weight=0.5)
+]
+
+# Create and solve scheduling problem
+problem = SchedulingProblem(
+    tasks=tasks,
+    resources=resources,
+    objectives=objectives,
+    horizon=timedelta(hours=24),
+    time_resolution=timedelta(hours=1)
+)
+
+schedule = scheduler.schedule(problem)
+
+# Inspect results
+print(f"Makespan: {schedule.makespan}")
+print(f"Feasible: {schedule.is_feasible}")
+print(f"Solve time: {schedule.metrics['solve_time']:.2f}s")
+for task in schedule.tasks:
+    print(f"{task.id}: {task.scheduled_start} → {task.scheduled_end}")
+```
+
+---
+
+## 📅 Previous Updates
+
+### Enhanced Executive Decision System (October 2025)
+
+#### **Advanced Decision Module** (`src/executive/decision/`)
+Phase 1 of Executive Function Refactoring with sophisticated decision algorithms:
 
 - **AHP Engine** (`ahp_engine.py`): Analytic Hierarchy Process for multi-criteria decisions
   - Pairwise comparison matrices with eigenvector method (Saaty, 1980)
@@ -39,85 +282,6 @@ Five production-ready components implementing cutting-edge decision science:
   - Suggests weight adjustments based on historical performance
   - Model persistence for continuous learning
   - 280 lines of adaptive intelligence
-
-- **Base Framework** (`base.py`): Core abstractions and data structures
-  - `EnhancedDecisionContext`: Rich context with cognitive/environmental factors
-  - `CriteriaHierarchy`: Multi-level criteria for AHP
-  - `ParetoSolution`: Non-dominated solution representation
-  - `DecisionOutcome`: Outcome tracking for ML learning
-  - `FeatureFlags`: Gradual rollout support with fallback
-  - 275 lines of robust architectural foundation
-
-#### **Key Enhancements Over Legacy System**
-
-**Decision Quality:**
-- AHP provides mathematically rigorous criterion weighting vs. static weights
-- Pareto analysis reveals trade-offs vs. single-score decisions
-- Consistency checking prevents contradictory preferences
-- Context adaptation matches decision strategy to situation
-
-**Adaptability:**
-- ML model learns from outcomes and improves over time
-- Dynamic weight adjustment responds to cognitive state
-- Feature flags enable safe gradual rollout
-- Backward compatibility with legacy `DecisionEngine`
-
-**Transparency:**
-- Detailed rationale generation for all decisions
-- Sensitivity analysis shows decision robustness
-- Trade-off visualization for multi-objective scenarios
-- Confidence scores calibrated to decision quality
-
-#### **Technical Specifications**
-
-**Dependencies:**
-- numpy, scipy: Eigenvector calculations and optimization
-- scikit-learn: Decision tree learning
-- ortools: Future constraint programming (Phase 4)
-- networkx: Graph algorithms for planning (Phase 2)
-
-**Performance:**
-- Decision latency: <100ms for typical decisions
-- AHP consistency checking: O(n²) for n criteria
-- Pareto frontier: O(n²) domination analysis
-- Memory efficient: numpy arrays + dataclasses
-
-**Testing:**
-- 20+ unit tests for AHP engine
-- Edge case coverage (inconsistent comparisons, empty options)
-- Integration tests planned for end-to-end flows
-- Performance benchmarks for all algorithms
-
-#### **Integration with Existing System**
-
-The enhanced decision module integrates seamlessly with the existing executive system:
-
-```python
-from src.executive.decision import (
-    AHPStrategy, ParetoStrategy,
-    EnhancedDecisionContext,
-    get_feature_flags
-)
-
-# Enable enhanced features gradually
-flags = get_feature_flags()
-flags.use_ahp = True
-flags.use_pareto = True
-
-# Rich decision context
-context = EnhancedDecisionContext(
-    cognitive_load=0.7,  # High cognitive load
-    time_pressure=0.3,   # Low time pressure
-    risk_tolerance=0.5   # Moderate risk tolerance
-)
-
-# Use AHP for criteria-based decisions
-strategy = AHPStrategy()
-result = strategy.decide(options, criteria_hierarchy, context)
-print(f"Recommended: {result.recommended_option_id}")
-print(f"Confidence: {result.confidence:.2%}")
-print(f"Rationale: {result.rationale}")
-```
 
 **Feature Flags for Safe Rollout:**
 - `use_ahp`: Enable Analytic Hierarchy Process

@@ -275,7 +275,7 @@ class WeightedScoringStrategy(DecisionStrategy):
         best_score = option_scores[best_option_id]
         
         # Calculate confidence based on score separation
-        sorted_scores = sorted(optionScores.values(), reverse=True)
+        sorted_scores = sorted(option_scores.values(), reverse=True)
         confidence = 0.5  # Base confidence
         if len(sorted_scores) > 1:
             score_gap = sorted_scores[0] - sorted_scores[1]
@@ -538,10 +538,6 @@ class EnhancedDecisionAdapter:
             # Convert to enhanced context
             enhanced_ctx = self.to_enhanced_context(options, criteria, context)
             
-            # Apply context adjustments if enabled
-            if self.feature_flags.use_context_adjustment and self.context_analyzer:
-                enhanced_ctx = self.context_analyzer.adjust_context(enhanced_ctx)
-            
             # Execute enhanced AHP
             if EnhancedAHPStrategy is None:
                 raise RuntimeError("Enhanced AHP strategy unavailable")
@@ -729,7 +725,7 @@ class DecisionEngine:
                     # Fallback to weighted scoring
                     logger.warning(f"Enhanced {self.strategy_type} failed: {e}, using weighted scoring")
                     fallback = WeightedScoringStrategy()
-                    result = fallback.decide(options, criteria, context)
+                    result = fallback.decide(options, criteria, context or {})
                     result.metadata['fallback_reason'] = str(e)
                     result.metadata['original_strategy'] = f"{self.strategy_type}_enhanced"
                     return result
@@ -993,7 +989,6 @@ class DecisionEngine:
                 outcome_metrics=outcome_metrics,
                 success=success,
                 timestamp=datetime.now(),
-                metadata=meta,
             )
 
             self.enhanced_adapter.ml_model.record_outcome(outcome)

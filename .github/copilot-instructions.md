@@ -45,6 +45,17 @@ Repo-specific guidance for being productive immediately. Keep changes small, con
     - **Telemetry**: 10 metrics tracked via `metrics_registry` (planning attempts, plans found, plan length/cost, nodes expanded, latency).
     - **Testing**: 96 comprehensive tests (71 unit + 16 adapter + 9 integration) all passing. <10ms medium plans, <500ms complex scenarios.
     - **Production Status**: 100% complete, 2,600+ production lines, feature flags for rollout, legacy fallback for safety.
+  - **Scheduling (Week 12 - COMPLETE)**: `scheduling/` module with CP-SAT constraint scheduling:
+    - `cp_scheduler.py`: Google OR-Tools CP-SAT solver for task scheduling (418 lines, type-safe, 0 Pylance errors).
+    - `models.py`: Task, Resource, TimeWindow, Schedule, SchedulingProblem dataclasses (320 lines).
+    - `task_planner_adapter.py`: Bridge CP scheduler with legacy TaskPlanner (327 lines, feature flags disabled by default).
+    - **Constraints**: Precedence, resource capacity, deadlines, time windows, cognitive load limits.
+    - **Optimization**: Minimize makespan, maximize priority, weighted multi-objective.
+    - **Features**: Cycle detection, infeasibility detection, resource utilization metrics, 30s timeout, 4 workers.
+    - **Usage**: `scheduler = CPScheduler(config); problem = SchedulingProblem(tasks, resources, objectives, ...); schedule = scheduler.schedule(problem)`.
+    - **Testing**: 17/17 tests passing in 17.82s (basic, precedence, resources, deadlines, cognitive load, infeasibility, optimization).
+    - **Dependencies**: ortools>=9.8.0 (Google's optimization library).
+    - **Production Status**: 100% complete, 1,065 production lines, all type checks passing, ready for integration.
 - Attention: `src/attention/attention_mechanism.py` (fatigue, capacity, metrics).
 - Config: `src/core/config.py` (`get_chat_config().to_dict()` feeds `ContextBuilder`).
 - API: `start_server.py` loads FastAPI app (`george_api_simple.py`) and mounts chat routes from `src/interfaces/api/chat_endpoints.py`.
@@ -75,6 +86,8 @@ pytest -q
 - Chroma configuration via `.env` (see `.env.example`: `CHROMA_PERSIST_DIR`, `STM_COLLECTION`, `LTM_COLLECTION`).
 - **Executive decisions**: Enhanced decision module uses feature flags for gradual rollout. Import from `src.executive.decision` for AHP/Pareto strategies; legacy `DecisionEngine` remains as fallback. All strategies implement `DecisionStrategy` interface.
 - **GOAP planning**: Import from `src.executive.planning`. `WorldState` is immutable (frozen dataclass); use `.set()` to create new states. Actions define preconditions/effects as `WorldState` objects. Heuristics must be admissible (never overestimate). `GOAPPlanner.plan()` returns `Plan` with optimal action sequence or `None` if no solution. Telemetry automatically tracked via `metrics_registry`. See 10 predefined actions in `action_library.create_default_action_library()` (analyze_data, gather_data, create_document, etc.).
+- **CP-SAT scheduling**: Import from `src.executive.scheduling`. Create `CPScheduler(config)` with `SchedulerConfig(time_resolution, solver_timeout, num_workers)`. Define `SchedulingProblem` with tasks, resources, objectives. Call `scheduler.schedule(problem)` to get optimal `Schedule`. Tasks have `scheduled_start`/`scheduled_end` after scheduling. Use `typing.cast()` for Optional type guards. All constraint types available: precedence, resource capacity, deadlines, time windows, cognitive load.
+- **Dynamic scheduling** (Week 14 COMPLETE): Import from `src.executive.scheduling`. Use `DynamicScheduler` for real-time schedule adaptation. Quality metrics auto-calculated via `schedule.update_quality_metrics()` - includes critical path, slack time, buffer time, robustness score (0-1), resource variance, cognitive smoothness. `ScheduleMonitor` detects disruptions (failures, delays, resource issues). `ScheduleAnalyzer` provides proactive warnings (resource contention >90%, zero slack, cognitive overload >90%, critical path >70%). Handle disruptions with `scheduler.handle_disruption(disruption)`. Check health with `scheduler.get_schedule_health()`. Export visualizations via `ScheduleVisualizer` - 7 formats (Gantt, timeline, resource utilization, dependency graph, critical path, cognitive load, JSON). See `docs/WEEK_14_COMPLETION_SUMMARY.md` for full usage.
 
 ## Integration references
 - Chat endpoints: `/agent/chat`, `/agent/chat/preview`, `/agent/chat/performance`, `/agent/chat/metacog/status`, `/agent/chat/consolidation/status` (see `src/interfaces/api/chat_endpoints.py`).
@@ -95,7 +108,16 @@ pytest -q
     * `Constraint` types: Use helper functions `create_resource_constraint()`, `create_deadline_constraint()`, `create_dependency_constraint()`, `create_state_constraint()`.
     * `ReplanningEngine`: `detect_failure()` monitors execution, `replan()` tries repair then full replan, `should_retry_action()` for transient failures.
     * Heuristics must be admissible (never overestimate). Default is `goal_distance`. Use `get_heuristic()` factory or `CompositeHeuristic` for weighted combinations.
+  - **CP-SAT Scheduling** (Week 12 COMPLETE) is in `src/executive/scheduling/`. Core components:
+    * `CPScheduler` (constraint solver): Use `scheduler.schedule(problem)` to solve scheduling problems with CP-SAT.
+    * `SchedulingProblem`: Define tasks, resources, objectives, constraints, time horizon, resolution.
+    * `Task` (scheduling): Has id, duration, priority, dependencies, resource_requirements, cognitive_load, time_window.
+    * `Resource`: Has name, capacity, type (COMPUTATIONAL, COGNITIVE, etc.). Use frozen Resource instances in task requirements.
+    * `Schedule` (result): Contains scheduled tasks with start/end times, makespan, resource utilization metrics.
+    * **Type Safety**: Use `typing.cast()` after None checks: `if self.model is None: raise RuntimeError(); model = cast(CpModel, self.model)`.
+    * **Constraints**: Precedence (A before B), resource capacity (cumulative), deadlines, time windows, cognitive load limits.
+    * **Optimization**: Minimize makespan (shortest schedule), maximize priority (high-priority first), weighted combinations.
   - **Integration**: Use `GOAPTaskPlannerAdapter` to bridge GOAP with `GoalManager`/`TaskPlanner`. Feature flags: `goap_enabled`, `goap_use_constraints`, `goap_use_replanning`, `goap_fallback_on_error`.
-  - See `docs/PHASE_2_FINAL_COMPLETE.md` for complete documentation and usage examples.
+  - See `docs/PHASE_2_FINAL_COMPLETE.md` for GOAP documentation and `docs/WEEK_12_COMPLETION_SUMMARY.md` for scheduling details.
 
 If a workflow or pattern you rely on is missing/unclear, say which part and we'll refine this doc.

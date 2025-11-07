@@ -34,6 +34,9 @@ scikit-learn>=1.6.1
 # Graph-based Semantic Processing
 networkx>=3.0
 
+# Constraint Programming and Optimization
+ortools>=9.8.0
+
 # ========================================
 # SCHEDULING AND ASYNC PROCESSING
 # ========================================
