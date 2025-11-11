@@ -21,7 +21,7 @@ Integration flow:
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 from collections import defaultdict
 import logging
 
@@ -34,6 +34,10 @@ from src.executive.scheduling import (
     DynamicScheduler, SchedulingProblem, Schedule,
     Task, Resource, ResourceType, OptimizationObjective
 )
+
+# Type checking imports (Week 16)
+if TYPE_CHECKING:
+    from src.executive.learning.outcome_tracker import OutcomeRecord
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +88,13 @@ class ExecutionContext:
     success: bool = False
     failure_reason: Optional[str] = None
     lessons_learned: List[str] = field(default_factory=list)
+    
+    # Outcome tracking (Week 16)
+    actual_completion_time: Optional[datetime] = None
+    actual_success: Optional[bool] = None  # Did goal actually succeed?
+    outcome_score: float = 0.0  # Quality score 0-1
+    deviations: List[str] = field(default_factory=list)  # Issues encountered
+    accuracy_metrics: Dict[str, float] = field(default_factory=dict)  # Predicted vs actual
     
     # Metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -166,6 +177,10 @@ class ExecutiveSystem:
         
         # Dynamic scheduler
         self.scheduler = DynamicScheduler()
+        
+        # Outcome tracking (Week 16)
+        from src.executive.learning.outcome_tracker import OutcomeTracker
+        self.outcome_tracker = OutcomeTracker()
         
         # Execution tracking
         self.execution_contexts: Dict[str, ExecutionContext] = {}
@@ -508,3 +523,70 @@ class ExecutiveSystem:
         else:
             self.execution_contexts.clear()
             self.active_schedules.clear()
+    
+    # Outcome tracking methods (Week 16)
+    
+    def complete_goal_execution(
+        self,
+        goal_id: str,
+        success: bool,
+        outcome_score: Optional[float] = None,
+        deviations: Optional[List[str]] = None,
+    ) -> Optional['OutcomeRecord']:
+        """
+        Mark a goal execution as complete and record outcome.
+        
+        Args:
+            goal_id: Goal to complete
+            success: Whether goal was successfully achieved
+            outcome_score: Quality score 0-1 (optional, auto-calculated)
+            deviations: List of issues encountered (optional)
+        
+        Returns:
+            OutcomeRecord if context exists, None otherwise
+        """
+        context = self.execution_contexts.get(goal_id)
+        if not context:
+            logger.warning(f"Cannot complete goal {goal_id}: no execution context")
+            return None
+        
+        # Update context
+        context.status = ExecutionStatus.COMPLETED if success else ExecutionStatus.FAILED
+        context.end_time = datetime.now()
+        context.actual_completion_time = datetime.now()
+        context.actual_success = success
+        
+        if deviations:
+            context.deviations.extend(deviations)
+        
+        # Calculate total time
+        context.total_time_ms = (context.end_time - context.start_time).total_seconds() * 1000
+        
+        # Record outcome
+        from src.executive.learning.outcome_tracker import OutcomeRecord
+        outcome = self.outcome_tracker.record_outcome(
+            context,
+            outcome_score=outcome_score,
+            deviations=deviations,
+        )
+        
+        logger.info(
+            f"Completed goal '{context.goal_title}': "
+            f"success={success}, score={outcome.outcome_score:.2f}"
+        )
+        
+        return outcome
+    
+    def get_learning_metrics(self) -> Dict[str, Any]:
+        """
+        Get learning and outcome metrics.
+        
+        Returns:
+            Dict with decision/planning/scheduling accuracy metrics
+        """
+        return {
+            "decision_accuracy": self.outcome_tracker.analyze_decision_accuracy(),
+            "planning_accuracy": self.outcome_tracker.analyze_planning_accuracy(),
+            "scheduling_accuracy": self.outcome_tracker.analyze_scheduling_accuracy(),
+            "improvement_trends": self.outcome_tracker.get_improvement_trends(),
+        }

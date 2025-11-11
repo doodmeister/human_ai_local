@@ -5,12 +5,134 @@ A production-grade, biologically-inspired cognitive architecture for human-like 
 
 ---
 
-## 🚀 Latest Update: Executive System Integration (November 2025)
+## 🚀 Latest Update: Learning Infrastructure (November 2025)
 
-### Week 15: System Integration Complete ✅
+### Week 16 Phase 2: Feature Extraction Complete ✅
+Converts execution outcomes into structured ML training data with multi-format export.
+
+#### **New Feature Extraction Capabilities**
+
+**1. FeatureExtractor Service** (450 lines in `feature_extractor.py`)
+- **FeatureVector**: 23-field structured features (decision/planning/scheduling/context + targets)
+- **Extraction Methods**:
+  - `extract_from_outcome()`: Single outcome → FeatureVector
+  - `extract_dataset()`: Batch extraction from multiple outcomes
+  - `to_dataframe()`: Convert to pandas DataFrame
+- **Export Formats**: CSV, JSON, Parquet (columnar)
+- **Normalization**: StandardScaler (mean=0, std=1), MinMaxScaler (0-1)
+- **Statistics**: Mean, std, min, max, missing counts per feature
+
+**2. Feature Schema**
+- **Decision Features**: strategy, confidence, decision_time_ms
+- **Planning Features**: plan_length, plan_cost, planning_time_ms, nodes_expanded
+- **Scheduling Features**: predicted_makespan_minutes, task_count
+- **Context Features**: hour_of_day (0-23), day_of_week (0-6)
+- **Target Variables**: success (0/1), outcome_score (0-1), time_accuracy_ratio, plan_adherence_score
+
+**3. OutcomeTracker Integration**
+- **get_training_dataset()**: Retrieve features with filters (strategy, success_only, limit)
+- **Auto-export**: Direct CSV/JSON/Parquet export from tracker
+- **Lazy Initialization**: feature_extractor property with graceful instantiation
+
+#### **Week 16 Phase 2 Quick Start**
+
+```python
+from src.executive.learning import OutcomeTracker, FeatureExtractor
+from pathlib import Path
+
+# Get training dataset from tracker
+tracker = OutcomeTracker()
+
+# Export recent outcomes as CSV
+features = tracker.get_training_dataset(
+    limit=100,
+    export_path=Path("data/training.csv"),
+    export_format='csv'
+)
+
+# Or use extractor directly
+extractor = FeatureExtractor()
+outcome_records = tracker.get_outcome_history(limit=50)
+feature_vectors = extractor.extract_dataset(outcome_records)
+
+# Convert to DataFrame for scikit-learn
+df = extractor.to_dataframe(feature_vectors, include_targets=True)
+X = df.drop(columns=['success', 'outcome_score', 'time_accuracy_ratio', 'plan_adherence_score'])
+y = df['success']
+
+# Normalize features
+normalized, norm_params = extractor.normalize_features(feature_vectors, method='standard')
+
+# Get feature statistics
+stats = extractor.get_feature_statistics(feature_vectors)
+print(f"Dataset: {stats['n_samples']} samples, {stats['n_features']} features")
+print(f"Success rate: {stats['success_rate']:.1%}")
+```
+
+**Week 16 Phase 2 Tests**: 21/21 passing (100%) | **Documentation**: `docs/WEEK_16_PHASE_2_FEATURE_EXTRACTION.md`
+
+---
+
+### Week 16 Phase 1: Outcome Tracking Complete ✅
+Foundation for continuous improvement through experience tracking and accuracy analysis.
+
+#### **New Learning Features**
+
+**1. Outcome Tracking** (610 lines in `outcome_tracker.py`)
+- **OutcomeTracker Service**: Records execution results, compares predictions to reality
+- **AccuracyMetrics**: Time accuracy, plan adherence, goal achievement, deviation tracking
+- **OutcomeRecord**: Complete execution record with decision/plan/schedule context
+- **Persistent Storage**: JSON files in `data/outcomes/` for long-term learning
+
+**2. Analysis Capabilities**
+- **Decision Accuracy**: Success rate, confidence calibration, strategy comparison
+- **Planning Accuracy**: Plan adherence, completion rates, deviation analysis
+- **Scheduling Accuracy**: Time prediction accuracy, under/overestimation rates
+- **Improvement Trends**: Compare recent vs historical performance (sliding window)
+
+**3. ExecutiveSystem Integration**
+- **complete_goal_execution()**: Mark goals complete and auto-record outcomes
+- **get_learning_metrics()**: Retrieve unified accuracy analytics
+- **Extended ExecutionContext**: 5 new outcome fields (actual_completion_time, actual_success, outcome_score, deviations, accuracy_metrics)
+
+#### **Week 16 Phase 1 Quick Start**
+
+```python
+from src.executive.integration import ExecutiveSystem
+
+# Create system with outcome tracking
+system = ExecutiveSystem()
+
+# Execute a goal
+goal_id = system.goal_manager.create_goal(
+    "Analyze customer data",
+    success_criteria=["data_analyzed=True"]
+)
+context = system.execute_goal(goal_id)
+
+# Complete and record outcome
+outcome = system.complete_goal_execution(
+    goal_id,
+    success=True,
+    outcome_score=0.85,
+    deviations=["minor data quality issue"]
+)
+
+# Analyze learning metrics
+metrics = system.get_learning_metrics()
+print(f"Decision success rate: {metrics['decision_accuracy']['success_rate']:.1%}")
+print(f"Planning adherence: {metrics['planning_accuracy']['avg_plan_adherence']:.1%}")
+print(f"Time accuracy: {metrics['scheduling_accuracy']['avg_time_accuracy_ratio']:.2f}")
+```
+
+**Week 16 Tests**: 20/20 passing (100%) | **Documentation**: `docs/WEEK_16_PHASE_1_OUTCOME_TRACKING.md`
+
+---
+
+### Previous Update: Week 15 - System Integration ✅
 Unified orchestration layer connecting GoalManager, DecisionEngine, GOAPPlanner, and DynamicScheduler into end-to-end pipeline.
 
-#### **New Integration Features**
+#### **Week 15 Integration Features**
 
 **1. ExecutiveSystem Orchestrator** (497 lines in `integration.py`)
 - **Unified Pipeline**: Goal → Decision → Plan → Schedule → Execution
@@ -85,8 +207,22 @@ ExecutionContext (tracking & telemetry)
 #### **Week 15 Test Results**
 - **17/24 tests passing (71%)**
 - Core integration: 100% functional
-- Remaining failures: Minor timing assertion issues
+- Remaining failures: Minor timing assertion issues (planning executes too fast)
 - Pipeline latency: 12-15s for full execution
+
+**Test Coverage:**
+```bash
+# Run Week 15 integration tests
+pytest tests/test_integration_week15.py -v
+
+# Quick test
+pytest tests/test_integration_week15.py::TestExecutiveSystemInitialization -v
+
+# Test specific pipeline stage
+pytest tests/test_integration_week15.py::TestPipelineStages -v
+```
+
+See [Week 15 Completion Summary](docs/WEEK_15_COMPLETION_SUMMARY.md) for comprehensive documentation.
 
 ---
 

@@ -47,6 +47,28 @@ except ImportError as e:
     ContextAnalyzer = None  # type: ignore[assignment]
     MLDecisionModel = None  # type: ignore[assignment]
 
+# ML prediction imports (Phase 3 - with graceful fallback)
+try:
+    from .learning import (
+        ModelPredictor,
+        FeatureVector,
+    )
+    ML_PREDICTION_AVAILABLE = True
+except ImportError as e:
+    ML_PREDICTION_AVAILABLE = False
+    logging.debug(f"ML prediction features not available: {e}")
+    ModelPredictor = None  # type: ignore[assignment]
+    FeatureVector = None  # type: ignore[assignment]
+
+# Experiment Manager imports (Phase 4 - with graceful fallback)
+try:
+    from .learning import ExperimentManager
+    EXPERIMENT_MANAGER_AVAILABLE = True
+except ImportError as e:
+    EXPERIMENT_MANAGER_AVAILABLE = False
+    logging.debug(f"Experiment Manager not available: {e}")
+    ExperimentManager = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 class DecisionType(Enum):
@@ -595,8 +617,14 @@ class DecisionEngine:
     - ML learning from outcomes
     """
     
-    def __init__(self):
-        """Initialize decision engine"""
+    def __init__(self, enable_ml_predictions: bool = True, experiment_manager: Optional[Any] = None):
+        """
+        Initialize decision engine
+        
+        Args:
+            enable_ml_predictions: Whether to use ML predictions for confidence boosting
+            experiment_manager: Optional ExperimentManager for A/B testing
+        """
         self.strategies: Dict[str, DecisionStrategy] = {
             'weighted_scoring': WeightedScoringStrategy(),
             'ahp': AHPStrategy()
@@ -607,6 +635,24 @@ class DecisionEngine:
         
         # Enhanced decision adapter (Phase 1)
         self.enhanced_adapter = EnhancedDecisionAdapter() if ENHANCED_DECISION_AVAILABLE else None
+        
+        # ML predictor for confidence boosting (Phase 3)
+        self._ml_predictor = None
+        self._enable_ml = enable_ml_predictions and ML_PREDICTION_AVAILABLE
+        if self._enable_ml:
+            try:
+                from .learning import create_model_predictor
+                self._ml_predictor = create_model_predictor()
+                logger.info("ML predictions enabled for DecisionEngine")
+            except Exception as e:
+                logger.warning(f"Failed to initialize ML predictor: {e}")
+                self._enable_ml = False
+        
+        # Experiment manager for A/B testing (Phase 4)
+        self._experiment_manager = experiment_manager
+        self._enable_experiments = experiment_manager is not None and EXPERIMENT_MANAGER_AVAILABLE
+        if self._enable_experiments:
+            logger.info("A/B testing enabled for DecisionEngine")
         
         # Add enhanced strategies if available
         if self.enhanced_adapter and self.enhanced_adapter.feature_flags:
@@ -732,12 +778,164 @@ class DecisionEngine:
         
         return EnhancedStrategyWrapper(self.enhanced_adapter, strategy_type)
     
+    def _create_feature_vector_from_context(self, context: Dict[str, Any]) -> Any:
+        """
+        Create a FeatureVector from decision context for ML predictions.
+        
+        Args:
+            context: Decision context dictionary
+            
+        Returns:
+            FeatureVector if sufficient data available, None otherwise
+        """
+        if not self._enable_ml or FeatureVector is None:
+            return None
+        
+        try:
+            from datetime import datetime
+            now = datetime.now()
+            
+            # Extract context values with defaults
+            plan_length = context.get('plan_length', 1)
+            plan_cost = context.get('plan_cost', 1.0)
+            nodes_expanded = context.get('nodes_expanded', 0)
+            predicted_makespan = context.get('predicted_makespan_minutes', 10.0)
+            task_count = context.get('task_count', 1)
+            
+            # Create FeatureVector with all required fields
+            feature_vec = FeatureVector(
+                # Identification
+                record_id=f"temp_{now.timestamp()}",
+                goal_id=context.get('goal_id', 'temp_goal'),
+                timestamp=now,
+                
+                # Decision features
+                decision_strategy=context.get('strategy', 'weighted_scoring'),
+                decision_confidence=0.0,  # Placeholder, will be updated
+                decision_time_ms=0.0,  # Not available yet
+                
+                # Planning features
+                plan_length=plan_length,
+                plan_cost=plan_cost,
+                planning_time_ms=context.get('planning_time_ms', 100.0),
+                nodes_expanded=nodes_expanded,
+                
+                # Scheduling features
+                predicted_makespan_minutes=predicted_makespan,
+                task_count=task_count,
+                
+                # Context features
+                hour_of_day=now.hour,
+                day_of_week=now.weekday(),
+                
+                # Target variables (placeholders)
+                success=1,  # Assume success for prediction
+                outcome_score=0.5,  # Neutral default
+                time_accuracy_ratio=1.0,
+                plan_adherence_score=1.0,
+                
+                # Metadata
+                metadata={}
+            )
+            
+            return feature_vec
+            
+        except Exception as e:
+            logger.debug(f"Could not create FeatureVector from context: {e}")
+            return None
+    
+    def _boost_confidence_with_ml(
+        self,
+        result: DecisionResult,
+        strategy: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> DecisionResult:
+        """
+        Boost decision confidence using ML predictions.
+        
+        Args:
+            result: Original decision result
+            strategy: Strategy used for decision
+            context: Decision context
+            
+        Returns:
+            DecisionResult with potentially boosted confidence
+        """
+        if not self._enable_ml or not self._ml_predictor or not context:
+            return result
+        
+        try:
+            # Create feature vector from context
+            feature_vec = self._create_feature_vector_from_context(context)
+            if not feature_vec:
+                return result
+            
+            # Update feature vector with actual decision info
+            feature_vec.decision_strategy = strategy
+            feature_vec.decision_confidence = result.confidence
+            
+            # Get ML predictions
+            strategy_pred = self._ml_predictor.predict_strategy(feature_vec, return_probabilities=False)
+            success_pred = self._ml_predictor.predict_success(feature_vec)
+            
+            # Calculate confidence boost
+            confidence_boost = 0.0
+            ml_metadata = {}
+            
+            if strategy_pred and strategy_pred.prediction:
+                # Strategy prediction available
+                predicted_strategy = strategy_pred.prediction
+                ml_metadata['predicted_strategy'] = predicted_strategy
+                ml_metadata['strategy_confidence'] = strategy_pred.confidence
+                
+                # Boost if predicted strategy matches
+                if predicted_strategy == strategy:
+                    confidence_boost += 0.05 * strategy_pred.confidence
+                    ml_metadata['strategy_match'] = True
+                else:
+                    ml_metadata['strategy_match'] = False
+                    ml_metadata['strategy_mismatch_penalty'] = True
+            
+            if success_pred and success_pred.prediction is not None:
+                # Success prediction available
+                success_prob = float(success_pred.prediction)
+                ml_metadata['predicted_success_probability'] = success_prob
+                ml_metadata['success_confidence'] = success_pred.confidence
+                
+                # Boost based on predicted success (0-15% boost)
+                if success_prob > 0.5:
+                    confidence_boost += 0.15 * (success_prob - 0.5) * 2  # Scale 0.5-1.0 to 0-0.15
+                else:
+                    # Reduce confidence if low success predicted
+                    confidence_boost -= 0.10 * (0.5 - success_prob) * 2  # Penalty for low success
+            
+            # Apply boost (cap at 0.95 max confidence)
+            original_confidence = result.confidence
+            boosted_confidence = min(0.95, max(0.05, result.confidence + confidence_boost))
+            
+            # Update result
+            result.confidence = boosted_confidence
+            result.metadata['ml_predictions'] = ml_metadata
+            result.metadata['ml_confidence_boost'] = confidence_boost
+            result.metadata['original_confidence'] = original_confidence
+            
+            logger.debug(
+                f"ML confidence boost: {original_confidence:.3f} -> {boosted_confidence:.3f} "
+                f"(+{confidence_boost:+.3f})"
+            )
+            
+        except Exception as e:
+            logger.debug(f"ML confidence boost failed: {e}")
+        
+        return result
+    
     def make_decision(
         self,
         options: List[DecisionOption],
         criteria: Optional[List[DecisionCriterion]] = None,
         strategy: str = 'weighted_scoring',
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        experiment_id: Optional[str] = None
     ) -> DecisionResult:
         """
         Make a decision given options and criteria
@@ -745,8 +943,9 @@ class DecisionEngine:
         Args:
             options: List of options to choose from
             criteria: Decision criteria (uses template if None)
-            strategy: Decision strategy to use
+            strategy: Decision strategy to use (ignored if experiment_id provided)
             context: Additional context for decision
+            experiment_id: Optional experiment ID for A/B testing
             
         Returns:
             Decision result with recommendation
@@ -756,6 +955,30 @@ class DecisionEngine:
                 decision_id=str(uuid.uuid4()),
                 rationale="No options provided"
             )
+        
+        # Check if we're in experiment mode
+        assignment = None
+        if experiment_id and self._enable_experiments and self._experiment_manager:
+            try:
+                # Generate decision ID and goal ID for assignment
+                decision_id = context.get('decision_id', str(uuid.uuid4())) if context else str(uuid.uuid4())
+                goal_id = context.get('goal_id', 'default') if context else 'default'
+                
+                # Let experiment manager assign strategy
+                assignment = self._experiment_manager.assign_strategy(
+                    experiment_id=experiment_id,
+                    decision_id=decision_id,
+                    goal_id=goal_id,
+                    context=context
+                )
+                
+                # Use assigned strategy
+                strategy = assignment.assigned_strategy
+                logger.debug(f"Experiment {experiment_id}: Assigned strategy '{strategy}' for decision {decision_id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to assign strategy from experiment {experiment_id}: {e}")
+                # Fall through to use provided strategy
         
         if strategy not in self.strategies:
             raise ValueError(f"Unknown strategy: {strategy}")
@@ -769,10 +992,65 @@ class DecisionEngine:
         # Make decision using selected strategy
         result = self.strategies[strategy].decide(options, criteria, context)
         
+        # Store experiment assignment in result metadata
+        if assignment:
+            result.metadata['experiment_assignment'] = {
+                'assignment_id': assignment.assignment_id,
+                'experiment_id': experiment_id,
+                'assigned_strategy': strategy
+            }
+        
+        # Boost confidence with ML predictions if available
+        result = self._boost_confidence_with_ml(result, strategy, context)
+        
         # Store in history
         self.decision_history.append(result)
         
         return result
+    
+    def record_experiment_outcome(
+        self,
+        assignment_id: str,
+        success: bool,
+        outcome_score: float,
+        execution_time_seconds: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Record the outcome of an experimental decision.
+        
+        Args:
+            assignment_id: ID from experiment assignment
+            success: Whether execution succeeded
+            outcome_score: Outcome quality (0-1)
+            execution_time_seconds: Execution time
+            metadata: Additional metadata
+        """
+        if not self._enable_experiments or not self._experiment_manager:
+            logger.warning("Cannot record outcome: Experiments not enabled")
+            return
+        
+        try:
+            # Find decision confidence from history
+            decision_confidence = 0.0
+            for decision in reversed(self.decision_history):
+                if decision.metadata.get('experiment_assignment', {}).get('assignment_id') == assignment_id:
+                    decision_confidence = decision.confidence
+                    break
+            
+            self._experiment_manager.record_outcome(
+                assignment_id=assignment_id,
+                success=success,
+                outcome_score=outcome_score,
+                execution_time_seconds=execution_time_seconds,
+                decision_confidence=decision_confidence,
+                metadata=metadata
+            )
+            
+            logger.debug(f"Recorded experiment outcome for assignment {assignment_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to record experiment outcome: {e}")
     
     def recommend_task(
         self,
