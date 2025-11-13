@@ -2,6 +2,13 @@
 
 Repo-specific guidance for being productive immediately. Keep changes small, concrete, and consistent with existing patterns.
 
+## OpenMemory Integration
+- **MCP Server**: OpenMemory is available via MCP at `http://localhost:8080/mcp` (requires Docker container running)
+- **Automatic Memory Usage**: When the user shares important preferences, coding patterns, project context, or decisions, proactively use `openmemory_store` to save it with appropriate tags and `user_id`
+- **Context Retrieval**: Before answering questions about preferences or past context, use `openmemory_query` to check for relevant memories
+- **Memory Sectors**: Use appropriate tags for different types of information (e.g., "preferences", "patterns", "decisions", "architecture")
+- **User Isolation**: Always use a consistent `user_id` (e.g., based on workspace or session) to keep memories isolated
+
 ## Ground rules
 - Python 3.12. Put new source in `src/` and tests in `tests/`.
 - Shell is bash on Windows 11. Do not include emojis in commands. Assume a venv is active.
