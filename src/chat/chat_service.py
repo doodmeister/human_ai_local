@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 import time
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 from pydantic import BaseModel, Field
 try:  # Pydantic v2
@@ -21,6 +21,8 @@ from .scoring import get_scoring_profile_version
 from .constants import PREVIEW_MAX_ITEMS, PREVIEW_MAX_CONTENT_CHARS
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from .memory_capture import MemoryCaptureModule, MemoryCaptureCache  # added import near top
+from .intent_classifier import IntentClassifier  # Production Phase 1
+from .goal_detector import GoalDetector  # Production Phase 1
 import re  # added for fact question pattern
 
 
@@ -46,6 +48,9 @@ class ChatService:
         # Memory capture modules (Phase 1)
         self._capture = MemoryCaptureModule()
         self._capture_cache = MemoryCaptureCache()
+        # Production Phase 1: Intent classification and goal detection
+        self._intent_classifier = IntentClassifier()
+        self._goal_detector = None  # Lazy init to avoid circular dependency with executive system
         # Consolidation event log (simple list for recent trace enrichment)
         self.consolidation_log = []  # entries: dict(user_turn_id,status,salience,valence,timestamp)
         # Metacognitive tracking fields
@@ -100,6 +105,28 @@ class ChatService:
         t_start = time.time()
         flags = flags or {}
         sess = self.sessions.create_or_get(session_id)
+        
+        # Production Phase 1: Classify user intent
+        intent = self._intent_classifier.classify(message)
+        detected_goal = None
+        
+        # Detect and create goals automatically
+        if intent.intent_type == 'goal_creation':
+            try:
+                # Lazy init goal detector
+                if self._goal_detector is None:
+                    from src.executive.integration import ExecutiveSystem
+                    executive_system = ExecutiveSystem()
+                    self._goal_detector = GoalDetector(executive_system)
+                
+                detected_goal = self._goal_detector.detect_goal(message, sess.session_id)
+                if detected_goal:
+                    metrics_registry.inc("goals_auto_detected_total")
+            except Exception as e:
+                # Don't fail the conversation if goal detection fails
+                print(f"Goal detection error: {e}")
+                detected_goal = None
+        
         salience, valence = estimate_salience_and_valence(message)
         importance = self._estimate_importance(message, salience, valence)
         user_turn = TurnRecord(
@@ -305,6 +332,15 @@ class ChatService:
                 assistant_content = answer
         except Exception:
             pass
+        
+        # Production Phase 1: Enrich response with goal confirmation if detected
+        if detected_goal and detected_goal.confirmation_needed:
+            goal_confirmation = self._format_goal_confirmation(detected_goal)
+            if assistant_content:
+                assistant_content = assistant_content + "\n\n" + goal_confirmation
+            else:
+                assistant_content = goal_confirmation
+        
         if not assistant_content:
             assistant_content = self._generate_placeholder_response(message)
         assistant_turn = TurnRecord(
@@ -396,6 +432,20 @@ class ChatService:
             "response": assistant_turn.content,
             # Newly exposed: most recent captured memory units extracted from this user message
             "captured_memories": stored_captures,
+            # Production Phase 1: Intent and goal detection
+            "intent": {
+                "type": intent.intent_type,
+                "confidence": intent.confidence,
+                "entities": intent.entities,
+            } if intent else None,
+            "detected_goal": {
+                "goal_id": detected_goal.goal_id,
+                "title": detected_goal.title,
+                "description": detected_goal.description,
+                "deadline": detected_goal.deadline.isoformat() if detected_goal.deadline else None,
+                "priority": detected_goal.priority.value if detected_goal.priority else None,
+                "estimated_duration_minutes": int(detected_goal.estimated_duration.total_seconds() / 60) if detected_goal.estimated_duration else None,
+            } if detected_goal else None,
             "metrics": {
                 "turn_latency_ms": built.metrics.turn_latency_ms,
                 "retrieval_time_ms": built.metrics.retrieval_time_ms,
@@ -593,6 +643,54 @@ class ChatService:
         length_factor = min(1.0, len(content.split()) / 30.0)
         emotional_weight = min(1.0, abs(valence))
         return max(salience * 0.5 + length_factor * 0.3 + emotional_weight * 0.2, salience * 0.6)
+    
+    def _format_goal_confirmation(self, detected_goal) -> str:
+        """
+        Format a natural language goal confirmation for the user.
+        
+        Production Phase 1: Automatic goal detection integration.
+        """
+        confirmation = f"\n\n🎯 **Goal Created**: {detected_goal.title}"
+        
+        if detected_goal.deadline:
+            # Format deadline nicely
+            deadline_date = detected_goal.deadline
+            today = datetime.now().date()
+            if deadline_date.date() == today:
+                deadline_str = "today"
+            elif deadline_date.date() == (today + timedelta(days=1)):
+                deadline_str = "tomorrow"
+            else:
+                # Show day of week if within next week
+                days_until = (deadline_date.date() - today).days
+                if days_until <= 7:
+                    deadline_str = deadline_date.strftime("%A")  # e.g., "Friday"
+                else:
+                    deadline_str = deadline_date.strftime("%B %d")  # e.g., "November 15"
+            
+            confirmation += f" (Due: {deadline_str})"
+        
+        # Add priority indicator if high priority
+        if hasattr(detected_goal, 'priority') and detected_goal.priority:
+            try:
+                from src.executive.goal_manager import GoalPriority
+                if detected_goal.priority == GoalPriority.HIGH:
+                    confirmation += " ⚡"
+            except:
+                pass
+        
+        # Add estimated duration if available
+        if detected_goal.estimated_duration:
+            minutes = int(detected_goal.estimated_duration.total_seconds() / 60)
+            if minutes < 60:
+                confirmation += f"\n📊 Estimated time: {minutes} minutes"
+            else:
+                hours = minutes / 60
+                confirmation += f"\n📊 Estimated time: {hours:.1f} hours"
+        
+        confirmation += f"\n\nI'll track this goal for you. Ask me 'How's my {detected_goal.title[:20]}...' to check progress anytime!"
+        
+        return confirmation
 
     def _invoke_agent_response(self, message: str, built: Any) -> str:
         """Invoke the configured agent to generate a response with context."""
