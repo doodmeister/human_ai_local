@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta, date
 
-from src.chat.intent_classifier import IntentClassifier, Intent
+from src.chat.intent_classifier_v2 import (
+    IntentClassifierV2,
+    IntentV2,
+    ConversationContext,
+    create_intent_classifier_v2,
+)
 from src.executive.integration import ExecutiveSystem
 from src.executive.goal_manager import GoalPriority
 
@@ -40,9 +45,15 @@ class GoalDetector:
             executive_system: Executive system for goal creation (optional, for testing)
         """
         self.executive = executive_system or ExecutiveSystem()
-        self.intent_classifier = IntentClassifier()
+        self._intent_classifiers: Dict[str, IntentClassifierV2] = {}
     
-    def detect_goal(self, message: str, session_id: str, user_context: Optional[Dict] = None) -> Optional[DetectedGoal]:
+    def detect_goal(
+        self,
+        message: str,
+        session_id: str,
+        user_context: Optional[Dict] = None,
+        intent: Optional[IntentV2] = None,
+    ) -> Optional[DetectedGoal]:
         """
         Analyzes message and creates goal if detected.
         
@@ -55,7 +66,9 @@ class GoalDetector:
             DetectedGoal if goal detected and created, None otherwise
         """
         # Classify intent
-        intent = self.intent_classifier.classify(message)
+        if intent is None:
+            intent_classifier = self._get_intent_classifier(session_id)
+            intent = intent_classifier.classify(message)
         
         # Only process goal creation intents
         if intent.intent_type != 'goal_creation':
@@ -81,15 +94,24 @@ class GoalDetector:
         
         # Create goal in executive system
         try:
-            goal = self.executive.goal_manager.create_goal(
+            goal_ref = self.executive.goal_manager.create_goal(
                 title=title,
                 description=entities.get('goal_description', message),
                 priority=priority,
                 deadline=deadline
             )
+            goal_id: str
+            if isinstance(goal_ref, str):
+                goal_id = goal_ref
+            elif hasattr(goal_ref, "goal_id"):
+                goal_id = getattr(goal_ref, "goal_id")
+            elif hasattr(goal_ref, "id"):
+                goal_id = getattr(goal_ref, "id")
+            else:
+                goal_id = str(goal_ref)
             
             return DetectedGoal(
-                goal_id=goal.goal_id,
+                goal_id=goal_id,
                 title=title,
                 description=entities.get('goal_description', message),
                 deadline=deadline,
@@ -134,6 +156,13 @@ class GoalDetector:
         
         # Capitalize first letter
         return title[0].upper() + title[1:] if title else "Untitled Goal"
+
+    def _get_intent_classifier(self, session_id: str) -> IntentClassifierV2:
+        classifier = self._intent_classifiers.get(session_id)
+        if classifier is None:
+            classifier = create_intent_classifier_v2(context=ConversationContext())
+            self._intent_classifiers[session_id] = classifier
+        return classifier
     
     def _parse_deadline(self, deadline_str: Optional[str]) -> Optional[datetime]:
         """

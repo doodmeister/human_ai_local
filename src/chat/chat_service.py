@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Dict, Any, Optional, Set
 import time
 import asyncio
 import logging
@@ -22,15 +22,19 @@ from .scoring import get_scoring_profile_version
 from .constants import PREVIEW_MAX_ITEMS, PREVIEW_MAX_CONTENT_CHARS
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from .memory_capture import MemoryCaptureModule, MemoryCaptureCache  # added import near top
-from .intent_classifier import IntentClassifier  # Production Phase 1
+from .intent_classifier_v2 import (
+    IntentClassifierV2,
+    IntentV2,
+    ConversationContext,
+    create_intent_classifier_v2,
+)
 from .goal_detector import GoalDetector  # Production Phase 1
 from .executive_orchestrator import ExecutiveOrchestrator  # Production Phase 1 - Task 6
 from .memory_query_parser import create_memory_query_parser  # Production Phase 1 - Task 8
 from .memory_query_interface import create_memory_query_interface  # Production Phase 1 - Task 8
 import re  # added for fact question pattern
 
-if TYPE_CHECKING:
-    from .intent_classifier import Intent
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -42,6 +46,12 @@ class ChatService:
     - Applies consolidation decision heuristic
     - Returns structured payload
     """
+
+    _INTENT_HANDLER_PRIORITY = ("goal_query", "memory_query")
+    _INTENT_SECTION_HEADERS = {
+        "goal_query": "Goal update",
+        "memory_query": "Memory lookup",
+    }
 
     def __init__(self,
                  session_manager: SessionManager,
@@ -56,7 +66,8 @@ class ChatService:
         self._capture = MemoryCaptureModule()
         self._capture_cache = MemoryCaptureCache()
         # Production Phase 1: Intent classification and goal detection
-        self._intent_classifier = IntentClassifier()
+        self._intent_classifiers: Dict[str, IntentClassifierV2] = {}
+        self._session_goal_index: Dict[str, Set[str]] = {}
         self._goal_detector = None  # Lazy init to avoid circular dependency with executive system
         self._orchestrator = None  # Lazy init for background goal execution (Task 6)
         # Production Phase 1 - Task 8: Memory query handling
@@ -118,8 +129,16 @@ class ChatService:
         sess = self.sessions.create_or_get(session_id)
         
         # Production Phase 1: Classify user intent
-        intent = self._intent_classifier.classify(message)
+        intent: IntentV2
+        classifier = self._get_intent_classifier(sess.session_id)
+        try:
+            intent = classifier.classify(message, use_context=True)
+        except Exception as exc:
+            logger.error("Intent classification failed: %s", exc, exc_info=True)
+            intent = self._fallback_intent(message)
         detected_goal = None
+        intent_sections: list[Dict[str, Any]] = []
+        intent_execution_log: list[Dict[str, Any]] = []
         
         # Detect and create goals automatically
         if intent.intent_type == 'goal_creation':
@@ -130,9 +149,16 @@ class ChatService:
                     executive_system = ExecutiveSystem()
                     self._goal_detector = GoalDetector(executive_system)
                 
-                detected_goal = self._goal_detector.detect_goal(message, sess.session_id)
+                detected_goal = self._goal_detector.detect_goal(
+                    message,
+                    sess.session_id,
+                    intent=intent,
+                )
                 if detected_goal:
                     metrics_registry.inc("goals_auto_detected_total")
+                    self._record_session_goal(sess.session_id, detected_goal.goal_id)
+                    # Update classifier context with fresh goal count for future turns
+                    classifier.context.active_goals = set(self._session_goal_index.get(sess.session_id, set()))
                     
                     # Start background execution
                     if self._orchestrator is None:
@@ -388,27 +414,22 @@ class ChatService:
             else:
                 assistant_content = goal_confirmation
         
-        # Production Phase 1 - Task 6: Handle goal status queries
-        if intent.intent_type == 'goal_query' and self._orchestrator:
-            try:
-                goal_status_text = self._handle_goal_query(intent, sess.session_id)
-                if goal_status_text:
-                    if assistant_content:
-                        assistant_content = goal_status_text + "\n\n" + assistant_content
-                    else:
-                        assistant_content = goal_status_text
-            except Exception as e:
-                # Don't fail conversation if goal query fails
-                print(f"Goal query error: {e}")
-        
-        # Production Phase 1 - Task 8: Handle memory queries
-        if intent.intent_type == 'memory_query':
-            memory_response_text = self._handle_memory_query(message, sess.session_id)
-            if memory_response_text:
-                if assistant_content:
-                    assistant_content = memory_response_text + "\n\n" + assistant_content
-                else:
-                    assistant_content = memory_response_text
+        # Production Phase 1 - Multi-intent fan-out (goal + memory queries, etc.)
+        intent_sections, intent_execution_log = self._run_intent_handlers(
+            intent=intent,
+            message=message,
+            session_id=sess.session_id,
+        )
+        assistant_content = self._merge_intent_sections(intent_sections, assistant_content)
+
+        session_context = self._build_session_context(
+            sess.session_id,
+            intent,
+            detected_goal,
+            stored_captures,
+            extra_due,
+        )
+        setattr(sess, "_session_context_snapshot", session_context)
         
         if not assistant_content:
             assistant_content = self._generate_placeholder_response(message)
@@ -502,11 +523,10 @@ class ChatService:
             # Newly exposed: most recent captured memory units extracted from this user message
             "captured_memories": stored_captures,
             # Production Phase 1: Intent and goal detection
-            "intent": {
-                "type": intent.intent_type,
-                "confidence": intent.confidence,
-                "entities": intent.entities,
-            } if intent else None,
+            "intent": self._serialize_intent(intent) if intent else None,
+            "intent_sections": intent_sections,
+            "intent_results": intent_execution_log,
+            "session_context": session_context,
             "detected_goal": {
                 "goal_id": detected_goal.goal_id,
                 "title": detected_goal.title,
@@ -706,6 +726,173 @@ class ChatService:
             yield {"type": "token", "t": token}
         yield {"type": "final", "data": base}
 
+    def _get_intent_classifier(self, session_id: str) -> IntentClassifierV2:
+        """Return or initialize the session-scoped intent classifier."""
+        classifier = self._intent_classifiers.get(session_id)
+        if classifier is None:
+            classifier = create_intent_classifier_v2(context=ConversationContext())
+            self._intent_classifiers[session_id] = classifier
+        # Refresh active goal context to keep boosts accurate
+        classifier.context.active_goals = set(self._session_goal_index.get(session_id, set()))
+        return classifier
+
+    def _record_session_goal(self, session_id: str, goal_id: str) -> None:
+        """Track goal IDs per session for context-aware intent boosts."""
+        goals = self._session_goal_index.setdefault(session_id, set())
+        goals.add(goal_id)
+
+    def _fallback_intent(self, message: str) -> IntentV2:
+        """Create a safe general_chat intent if classification fails."""
+        return IntentV2(
+            intent_type="general_chat",
+            confidence=1.0,
+            entities={},
+            original_message=message,
+            matched_patterns=[],
+        )
+
+    def _serialize_intent(self, intent: IntentV2) -> Dict[str, Any]:
+        """Serialize IntentV2 for API payloads."""
+        return {
+            "type": intent.intent_type,
+            "confidence": intent.confidence,
+            "entities": intent.entities,
+            "matched_patterns": intent.matched_patterns,
+            "secondary_intents": intent.secondary_intents,
+            "is_ambiguous": intent.is_ambiguous,
+            "ambiguity_score": intent.ambiguity_score,
+            "context_boost": intent.context_boost,
+            "conversation_context": intent.conversation_context,
+        }
+
+    def _plan_intent_execution(self, intent: IntentV2) -> list[str]:
+        """Return ordered list of intent handlers to execute for this turn."""
+        allowed = set(self._INTENT_HANDLER_PRIORITY)
+        ordered_candidates: list[str] = []
+        if intent.intent_type in allowed:
+            ordered_candidates.append(intent.intent_type)
+        for intent_name, _conf in intent.secondary_intents:
+            if intent_name in allowed and intent_name not in ordered_candidates:
+                ordered_candidates.append(intent_name)
+        plan = sorted(
+            ordered_candidates,
+            key=lambda name: (
+                self._INTENT_HANDLER_PRIORITY.index(name),
+                ordered_candidates.index(name),
+            ),
+        )
+        return plan
+
+    def _run_intent_handlers(
+        self,
+        intent: IntentV2,
+        message: str,
+        session_id: str,
+    ) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        """Execute all applicable intent handlers and return sections + execution log."""
+        sections: list[Dict[str, Any]] = []
+        execution_log: list[Dict[str, Any]] = []
+        plan = self._plan_intent_execution(intent)
+        for handler_name in plan:
+            confidence = self._get_intent_confidence(intent, handler_name)
+            handler_callable = None
+            if handler_name == "goal_query":
+                if self._orchestrator is None:
+                    execution_log.append({
+                        "intent": handler_name,
+                        "confidence": confidence,
+                        "handled": False,
+                        "response": None,
+                        "error": "orchestrator_unavailable",
+                        "duration_ms": 0.0,
+                    })
+                    continue
+                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_goal_query(_intent, _sid)
+            elif handler_name == "memory_query":
+                handler_callable = lambda _message=message, _sid=session_id: self._handle_memory_query(_message, _sid)
+            if handler_callable is None:
+                continue
+            metrics_registry.inc(f"intent_handler_{handler_name}_attempts_total")
+            start = time.time()
+            response_text = None
+            error_text = None
+            try:
+                response_text = handler_callable()
+                if response_text:
+                    sections.append({
+                        "intent": handler_name,
+                        "confidence": confidence,
+                        "content": response_text,
+                    })
+                    metrics_registry.inc(f"intent_handler_{handler_name}_handled_total")
+            except Exception as exc:  # pragma: no cover - defensive guard
+                error_text = str(exc)
+                response_text = None
+            duration_ms = (time.time() - start) * 1000.0
+            execution_log.append({
+                "intent": handler_name,
+                "confidence": confidence,
+                "handled": bool(response_text),
+                "response": response_text,
+                "error": error_text,
+                "duration_ms": duration_ms,
+            })
+        return sections, execution_log
+
+    def _merge_intent_sections(
+        self,
+        sections: list[Dict[str, Any]],
+        base_response: Optional[str],
+    ) -> str:
+        """Merge intent-specific sections with the base assistant response."""
+        blocks: list[str] = []
+        for section in sections:
+            header = self._INTENT_SECTION_HEADERS.get(
+                section["intent"],
+                section["intent"].replace("_", " ").title(),
+            )
+            content = section.get("content") or ""
+            content = content.strip()
+            if content:
+                blocks.append(f"{header}:\n{content}")
+        if base_response:
+            stripped = base_response.strip()
+            if stripped:
+                blocks.append(stripped)
+        merged = "\n\n".join(blocks).strip()
+        return merged
+
+    def _get_intent_confidence(self, intent: IntentV2, intent_name: str) -> float:
+        """Return the classifier confidence for the given intent name."""
+        if intent_name == intent.intent_type:
+            return intent.confidence
+        for secondary_name, secondary_conf in intent.secondary_intents:
+            if secondary_name == intent_name:
+                return secondary_conf
+        return 0.0
+
+    def _build_session_context(
+        self,
+        session_id: str,
+        intent: IntentV2,
+        detected_goal: Optional[Any],
+        stored_captures: list[Dict[str, Any]],
+        extra_due: list[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Construct a lightweight session context snapshot for UI consumers."""
+        active_goals = sorted(self._session_goal_index.get(session_id, set()))
+        context = {
+            "session_id": session_id,
+            "active_goal_ids": active_goals,
+            "captured_memory_count": len(stored_captures),
+            "prospective_due_count": len(extra_due),
+            "last_intent": intent.intent_type,
+            "classifier_context": intent.conversation_context,
+        }
+        if detected_goal is not None:
+            context["last_detected_goal_id"] = detected_goal.goal_id
+        return context
+
     # --- Helpers ---
 
     def _get_stat_value(self, stats: Any, key: str, default: Any) -> float:
@@ -780,7 +967,7 @@ class ChatService:
         
         return confirmation
     
-    def _handle_goal_query(self, intent: 'Intent', session_id: str) -> Optional[str]:
+    def _handle_goal_query(self, intent: IntentV2, session_id: str) -> Optional[str]:
         """
         Handle goal status queries (Task 6).
         
@@ -795,7 +982,10 @@ class ChatService:
             return None
         
         # Extract goal identifier from entities
-        goal_identifier = intent.entities.get('goal_identifier')
+        goal_identifier = (
+            intent.entities.get('goal_identifier')
+            or intent.entities.get('goal_reference')
+        )
         if not goal_identifier:
             # Try to find recent goals for this session
             active_executions = self._orchestrator.list_active_executions()
