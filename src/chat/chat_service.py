@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 import time
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from collections import deque
 from pydantic import BaseModel, Field
@@ -23,7 +24,13 @@ from src.memory.prospective.prospective_memory import get_inmemory_prospective_m
 from .memory_capture import MemoryCaptureModule, MemoryCaptureCache  # added import near top
 from .intent_classifier import IntentClassifier  # Production Phase 1
 from .goal_detector import GoalDetector  # Production Phase 1
+from .executive_orchestrator import ExecutiveOrchestrator  # Production Phase 1 - Task 6
+from .memory_query_parser import create_memory_query_parser  # Production Phase 1 - Task 8
+from .memory_query_interface import create_memory_query_interface  # Production Phase 1 - Task 8
 import re  # added for fact question pattern
+
+if TYPE_CHECKING:
+    from .intent_classifier import Intent
 
 
 class ChatService:
@@ -51,6 +58,10 @@ class ChatService:
         # Production Phase 1: Intent classification and goal detection
         self._intent_classifier = IntentClassifier()
         self._goal_detector = None  # Lazy init to avoid circular dependency with executive system
+        self._orchestrator = None  # Lazy init for background goal execution (Task 6)
+        # Production Phase 1 - Task 8: Memory query handling
+        self._memory_query_parser = create_memory_query_parser()
+        self._memory_query_interface = None  # Lazy init with memory systems
         # Consolidation event log (simple list for recent trace enrichment)
         self.consolidation_log = []  # entries: dict(user_turn_id,status,salience,valence,timestamp)
         # Metacognitive tracking fields
@@ -122,6 +133,17 @@ class ChatService:
                 detected_goal = self._goal_detector.detect_goal(message, sess.session_id)
                 if detected_goal:
                     metrics_registry.inc("goals_auto_detected_total")
+                    
+                    # Start background execution
+                    if self._orchestrator is None:
+                        from src.executive.integration import ExecutiveSystem
+                        executive_system = ExecutiveSystem()
+                        self._orchestrator = ExecutiveOrchestrator(executive_system)
+                    try:
+                        asyncio.create_task(self._orchestrator.execute_goal_async(detected_goal.goal_id))
+                    except RuntimeError:
+                        # No event loop running, skip async execution for now
+                        pass
             except Exception as e:
                 # Don't fail the conversation if goal detection fails
                 print(f"Goal detection error: {e}")
@@ -156,16 +178,41 @@ class ChatService:
                                 prior_objs.add(pobj)
                 except Exception:
                     prior_objs = set()
-            stats = self._capture_cache.update(cm)
+            # Use correct method name or implement fallback
+            try:
+                update_fn = getattr(self._capture_cache, "update", None)
+                if callable(update_fn):
+                    stats = update_fn(cm)
+                else:
+                    update_capture_fn = getattr(self._capture_cache, "update_capture", None)
+                    if callable(update_capture_fn):
+                        stats = update_capture_fn(cm)
+                    else:
+                        # Fallback: create stats manually
+                        stats = {
+                            "frequency": 1,
+                            "first_seen_ts": time.time(),
+                            "last_seen_ts": time.time(),
+                        }
+            except Exception:
+                stats = {
+                    "frequency": 1,
+                    "first_seen_ts": time.time(),
+                    "last_seen_ts": time.time(),
+                }
+            default_ts = time.time()
+            frequency = self._get_stat_value(stats, "frequency", 1)
+            first_seen_ts = self._get_stat_value(stats, "first_seen_ts", default_ts)
+            last_seen_ts = self._get_stat_value(stats, "last_seen_ts", default_ts)
             meta = {
                 "memory_type": cm.memory_type,
                 "subject": (cm.subject or "").lower(),
                 "predicate": (cm.predicate or "").lower(),
                 "object": (cm.obj or "").lower(),
                 "raw_text": cm.raw_text,
-                "frequency": stats["frequency"],
-                "first_seen_ts": stats["first_seen_ts"],
-                "last_seen_ts": stats["last_seen_ts"],
+                "frequency": frequency,
+                "first_seen_ts": first_seen_ts,
+                "last_seen_ts": last_seen_ts,
                 "extracted_from_turn_id": user_turn.turn_id,
             }
             # Contradiction detection for identity facts (same subject different object values over time)
@@ -180,7 +227,7 @@ class ChatService:
                     pass
             # Frequency reinforcement: if frequency passes thresholds, mark reinforcement and slightly boost importance
             try:
-                freq = stats.get("frequency", 0)
+                freq = meta.get("frequency", 0)
                 if freq in (2, 3, 5, 8):  # key reinforcement milestones
                     meta["reinforced"] = True
                     # Boost importance proportionally (capped)
@@ -340,6 +387,28 @@ class ChatService:
                 assistant_content = assistant_content + "\n\n" + goal_confirmation
             else:
                 assistant_content = goal_confirmation
+        
+        # Production Phase 1 - Task 6: Handle goal status queries
+        if intent.intent_type == 'goal_query' and self._orchestrator:
+            try:
+                goal_status_text = self._handle_goal_query(intent, sess.session_id)
+                if goal_status_text:
+                    if assistant_content:
+                        assistant_content = goal_status_text + "\n\n" + assistant_content
+                    else:
+                        assistant_content = goal_status_text
+            except Exception as e:
+                # Don't fail conversation if goal query fails
+                print(f"Goal query error: {e}")
+        
+        # Production Phase 1 - Task 8: Handle memory queries
+        if intent.intent_type == 'memory_query':
+            memory_response_text = self._handle_memory_query(message, sess.session_id)
+            if memory_response_text:
+                if assistant_content:
+                    assistant_content = memory_response_text + "\n\n" + assistant_content
+                else:
+                    assistant_content = memory_response_text
         
         if not assistant_content:
             assistant_content = self._generate_placeholder_response(message)
@@ -639,6 +708,25 @@ class ChatService:
 
     # --- Helpers ---
 
+    def _get_stat_value(self, stats: Any, key: str, default: Any) -> float:
+        """Safely extract a numeric statistic value with graceful fallback."""
+        value: Any = default
+        try:
+            if isinstance(stats, dict):
+                value = stats.get(key, default)
+            else:
+                value = getattr(stats, key, default)
+        except Exception:
+            value = default
+
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            try:
+                return float(default)
+            except (TypeError, ValueError):
+                return 0.0
+
     def _estimate_importance(self, content: str, salience: float, valence: float) -> float:
         length_factor = min(1.0, len(content.split()) / 30.0)
         emotional_weight = min(1.0, abs(valence))
@@ -691,6 +779,110 @@ class ChatService:
         confirmation += f"\n\nI'll track this goal for you. Ask me 'How's my {detected_goal.title[:20]}...' to check progress anytime!"
         
         return confirmation
+    
+    def _handle_goal_query(self, intent: 'Intent', session_id: str) -> Optional[str]:
+        """
+        Handle goal status queries (Task 6).
+        
+        Args:
+            intent: Classified intent with goal_query type
+            session_id: Current session ID
+            
+        Returns:
+            Formatted status text or None if no goals found
+        """
+        if not self._orchestrator:
+            return None
+        
+        # Extract goal identifier from entities
+        goal_identifier = intent.entities.get('goal_identifier')
+        if not goal_identifier:
+            # Try to find recent goals for this session
+            active_executions = self._orchestrator.list_active_executions()
+            if not active_executions:
+                return "You don't have any active goals at the moment."
+            
+            # Show status of most recent active goal
+            progress = active_executions[0]
+            return self._orchestrator.format_status_for_chat(progress.goal_id)
+        
+        # Try to find goal by identifier (title substring match) via orchestrator
+        try:
+            # Access goal manager through orchestrator's executive system
+            if hasattr(self._orchestrator, 'executive_system'):
+                goal_manager = self._orchestrator.executive_system.goal_manager
+            elif hasattr(self._orchestrator, '_executive_system'):
+                goal_manager = getattr(self._orchestrator, '_executive_system').goal_manager  # legacy attribute support
+            else:
+                # Fallback: just list active executions
+                active_executions = self._orchestrator.list_active_executions()
+                if not active_executions:
+                    return "You don't have any active goals at the moment."
+                return self._orchestrator.format_status_for_chat(active_executions[0].goal_id)
+            
+            matching_goals = []
+            for goal_id, goal in goal_manager.goals.items():
+                if goal_identifier.lower() in goal.title.lower():
+                    matching_goals.append(goal)
+            
+            if not matching_goals:
+                return f"I couldn't find a goal matching '{goal_identifier}'."
+            
+            # Show status of first match
+            goal = matching_goals[0]
+            return self._orchestrator.format_status_for_chat(goal.goal_id)
+        except Exception:
+            # Fallback to showing active executions
+            active_executions = self._orchestrator.list_active_executions()
+            if not active_executions:
+                return "You don't have any active goals at the moment."
+            return self._orchestrator.format_status_for_chat(active_executions[0].goal_id)
+    
+    def _handle_memory_query(self, message: str, session_id: str) -> Optional[str]:
+        """
+        Handle memory query intent using MemoryQueryParser and Interface.
+        
+        Args:
+            message: User's query message
+            session_id: Current session ID
+            
+        Returns:
+            Formatted memory response or None
+        """
+        try:
+            # Parse the query
+            query_result = self._memory_query_parser.parse_query(message)
+            
+            # Lazy init memory query interface with actual memory systems
+            if self._memory_query_interface is None:
+                # Get memory systems from consolidator
+                stm = None
+                ltm = None
+                episodic = None
+                
+                if self.consolidator:
+                    stm = getattr(self.consolidator, 'stm', None)
+                    ltm = getattr(self.consolidator, 'ltm', None)
+                    episodic = getattr(self.consolidator, 'episodic', None)
+                
+                self._memory_query_interface = create_memory_query_interface(
+                    stm=stm,
+                    ltm=ltm,
+                    episodic=episodic
+                )
+            
+            # Execute query
+            response = self._memory_query_interface.execute_query(query_result)
+            
+            # Format for chat
+            formatted = self._memory_query_interface.format_response(response)
+            
+            return formatted
+        
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error handling memory query: {e}", exc_info=True)
+            return None
 
     def _invoke_agent_response(self, message: str, built: Any) -> str:
         """Invoke the configured agent to generate a response with context."""
@@ -714,6 +906,7 @@ class ChatService:
         except Exception:
             memory_context = []
 
+        result = None
         try:
             result = self.agent._generate_response(
                 processed_input={"raw_input": message, "processed_at": datetime.now()},
@@ -724,7 +917,7 @@ class ChatService:
                 return str(self._run_coroutine_sync(result))
             return str(result)
         except Exception as exc:
-            if "result" in locals() and asyncio.iscoroutine(result):
+            if result is not None and asyncio.iscoroutine(result):
                 try:
                     result.close()
                 except Exception:
