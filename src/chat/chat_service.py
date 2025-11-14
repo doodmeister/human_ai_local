@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, Set
+from typing import Dict, Any, Optional, Set, Tuple
 import time
 import asyncio
 import logging
@@ -47,10 +47,12 @@ class ChatService:
     - Returns structured payload
     """
 
-    _INTENT_HANDLER_PRIORITY = ("goal_query", "memory_query")
+    _INTENT_HANDLER_PRIORITY = ("goal_query", "memory_query", "performance_query", "system_status")
     _INTENT_SECTION_HEADERS = {
         "goal_query": "Goal update",
         "memory_query": "Memory lookup",
+        "performance_query": "Performance metrics",
+        "system_status": "System status",
     }
 
     def __init__(self,
@@ -810,6 +812,10 @@ class ChatService:
                 handler_callable = lambda _intent=intent, _sid=session_id: self._handle_goal_query(_intent, _sid)
             elif handler_name == "memory_query":
                 handler_callable = lambda _message=message, _sid=session_id: self._handle_memory_query(_message, _sid)
+            elif handler_name == "performance_query":
+                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_performance_query(_intent, _sid)
+            elif handler_name == "system_status":
+                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_system_status(_intent, _sid)
             if handler_callable is None:
                 continue
             metrics_registry.inc(f"intent_handler_{handler_name}_attempts_total")
@@ -894,6 +900,49 @@ class ChatService:
         return context
 
     # --- Helpers ---
+
+    def _get_stm_usage_snapshot(self) -> Tuple[Optional[int], Optional[int], Optional[float]]:
+        """Return STM size, capacity, and utilization ratio if available."""
+        if self.consolidator is None:
+            return None, None, None
+        stm_obj = getattr(self.consolidator, "stm", None)
+        if stm_obj is None:
+            return None, None, None
+        size = None
+        try:
+            if hasattr(stm_obj, "__len__"):
+                size = len(stm_obj)  # type: ignore[arg-type]
+        except Exception:
+            size = None
+        if size is None:
+            fallback_size = getattr(stm_obj, "size", None)
+            if isinstance(fallback_size, int):
+                size = fallback_size
+        capacity = getattr(stm_obj, "capacity", None)
+        if not isinstance(capacity, int):
+            capacity = None
+        utilization = None
+        if isinstance(size, int) and isinstance(capacity, int) and capacity > 0:
+            utilization = min(1.0, max(0.0, size / capacity))
+        return size, capacity, utilization
+
+    def _format_latency_ms(self, value: Optional[Any]) -> str:
+        """Format latency or duration values for chat output."""
+        try:
+            if isinstance(value, (int, float)):
+                return f"{value:.0f} ms"
+        except Exception:
+            pass
+        return "unknown"
+
+    def _format_percentage(self, value: Optional[Any]) -> str:
+        """Format ratio as percentage string."""
+        try:
+            if isinstance(value, (int, float)):
+                return f"{value * 100:.0f}%"
+        except Exception:
+            pass
+        return "unknown"
 
     def _get_stat_value(self, stats: Any, key: str, default: Any) -> float:
         """Safely extract a numeric statistic value with graceful fallback."""
@@ -1073,6 +1122,102 @@ class ChatService:
             logger = logging.getLogger(__name__)
             logger.error(f"Error handling memory query: {e}", exc_info=True)
             return None
+
+    def _handle_performance_query(self, intent: IntentV2, session_id: str) -> Optional[str]:
+        """Return a formatted performance snapshot for performance_query intents."""
+        try:
+            status = self.performance_status()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.error("Performance status lookup failed: %s", exc, exc_info=True)
+            return None
+
+        if not isinstance(status, dict):
+            return None
+
+        metric_focus = intent.entities.get("metric_type", "general")
+        latency_text = self._format_latency_ms(status.get("latency_p95_ms"))
+        target_text = self._format_latency_ms(status.get("target_p95_ms"))
+        ema_text = self._format_latency_ms(status.get("ema_turn_latency_ms"))
+        throughput = status.get("chat_turns_per_sec")
+        try:
+            throughput_text = f"{float(throughput):.2f} turns/sec"
+        except Exception:
+            throughput_text = "unknown throughput"
+        degraded = bool(status.get("performance_degraded"))
+        health_text = "⚠️ Running slower than target" if degraded else "✅ Meeting latency target"
+
+        lines = [
+            f"- Latency p95: {latency_text} (target {target_text})",
+            f"- EMA latency: {ema_text}",
+            f"- Throughput: {throughput_text}",
+            f"- Status: {health_text}",
+        ]
+        if metric_focus and metric_focus != "general":
+            focus_text = metric_focus.replace("_", " ")
+            lines.append(f"- Metric focus: watching {focus_text} trends")
+        return "\n".join(lines)
+
+    def _handle_system_status(self, intent: IntentV2, session_id: str) -> Optional[str]:
+        """Summarize current cognitive system health for system_status intents."""
+        detail_level = intent.entities.get("detail_level", "normal")
+        component_focus = intent.entities.get("component", "general")
+        active_goals = len(self._session_goal_index.get(session_id, set()))
+        size, capacity, util = self._get_stm_usage_snapshot()
+        if size is None and capacity is None:
+            stm_line = "STM load: unavailable (not configured)"
+        elif capacity:
+            stm_line = f"STM load: {size}/{capacity} items ({self._format_percentage(util)})"
+        else:
+            stm_line = f"STM load: {size or 0} items"
+
+        perf_snapshot = None
+        try:
+            perf_snapshot = self.performance_status()
+        except Exception:
+            perf_snapshot = None
+
+        latency_line = None
+        if isinstance(perf_snapshot, dict):
+            latency_line = f"Latency: {self._format_latency_ms(perf_snapshot.get('latency_p95_ms'))}"
+            if perf_snapshot.get("performance_degraded"):
+                latency_line += " (⚠️ above target)"
+            else:
+                latency_line += " (✅ stable)"
+
+        due_count = 0
+        upcoming_hour = 0
+        try:
+            pm = get_inmemory_prospective_memory()
+            reminders = pm.list_reminders(include_completed=False)
+            now = datetime.now()
+            for rem in reminders:
+                due_time = getattr(rem, "due_time", None)
+                if not due_time:
+                    continue
+                delta = (due_time - now).total_seconds()
+                if delta <= 0:
+                    due_count += 1
+                elif delta <= 3600:
+                    upcoming_hour += 1
+        except Exception:
+            pass
+
+        lines = [
+            f"- Active goals: {active_goals}",
+            f"- {stm_line}",
+            f"- Prospective reminders: {due_count} due, {upcoming_hour} within an hour",
+            f"- Metacog cadence: every {max(1, self._metacog_interval)} turns",
+        ]
+
+        if latency_line and component_focus in ("general", "performance", "cognitive"):
+            lines.append(f"- {latency_line}")
+
+        if detail_level == "detailed":
+            ema_text = self._format_latency_ms(perf_snapshot.get("ema_turn_latency_ms") if isinstance(perf_snapshot, dict) else None)
+            lines.append(f"- EMA latency: {ema_text}")
+            lines.append(f"- Consolidation history: {len(self.consolidation_log)} recent events")
+
+        return "\n".join(lines)
 
     def _invoke_agent_response(self, message: str, built: Any) -> str:
         """Invoke the configured agent to generate a response with context."""
