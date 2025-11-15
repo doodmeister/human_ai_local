@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, Set, Tuple
+from typing import Dict, Any, Optional, Set, Tuple, List
 import time
 import asyncio
 import logging
@@ -383,6 +383,11 @@ class ChatService:
 
         # Prospective memory injection (non-invasive: append dicts only)
         extra_due: list[Dict[str, Any]] = []
+        due_reminders: list[Any] = []
+        upcoming_reminders: list[Any] = []
+        proactive_due_surface: list[Any] = []
+        proactive_upcoming_surface: list[Any] = []
+        proactive_summary: Optional[str] = None
         try:
             pm = get_inmemory_prospective_memory()
             # Track injected reminder ids inside session state to avoid double counting
@@ -390,7 +395,8 @@ class ChatService:
             injected_ids = getattr(sess, injected_key, set())
             if not isinstance(injected_ids, set):  # safety
                 injected_ids = set()
-            for r in pm.check_due():
+            due_reminders = list(pm.check_due())
+            for r in due_reminders:
                 extra_due.append({
                     "source_id": f"reminder-{r.id}",
                     "source_system": "prospective",
@@ -403,8 +409,54 @@ class ChatService:
                     metrics_registry.inc("prospective_reminders_injected_total")
                     injected_ids.add(r.id)
             setattr(sess, injected_key, injected_ids)
+
+            upcoming_window = float(cfg.get("prospective_upcoming_window_seconds", 1800.0))
+            upcoming_limit = int(cfg.get("prospective_upcoming_limit", 3))
+            now_dt = datetime.now()
+            if upcoming_window > 0:
+                raw_upcoming = pm.get_upcoming(within=timedelta(seconds=upcoming_window))
+                due_ids = {r.id for r in due_reminders}
+                for reminder in raw_upcoming:
+                    due_time = getattr(reminder, "due_time", None)
+                    if reminder.id in due_ids:
+                        continue
+                    if due_time is not None and due_time <= now_dt:
+                        continue
+                    upcoming_reminders.append(reminder)
+                if upcoming_limit > 0:
+                    upcoming_reminders = upcoming_reminders[:upcoming_limit]
+
+            proactive_ack = getattr(sess, "_proactive_reminder_ack", {})
+            if not isinstance(proactive_ack, dict):
+                proactive_ack = {}
+            ack_cooldown = float(cfg.get("prospective_ack_cooldown_seconds", 600.0))
+            now_ts = time.time()
+            due_ids = {r.id for r in due_reminders}
+            for reminder in due_reminders + upcoming_reminders:
+                if not getattr(reminder, "id", None):
+                    continue
+                last_ack = proactive_ack.get(reminder.id)
+                if last_ack is not None and now_ts - last_ack < ack_cooldown:
+                    continue
+                proactive_ack[reminder.id] = now_ts
+                if reminder.id in due_ids:
+                    proactive_due_surface.append(reminder)
+                else:
+                    proactive_upcoming_surface.append(reminder)
+            setattr(sess, "_proactive_reminder_ack", proactive_ack)
+
+            if proactive_due_surface or proactive_upcoming_surface:
+                proactive_summary = self._format_proactive_reminder_summary(
+                    proactive_due_surface,
+                    proactive_upcoming_surface,
+                )
         except Exception:
             extra_due = []
+            due_reminders = []
+            upcoming_reminders = []
+            proactive_due_surface = []
+            proactive_upcoming_surface = []
+            proactive_summary = None
 
         assistant_content = self._invoke_agent_response(message, built)
         # Before forming assistant response, check retrieval for simple questions
@@ -430,6 +482,8 @@ class ChatService:
             session_id=sess.session_id,
         )
         assistant_content = self._merge_intent_sections(intent_sections, assistant_content)
+        if proactive_summary:
+            assistant_content = (proactive_summary + "\n\n" + (assistant_content or "")).strip()
 
         session_context = self._build_session_context(
             sess.session_id,
@@ -437,6 +491,7 @@ class ChatService:
             detected_goal,
             stored_captures,
             extra_due,
+            upcoming_reminders,
         )
         setattr(sess, "_session_context_snapshot", session_context)
         
@@ -536,6 +591,11 @@ class ChatService:
             "intent_sections": intent_sections,
             "intent_results": intent_execution_log,
             "session_context": session_context,
+            "proactive_reminders": {
+                "summary": proactive_summary,
+                "due": [self._serialize_reminder_brief(r) for r in proactive_due_surface],
+                "upcoming": [self._serialize_reminder_brief(r) for r in proactive_upcoming_surface],
+            },
             "detected_goal": {
                 "goal_id": detected_goal.goal_id,
                 "title": detected_goal.title,
@@ -893,6 +953,7 @@ class ChatService:
         detected_goal: Optional[Any],
         stored_captures: list[Dict[str, Any]],
         extra_due: list[Dict[str, Any]],
+        upcoming_reminders: List[Any],
     ) -> Dict[str, Any]:
         """Construct a lightweight session context snapshot for UI consumers."""
         active_goals = sorted(self._session_goal_index.get(session_id, set()))
@@ -901,9 +962,18 @@ class ChatService:
             "active_goal_ids": active_goals,
             "captured_memory_count": len(stored_captures),
             "prospective_due_count": len(extra_due),
+            "prospective_upcoming_count": len(upcoming_reminders),
             "last_intent": intent.intent_type,
             "classifier_context": intent.conversation_context,
         }
+        if upcoming_reminders:
+            next_due = next((rem for rem in upcoming_reminders if getattr(rem, "due_time", None)), None)
+            if next_due is not None:
+                due_time = getattr(next_due, "due_time", None)
+                context["next_upcoming_reminder"] = {
+                    "content": getattr(next_due, "content", ""),
+                    "due_time": due_time.isoformat() if due_time else None,
+                }
         if detected_goal is not None:
             context["last_detected_goal_id"] = detected_goal.goal_id
         return context
@@ -990,6 +1060,40 @@ class ChatService:
             return f"due in {hours:.1f} hr"
         days = hours / 24
         return f"due in {days:.1f} days"
+
+    def _format_proactive_reminder_summary(
+        self,
+        due_reminders: List[Any],
+        upcoming_reminders: List[Any],
+    ) -> str:
+        lines: List[str] = []
+        if due_reminders:
+            if len(due_reminders) == 1:
+                lines.append(f"🔔 Reminder now due: {getattr(due_reminders[0], 'content', '')}")
+            else:
+                lines.append("🔔 Reminders now due:")
+                for reminder in due_reminders[:3]:
+                    lines.append(f" • {getattr(reminder, 'content', '')}")
+                if len(due_reminders) > 3:
+                    lines.append(f"   (+{len(due_reminders) - 3} more)")
+        if upcoming_reminders:
+            lines.append("⏰ Coming up soon:")
+            for reminder in upcoming_reminders[:3]:
+                lines.append(
+                    f" • {getattr(reminder, 'content', '')} ({self._format_due_phrase(getattr(reminder, 'due_time', None))})"
+                )
+            if len(upcoming_reminders) > 3:
+                lines.append(f"   (+{len(upcoming_reminders) - 3} more)")
+        return "\n".join(lines).strip()
+
+    def _serialize_reminder_brief(self, reminder: Any) -> Dict[str, Any]:
+        due_time = getattr(reminder, "due_time", None)
+        return {
+            "id": getattr(reminder, "id", None),
+            "content": getattr(reminder, "content", ""),
+            "due_time": due_time.isoformat() if isinstance(due_time, datetime) else None,
+            "due_phrase": self._format_due_phrase(due_time) if due_time else "no specific time",
+        }
 
     def _get_stat_value(self, stats: Any, key: str, default: Any) -> float:
         """Safely extract a numeric statistic value with graceful fallback."""
