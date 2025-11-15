@@ -174,6 +174,19 @@ class IntentClassifierV2:
             'keywords': ['status', 'health', 'load', 'capacity', 'feeling', 'system', 'cognitive'],
             'boost_words': ['overloaded', 'stressed', 'busy', 'overwhelmed'],
         },
+        'reminder_request': {
+            'patterns': [
+                (r"remind me to\s+(?P<reminder_text>.+?)(?:\s+in\s+(?P<reminder_time>[\w\s]+))?(?:[.!?]|$)", 0.95, 1.2),
+                (r"set (?:a )?reminder (?:for|to)\s+(?P<reminder_text>.+?)(?:[.!?]|$)", 0.90, 1.1),
+                (r"(?:what|which) (?:are )?(?:my )?reminders?(?: do i have)?(?:\?|$)", 0.90, 1.0),
+                (r"do i have any reminders(?:\?|$)", 0.90, 1.0),
+                (r"list (?:my )?reminders?(?:\?|$)", 0.92, 1.05),
+                (r"do i have any reminders due(?:\?|$)", 0.85, 0.95),
+                (r"remind me in\s+(?P<reminder_time_only>[\w\s]+)\s+to\s+(?P<reminder_text_alt>.+?)(?:[.!?]|$)", 0.93, 1.15),
+            ],
+            'keywords': ['remind', 'reminder', 'reminders', 'due'],
+            'boost_words': ['today', 'tonight', 'tomorrow', 'minutes', 'hours'],
+        },
     }
     
     def __init__(self, context: Optional[ConversationContext] = None):
@@ -354,6 +367,22 @@ class IntentClassifierV2:
         elif intent_type == 'system_status':
             entities['component'] = self._detect_system_component(message)
             entities['detail_level'] = self._detect_detail_level(message)
+        elif intent_type == 'reminder_request':
+            entities['reminder_action'] = self._detect_reminder_action(message)
+            groups = match.groupdict()
+            reminder_text = (
+                groups.get('reminder_text')
+                or groups.get('reminder_text_alt')
+            )
+            if reminder_text:
+                entities['reminder_text'] = reminder_text.strip()
+            time_hint = groups.get('reminder_time') or groups.get('reminder_time_only')
+            offset = self._parse_time_offset_seconds(time_hint or message)
+            if offset is not None:
+                entities['reminder_offset_seconds'] = offset
+            upcoming_window = self._parse_upcoming_window_seconds(message)
+            if upcoming_window is not None:
+                entities['reminder_upcoming_window_seconds'] = upcoming_window
         
         return entities
     
@@ -597,6 +626,61 @@ class IntentClassifierV2:
             return 'brief'
         
         return 'normal'
+
+    def _detect_reminder_action(self, message: str) -> str:
+        """Determine whether the reminder intent is create, list, or due."""
+        message_lower = message.lower()
+        list_phrases = [
+            "list",
+            "show",
+            "what reminders",
+            "which reminders",
+            "what are my reminders",
+            "do i have",
+        ]
+        if any(phrase in message_lower for phrase in list_phrases):
+            return 'list'
+        if 'due' in message_lower or 'upcoming' in message_lower:
+            return 'due'
+        return 'create'
+
+    def _parse_time_offset_seconds(self, text: Optional[str]) -> Optional[float]:
+        """Parse relative time expressions into seconds."""
+        if not text:
+            return None
+        lower = text.lower()
+        match = re.search(r"in\s+(?P<num>\d+)\s+(?P<unit>minute|minutes|hour|hours|day|days)", lower)
+        if not match:
+            match = re.search(r"(?P<num>\d+)\s+(?P<unit>minute|minutes|hour|hours|day|days)\s+from now", lower)
+        if not match:
+            match = re.search(r"(?P<num>\d+)\s+(?P<unit>minute|minutes|hour|hours|day|days)", lower)
+        if match:
+            num = int(match.group('num'))
+            unit = match.group('unit')
+            multiplier = 60 if 'minute' in unit else 3600 if 'hour' in unit else 86400
+            return float(num * multiplier)
+        if 'tomorrow' in lower:
+            return 86400.0
+        if 'next week' in lower:
+            return 7 * 86400.0
+        if 'tonight' in lower:
+            now = datetime.now()
+            target = now.replace(hour=21, minute=0, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            return (target - now).total_seconds()
+        return None
+
+    def _parse_upcoming_window_seconds(self, message: str) -> Optional[float]:
+        """Extract upcoming reminder window requests."""
+        lower = message.lower()
+        match = re.search(r"within\s+(?P<num>\d+)\s+(?P<unit>minute|minutes|hour|hours|day|days)", lower)
+        if not match:
+            return None
+        num = int(match.group('num'))
+        unit = match.group('unit')
+        multiplier = 60 if 'minute' in unit else 3600 if 'hour' in unit else 86400
+        return float(num * multiplier)
     
     def _extract_named_entities(self, message: str) -> List[str]:
         """Simple named entity extraction (capitalized words/phrases)"""

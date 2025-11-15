@@ -47,12 +47,19 @@ class ChatService:
     - Returns structured payload
     """
 
-    _INTENT_HANDLER_PRIORITY = ("goal_query", "memory_query", "performance_query", "system_status")
+    _INTENT_HANDLER_PRIORITY = (
+        "goal_query",
+        "memory_query",
+        "reminder_request",
+        "performance_query",
+        "system_status",
+    )
     _INTENT_SECTION_HEADERS = {
         "goal_query": "Goal update",
         "memory_query": "Memory lookup",
         "performance_query": "Performance metrics",
         "system_status": "System status",
+        "reminder_request": "Reminders",
     }
 
     def __init__(self,
@@ -812,6 +819,8 @@ class ChatService:
                 handler_callable = lambda _intent=intent, _sid=session_id: self._handle_goal_query(_intent, _sid)
             elif handler_name == "memory_query":
                 handler_callable = lambda _message=message, _sid=session_id: self._handle_memory_query(_message, _sid)
+            elif handler_name == "reminder_request":
+                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_reminder_request(_intent, _sid)
             elif handler_name == "performance_query":
                 handler_callable = lambda _intent=intent, _sid=session_id: self._handle_performance_query(_intent, _sid)
             elif handler_name == "system_status":
@@ -943,6 +952,44 @@ class ChatService:
         except Exception:
             pass
         return "unknown"
+
+    def _resolve_reminder_due_time(self, intent: IntentV2) -> Optional[datetime]:
+        """Convert intent entities into an absolute reminder due time."""
+        offset = intent.entities.get("reminder_offset_seconds")
+        if offset is not None:
+            try:
+                seconds = float(offset)
+                if seconds > 0:
+                    return datetime.now() + timedelta(seconds=seconds)
+            except (TypeError, ValueError):
+                pass
+        due_text = intent.entities.get("reminder_due_time")
+        if isinstance(due_text, str):
+            try:
+                return datetime.fromisoformat(due_text)
+            except Exception:
+                pass
+        return None
+
+    def _format_due_phrase(self, due_time: Optional[datetime]) -> str:
+        """Return a friendly phrase for reminder due times."""
+        if due_time is None:
+            return "no specific time"
+        now = datetime.now()
+        delta = due_time - now
+        total_seconds = delta.total_seconds()
+        if total_seconds < -60:
+            return "past due"
+        if total_seconds < 60:
+            return "due now"
+        minutes = total_seconds / 60
+        if minutes < 60:
+            return f"due in {int(round(minutes))} min"
+        hours = minutes / 60
+        if hours < 24:
+            return f"due in {hours:.1f} hr"
+        days = hours / 24
+        return f"due in {days:.1f} days"
 
     def _get_stat_value(self, stats: Any, key: str, default: Any) -> float:
         """Safely extract a numeric statistic value with graceful fallback."""
@@ -1122,6 +1169,57 @@ class ChatService:
             logger = logging.getLogger(__name__)
             logger.error(f"Error handling memory query: {e}", exc_info=True)
             return None
+
+    def _handle_reminder_request(self, intent: IntentV2, session_id: str) -> Optional[str]:
+        """Create or list reminders using the prospective memory subsystem."""
+        try:
+            pm = get_inmemory_prospective_memory()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.error("Prospective memory unavailable: %s", exc, exc_info=True)
+            return None
+
+        action = (intent.entities.get("reminder_action") or "create").lower()
+
+        if action in ("list", "show"):
+            reminders = pm.list_reminders(include_completed=False)
+            if not reminders:
+                return "You don't have any active reminders."
+            lines = ["Active reminders:"]
+            for reminder in reminders[:5]:
+                lines.append(f"- {reminder.content} ({self._format_due_phrase(getattr(reminder, 'due_time', None))})")
+            if len(reminders) > 5:
+                lines.append(f"…and {len(reminders) - 5} more")
+            return "\n".join(lines)
+
+        if action in ("due", "upcoming"):
+            window = intent.entities.get("reminder_upcoming_window_seconds")
+            reminders = []
+            if action == "due":
+                reminders = pm.get_due_reminders()
+            elif window:
+                try:
+                    seconds = float(window)
+                    reminders = pm.get_upcoming(within=timedelta(seconds=seconds))
+                except Exception:
+                    reminders = pm.get_upcoming(within=timedelta(hours=1))
+            else:
+                reminders = pm.get_upcoming(within=timedelta(hours=1))
+            if not reminders:
+                return "No reminders are due right now."
+            lines = ["Reminders due soon:"]
+            for reminder in reminders[:5]:
+                lines.append(f"- {reminder.content} ({self._format_due_phrase(getattr(reminder, 'due_time', None))})")
+            return "\n".join(lines)
+
+        # Default: create a new reminder
+        reminder_text = intent.entities.get("reminder_text") or intent.entities.get("reminder_description")
+        if not reminder_text:
+            return "Tell me what you'd like me to remind you about."
+
+        due_time = self._resolve_reminder_due_time(intent)
+        reminder = pm.add_reminder(reminder_text, due_time=due_time)
+        due_phrase = self._format_due_phrase(getattr(reminder, "due_time", None))
+        return f"Reminder set: '{reminder.content}' ({due_phrase})."
 
     def _handle_performance_query(self, intent: IntentV2, session_id: str) -> Optional[str]:
         """Return a formatted performance snapshot for performance_query intents."""
