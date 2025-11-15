@@ -13,7 +13,7 @@
 
 ### Multi-Modal & Personalized User Experience
 - **Full Multi-Modal Support:** Expand beyond text to robustly handle voice and image inputs/outputs. Enable the AI to analyze, discuss, and generate content across modalities.
-- **Interface Refinement:** Upgrade the user interface for better usability, history review, and dynamic content (e.g., inline images, voice waveforms).
+- **Interface Refinement:** Upgrade the user interface for better usability, history review, and dynamic content (e.g., inline images, voice waveforms). Maintain the current Streamlit client for rapid iteration while planning a dedicated React/Next.js front-end that consumes the existing FastAPI `/agent/*` endpoints; this future web app should share contracts with the Streamlit prototype so that the transition can be incremental.
 - **Personalization:** Leverage stored user preferences and interaction history to adapt the AI’s tone, style, and recommendations.
 
 ### Feedback & Metacognition
