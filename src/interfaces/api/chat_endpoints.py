@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, AsyncGenerator
@@ -221,6 +221,22 @@ async def purge_triggered_reminders():
     """Delete all triggered (already fired) reminders from in-memory store."""
     removed = _prospective.purge_triggered()
     return {"purged": removed}
+
+
+@router.post("/reminders/{reminder_id}/complete")
+async def complete_reminder(reminder_id: str):
+    success = _prospective.complete_reminder(reminder_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="reminder_not_found")
+    return {"status": "completed", "reminder_id": reminder_id}
+
+
+@router.delete("/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: str):
+    success = _prospective.delete_reminder(reminder_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="reminder_not_found")
+    return {"status": "deleted", "reminder_id": reminder_id}
 
 
 # ---------------- Dream Cycle Endpoint ----------------

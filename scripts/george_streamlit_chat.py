@@ -5,13 +5,339 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 import streamlit as st
 
 # Allow overriding the API host via environment variable.
 DEFAULT_API_BASE = os.getenv("GEORGE_API_BASE_URL", "http://localhost:8000")
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Best-effort ISO8601 parser that tolerates trailing Z notation."""
+    if not value:
+        return None
+    cleaned = value
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+
+
+def _format_due_display(reminder: Dict[str, Any]) -> str:
+    """Return a user-friendly due phrase for a reminder."""
+    phrase = reminder.get("due_phrase")
+    if phrase:
+        return phrase
+    due_dt = _parse_iso_datetime(reminder.get("due_time"))
+    if not due_dt:
+        return "no specific time"
+    if due_dt.tzinfo is None:
+        due_dt = due_dt.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    delta = due_dt - now
+    seconds = int(delta.total_seconds())
+    if seconds <= 0:
+        return "due now"
+    minutes = seconds // 60
+    hours = minutes // 60
+    days = hours // 24
+    if minutes < 1:
+        return "in <1 min"
+    if minutes < 60:
+        return f"in {minutes} min"
+    if hours < 24:
+        return f"in {hours} hr"
+    return f"in {days} day" + ("s" if days != 1 else "")
+
+
+def _mark_acknowledged(reminder_id: Optional[str]) -> None:
+    """Remember that a reminder was surfaced so we do not spam announcements."""
+    if not reminder_id:
+        return
+    if "acknowledged_reminder_ids" not in st.session_state:
+        st.session_state.acknowledged_reminder_ids = set()
+    st.session_state.acknowledged_reminder_ids.add(reminder_id)
+
+
+def _drop_reminder_from_cache(reminder_id: Optional[str]) -> None:
+    if not reminder_id:
+        return
+    data = st.session_state.get("proactive_reminders") or {}
+    for bucket in ("due", "upcoming"):
+        items = data.get(bucket) or []
+        filtered = [item for item in items if item.get("id") != reminder_id]
+        data[bucket] = filtered
+    st.session_state.proactive_reminders = data
+    pending = st.session_state.get("new_due_reminders", [])
+    st.session_state.new_due_reminders = [item for item in pending if item.get("id") != reminder_id]
+
+
+def _log_reminder_event(event_type: str, reminder: Optional[Dict[str, Any]] = None) -> None:
+    metrics = st.session_state.get("reminder_metrics")
+    if metrics is None:
+        metrics = {"counts": {}, "events": []}
+    counts = metrics.setdefault("counts", {})
+    counts[event_type] = counts.get(event_type, 0) + 1
+    event = {
+        "type": event_type,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if reminder:
+        event["reminder_id"] = reminder.get("id")
+        event["content"] = reminder.get("content")
+        event["due_time"] = reminder.get("due_time")
+    events = metrics.setdefault("events", [])
+    events.append(event)
+    metrics["events"] = events[-50:]
+    st.session_state.reminder_metrics = metrics
+
+
+def _add_reminder_to_upcoming_cache(reminder: Dict[str, Any]) -> None:
+    data = st.session_state.get("proactive_reminders") or {"summary": None, "due": [], "upcoming": []}
+    upcoming = data.get("upcoming") or []
+    if reminder.get("id") not in {item.get("id") for item in upcoming}:
+        upcoming.append(reminder)
+        data["upcoming"] = upcoming
+    st.session_state.proactive_reminders = data
+
+
+def create_reminder_remote(
+    base_url: str,
+    content: str,
+    due_in_seconds: int,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    payload: Dict[str, Any] = {
+        "content": content,
+        "due_in_seconds": due_in_seconds,
+    }
+    if metadata:
+        payload["metadata"] = metadata
+    try:
+        resp = requests.post(f"{base_url}/agent/reminders", json=payload, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        st.error(f"Unable to create reminder: {exc}")
+        return None
+    reminder = resp.json().get("reminder")
+    if reminder:
+        _log_reminder_event("created", reminder)
+    return reminder
+
+
+def complete_reminder_remote(base_url: str, reminder: Dict[str, Any]) -> bool:
+    """Mark a reminder complete via the API and update local caches."""
+    reminder_id = reminder.get("id")
+    if not reminder_id:
+        st.error("Missing reminder identifier")
+        return False
+    try:
+        resp = requests.post(f"{base_url}/agent/reminders/{reminder_id}/complete", timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        st.error(f"Unable to complete reminder: {exc}")
+        return False
+    _mark_acknowledged(reminder_id)
+    _drop_reminder_from_cache(reminder_id)
+    _log_reminder_event("completed", reminder)
+    return True
+
+
+def delete_reminder_remote(base_url: str, reminder: Dict[str, Any], log_event: bool = True) -> bool:
+    """Delete a reminder via API and update local caches."""
+    reminder_id = reminder.get("id")
+    if not reminder_id:
+        st.error("Missing reminder identifier")
+        return False
+    try:
+        resp = requests.delete(f"{base_url}/agent/reminders/{reminder_id}", timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        st.error(f"Unable to delete reminder: {exc}")
+        return False
+    _mark_acknowledged(reminder_id)
+    _drop_reminder_from_cache(reminder_id)
+    if log_event:
+        _log_reminder_event("deleted", reminder)
+    return True
+
+
+def snooze_reminder_remote(base_url: str, reminder: Dict[str, Any], minutes: int = 15) -> bool:
+    """Snooze a reminder by creating a new one and removing the original."""
+    content = reminder.get("content", "")
+    if not content:
+        st.error("Cannot snooze reminder without content")
+        return False
+    if minutes <= 0:
+        st.warning("Snooze minutes must be positive")
+        return False
+    metadata = dict(reminder.get("metadata") or {})
+    metadata.update({
+        "snoozed_from_id": reminder.get("id"),
+        "snoozed_minutes": minutes,
+    })
+    new_reminder = create_reminder_remote(base_url, content, int(minutes) * 60, metadata)
+    if new_reminder is None:
+        return False
+    if reminder.get("id"):
+        delete_reminder_remote(base_url, reminder, log_event=False)
+    _add_reminder_to_upcoming_cache(new_reminder)
+    _log_reminder_event("snoozed", reminder)
+    return True
+
+
+def render_proactive_banner(base_url: str) -> None:
+    """Show a top-of-feed announcement whenever fresh reminders arrive."""
+    new_due: List[Dict[str, Any]] = st.session_state.get("new_due_reminders", [])
+    if not new_due:
+        return
+
+    with st.container():
+        st.markdown("### ⏰ Coming up soon")
+        summary = st.session_state.get("proactive_reminders", {}).get("summary")
+        if summary:
+            st.caption(summary)
+        for reminder in new_due:
+            _render_reminder_row(reminder, base_url, source="banner")
+        if st.button("Dismiss reminders", key="dismiss_proactive_banner"):
+            for reminder in list(new_due):
+                _mark_acknowledged(reminder.get("id"))
+                _log_reminder_event("dismissed", reminder)
+            st.session_state.new_due_reminders = []
+
+
+def render_session_context_panel() -> None:
+    """Render a lightweight session context snapshot when available."""
+    context = st.session_state.get("session_context")
+    if not context:
+        return
+
+    with st.expander("Session context snapshot", expanded=False):
+        cols = st.columns(3)
+        with cols[0]:
+            st.metric("Captured", context.get("captured_memory_count", 0))
+            st.metric("Last intent", context.get("last_intent", "unknown"))
+        with cols[1]:
+            st.metric("Due reminders", context.get("prospective_due_count", 0))
+            st.metric("Upcoming", context.get("prospective_upcoming_count", 0))
+        with cols[2]:
+            goals = context.get("active_goal_ids") or []
+            st.metric("Active goals", len(goals))
+            st.caption(context.get("session_id", ""))
+
+        next_upcoming = context.get("next_upcoming_reminder")
+        if next_upcoming:
+            due_phrase = _format_due_display({"due_time": next_upcoming.get("due_time")})
+            st.info(
+                f"Next reminder: **{next_upcoming.get('content', '')}** ({due_phrase})",
+                icon="⌛",
+            )
+
+        classifier_context = context.get("classifier_context")
+        if classifier_context:
+            with st.expander("Classifier context", expanded=False):
+                st.json(classifier_context)
+
+        if goals:
+            with st.expander("Active goal IDs", expanded=False):
+                for goal_id in goals:
+                    st.write(f"- {goal_id}")
+
+
+def _render_reminder_row(reminder: Dict[str, Any], base_url: str, source: str) -> None:
+    reminder_id = reminder.get("id")
+    snooze_minutes = (
+        st.session_state.get("reminder_form", {}).get("snooze_minutes")
+        or 15
+    )
+    cols = st.columns([0.5, 0.2, 0.2, 0.1])
+    with cols[0]:
+        st.markdown(f"**{reminder.get('content', 'Reminder')}**")
+        st.caption(_format_due_display(reminder))
+    with cols[1]:
+        if st.button("Mark done", key=f"complete_{reminder_id}_{source}"):
+            if complete_reminder_remote(base_url, reminder):
+                st.success("Reminder completed")
+    with cols[2]:
+        label = f"Snooze +{snooze_minutes}m"
+        if st.button(label, key=f"snooze_{reminder_id}_{source}"):
+            if snooze_reminder_remote(base_url, reminder, minutes=int(snooze_minutes)):
+                st.info(f"Snoozed for {snooze_minutes} minutes")
+    with cols[3]:
+        if st.button("Dismiss", key=f"dismiss_{reminder_id}_{source}"):
+            _mark_acknowledged(reminder_id)
+            _drop_reminder_from_cache(reminder_id)
+            _log_reminder_event("dismissed", reminder)
+            st.session_state.new_due_reminders = [
+                item for item in st.session_state.get("new_due_reminders", []) if item.get("id") != reminder_id
+            ]
+
+
+def render_sidebar_reminders(base_url: str) -> None:
+    """Render the reminder timeline in the sidebar."""
+    data = st.session_state.get("proactive_reminders") or {}
+    due = data.get("due") or []
+    upcoming = data.get("upcoming") or []
+    combined = due + [r for r in upcoming if r.get("id") not in {item.get("id") for item in due}]
+
+    if not combined:
+        st.caption("No reminders scheduled")
+        return
+
+    def _sort_key(item: Dict[str, Any]) -> float:
+        dt = _parse_iso_datetime(item.get("due_time"))
+        if dt is None:
+            return float("inf")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+
+    sorted_items = sorted(combined, key=_sort_key)
+    snooze_minutes = (
+        st.session_state.get("reminder_form", {}).get("snooze_minutes")
+        or 15
+    )
+    for reminder in sorted_items:
+        reminder_id = reminder.get("id")
+        st.markdown(f"**{reminder.get('content', 'Reminder')}**")
+        st.caption(_format_due_display(reminder))
+        btn_cols = st.columns([0.4, 0.3, 0.3])
+        with btn_cols[0]:
+            if st.button("Complete", key=f"sidebar_complete_{reminder_id}"):
+                if complete_reminder_remote(base_url, reminder):
+                    st.success("Reminder completed")
+        with btn_cols[1]:
+            label = f"Snooze +{snooze_minutes}m"
+            if st.button(label, key=f"sidebar_snooze_{reminder_id}"):
+                if snooze_reminder_remote(base_url, reminder, minutes=int(snooze_minutes)):
+                    st.info(f"Snoozed {snooze_minutes} minutes")
+        with btn_cols[2]:
+            if st.button("Delete", key=f"sidebar_delete_{reminder_id}"):
+                if delete_reminder_remote(base_url, reminder):
+                    st.info("Reminder removed")
+
+
+def _update_proactive_state_from_response(response: Dict[str, Any]) -> None:
+    proactive = response.get("proactive_reminders") or {}
+    st.session_state.proactive_reminders = proactive
+    due = proactive.get("due") or []
+    ack = st.session_state.get("acknowledged_reminder_ids", set())
+    surfaced = st.session_state.get("surfaced_reminder_ids", set())
+    fresh_due: List[Dict[str, Any]] = []
+    for reminder in due:
+        rem_id = reminder.get("id")
+        if not rem_id or rem_id in ack:
+            continue
+        fresh_due.append(reminder)
+        if rem_id not in surfaced:
+            _log_reminder_event("surfaced", reminder)
+            surfaced.add(rem_id)
+    st.session_state.surfaced_reminder_ids = surfaced
+    st.session_state.new_due_reminders = fresh_due
 
 
 def check_backend(base_url: str) -> bool:
@@ -72,6 +398,24 @@ def ensure_state() -> None:
         st.session_state.last_error = None
     if "salience_threshold" not in st.session_state:
         st.session_state.salience_threshold = 0.55  # Default from ChatConfig
+    if "session_context" not in st.session_state:
+        st.session_state.session_context = None
+    if "proactive_reminders" not in st.session_state:
+        st.session_state.proactive_reminders = {"summary": None, "due": [], "upcoming": []}
+    if "new_due_reminders" not in st.session_state:
+        st.session_state.new_due_reminders = []
+    if "acknowledged_reminder_ids" not in st.session_state:
+        st.session_state.acknowledged_reminder_ids = set()
+    if "surfaced_reminder_ids" not in st.session_state:
+        st.session_state.surfaced_reminder_ids = set()
+    if "reminder_form" not in st.session_state:
+        st.session_state.reminder_form = {
+            "content": "",
+            "due_in_minutes": 15,
+            "snooze_minutes": 15,
+        }
+    if "reminder_metrics" not in st.session_state:
+        st.session_state.reminder_metrics = {"counts": {}, "events": []}
     # LLM provider settings
     if "llm_provider" not in st.session_state:
         st.session_state.llm_provider = "openai"
@@ -285,6 +629,11 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
             st.session_state.messages = []
             st.session_state.last_raw_response = None
             st.session_state.last_error = None
+            st.session_state.session_context = None
+            st.session_state.proactive_reminders = {"summary": None, "due": [], "upcoming": []}
+            st.session_state.new_due_reminders = []
+            st.session_state.acknowledged_reminder_ids.clear()
+            st.session_state.surfaced_reminder_ids.clear()
         st.caption(f"Session ID: {st.session_state.session_id}")
         if connection_ok:
             st.success("Backend reachable")
@@ -297,6 +646,86 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
                 st.caption("No responses yet")
             else:
                 st.json(st.session_state.last_raw_response)
+        st.subheader("Upcoming reminders")
+        render_sidebar_reminders(st.session_state.api_base_url)
+        st.markdown("---")
+        st.subheader("Create reminder")
+        reminder_form = st.session_state.reminder_form
+        reminder_content = st.text_input(
+            "Content",
+            value=reminder_form.get("content", ""),
+            key="reminder_content_input",
+        )
+        reminder_minutes = st.number_input(
+            "Due in (minutes)",
+            min_value=1,
+            max_value=1440,
+            value=int(reminder_form.get("due_in_minutes", 15)),
+            step=5,
+            key="reminder_due_minutes_input",
+        )
+        snooze_options = [5, 10, 15, 30, 45, 60]
+        current_snooze = reminder_form.get("snooze_minutes", 15)
+        if current_snooze not in snooze_options:
+            snooze_options.append(current_snooze)
+            snooze_options = sorted(set(snooze_options))
+        default_index = snooze_options.index(current_snooze)
+        snooze_minutes = st.selectbox(
+            "Default snooze length (minutes)",
+            options=snooze_options,
+            index=default_index,
+            key="reminder_snooze_minutes_input",
+        )
+        st.session_state.reminder_form["snooze_minutes"] = snooze_minutes
+        reminder_metadata_note = st.text_area(
+            "Metadata notes (optional)",
+            value=reminder_form.get("metadata_note", ""),
+            key="reminder_metadata_input",
+        )
+
+        if st.button("➕ Add reminder", key="create_reminder_button"):
+            trimmed = reminder_content.strip()
+            if not trimmed:
+                st.warning("Provide reminder content first")
+            else:
+                metadata = {"note": reminder_metadata_note.strip()} if reminder_metadata_note.strip() else None
+                reminder = create_reminder_remote(
+                    st.session_state.api_base_url,
+                    trimmed,
+                    int(reminder_minutes) * 60,
+                    metadata=metadata,
+                )
+                if reminder:
+                    st.success("Reminder created")
+                    _add_reminder_to_upcoming_cache(reminder)
+                    st.session_state.reminder_form = {
+                        "content": "",
+                        "due_in_minutes": reminder_minutes,
+                        "snooze_minutes": snooze_minutes,
+                        "metadata_note": reminder_metadata_note,
+                    }
+
+        metrics = st.session_state.get("reminder_metrics", {"counts": {}, "events": []})
+        with st.expander("Reminder telemetry", expanded=False):
+            counts = metrics.get("counts", {})
+            if counts:
+                cols = st.columns(len(counts))
+                for idx, (label, value) in enumerate(counts.items()):
+                    with cols[idx]:
+                        st.metric(label.replace("_", " ").title(), value)
+            else:
+                st.caption("No reminder interactions yet")
+            events = metrics.get("events", [])
+            if events:
+                st.caption("Recent events")
+                for event in reversed(events[-5:]):
+                    stamp = event.get("timestamp", "")
+                    ev_label = event.get("type", "")
+                    content = event.get("content", "")
+                    st.write(f"{stamp}: **{ev_label}** – {content}")
+            else:
+                st.caption("No telemetry events recorded")
+
         return {
             "flags": {
                 "include_memory": include_memory,
@@ -384,6 +813,8 @@ def main() -> None:
 
     st.title("George Chat Interface")
     st.write("Chat with the cognitive backend. Each turn retrieves short-term memories first, then falls back to long-term memories when needed.")
+    render_proactive_banner(base_url)
+    render_session_context_panel()
 
     prompt: Optional[str] = None
     if backend_ok:
@@ -411,6 +842,8 @@ def main() -> None:
                     salience_threshold,
                 )
             st.session_state.last_raw_response = response
+            st.session_state.session_context = response.get("session_context")
+            _update_proactive_state_from_response(response)
             reply_text = response.get("response") or "[Empty response from backend]"
             assistant_record = {
                 "role": "assistant",

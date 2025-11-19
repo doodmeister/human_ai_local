@@ -18,10 +18,24 @@ try:
     # Mount the advanced chat router
     app.include_router(chat_router)
 
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    if __name__ == "__main__":
+        sys.exit(1)
+    raise
+except Exception as e:
+    print(f"❌ Server startup error: {e}")
+    if __name__ == "__main__":
+        sys.exit(1)
+    raise
+
+
+def main() -> None:
+    """Start the George Cognitive API server via uvicorn."""
     print("✅ API app imported successfully")
     print("🚀 Starting George Cognitive API server on http://localhost:8000...")
     print("📋 Available endpoints:")
-    print("   GET  /health - Health check")  
+    print("   GET  /health - Health check")
     print("   GET  /api/agent/status - Get cognitive status")
     print("   POST /api/agent/process - Process user input")
     print("   GET  /api/agent/memory/list/{system} - List STM/LTM memories")
@@ -29,12 +43,9 @@ try:
     print("   GET  /reflection/status - Get reflection scheduler status")
     print("   GET  /reflection/report - Get last reflection report")
     print()
-    
+
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=False, log_level="info")
-    
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-    sys.exit(1)
-except Exception as e:
-    print(f"❌ Server startup error: {e}")
-    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

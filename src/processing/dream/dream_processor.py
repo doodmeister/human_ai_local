@@ -140,21 +140,42 @@ class DreamProcessor:
         while True:
             schedule.run_pending()
             time.sleep(60)  # Check every minute
+
+    def _launch_dream_cycle(self, cycle_type: str) -> None:
+        """Start a dream cycle, handling both async and non-async contexts."""
+        if self.is_dreaming:
+            logger.debug("Dream cycle already in progress; skipping scheduled start")
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            loop.create_task(self.enter_dream_cycle(cycle_type))
+            return
+
+        def _run_cycle() -> None:
+            try:
+                asyncio.run(self.enter_dream_cycle(cycle_type))
+            except Exception:  # pragma: no cover - logged for visibility
+                logger.exception(f"Dream cycle {cycle_type} failed")
+
+        thread = Thread(target=_run_cycle, daemon=True)
+        thread.start()
     
     def _scheduled_light_sleep(self):
         """Scheduled light sleep cycle"""
-        if not self.is_dreaming:
-            asyncio.create_task(self.enter_dream_cycle('light'))
+        self._launch_dream_cycle('light')
     
     def _scheduled_deep_sleep(self):
         """Scheduled deep sleep cycle"""
-        if not self.is_dreaming:
-            asyncio.create_task(self.enter_dream_cycle('deep'))
+        self._launch_dream_cycle('deep')
     
     def _scheduled_rem_sleep(self):
         """Scheduled REM sleep cycle"""
-        if not self.is_dreaming:
-            asyncio.create_task(self.enter_dream_cycle('rem'))
+        self._launch_dream_cycle('rem')
     
     async def enter_dream_cycle(self, cycle_type: str = 'deep') -> Dict[str, Any]:
         """
@@ -780,10 +801,10 @@ class DreamProcessor:
     
     def force_dream_cycle(self, cycle_type: str = 'deep') -> None:
         """Force an immediate dream cycle (for testing/manual triggering)"""
-        if not self.is_dreaming:
-            asyncio.create_task(self.enter_dream_cycle(cycle_type))
-        else:
+        if self.is_dreaming:
             logger.warning("Cannot force dream cycle - already dreaming")
+            return
+        self._launch_dream_cycle(cycle_type)
     
     def shutdown(self):
         """Shutdown the dream processor"""
