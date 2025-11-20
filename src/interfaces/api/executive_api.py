@@ -14,11 +14,13 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from ...executive.executive_agent import ExecutiveAgent
 from ...executive.goal_manager import GoalPriority
+from ...executive.integration import ExecutiveSystem
+from ...executive.planning.world_state import WorldState
 
 router = APIRouter()
 
@@ -44,6 +46,17 @@ def get_executive_agent(request: Request) -> ExecutiveAgent:
         )
     
     return cognitive_agent.executive_agent
+
+
+def get_executive_system(request: Request) -> ExecutiveSystem:
+    """Get or create ExecutiveSystem for integrated pipeline operations"""
+    cognitive_agent = request.app.state.agent
+    
+    # Check if cognitive agent has integrated executive system
+    if not hasattr(cognitive_agent, 'executive_system'):
+        cognitive_agent.executive_system = ExecutiveSystem()
+    
+    return cognitive_agent.executive_system
 
 # Goal Management Endpoints
 
@@ -238,3 +251,203 @@ async def get_executive_status(request: Request):
             "executive_state": "error",
             "error": f"Failed to get executive status: {str(e)}"
         }
+
+
+# Integrated Pipeline Endpoints (ExecutiveSystem)
+
+@router.post("/goals/{goal_id}/execute")
+async def execute_goal(goal_id: str, request: Request):
+    """Execute integrated pipeline for a goal: Decision → Plan → Schedule"""
+    try:
+        system = get_executive_system(request)
+        
+        # Execute goal through integrated pipeline
+        context = system.execute_goal(goal_id, initial_state=WorldState({}))
+        
+        return {
+            "status": "success",
+            "execution_context": {
+                "goal_id": context.goal_id,
+                "status": context.status.value,
+                "decision_time_ms": context.decision_time_ms,
+                "planning_time_ms": context.planning_time_ms,
+                "scheduling_time_ms": context.scheduling_time_ms,
+                "total_actions": context.total_actions,
+                "scheduled_tasks": context.scheduled_tasks,
+                "makespan": context.makespan,
+                "has_plan": context.plan is not None,
+                "has_schedule": context.schedule is not None,
+                "failure_reason": context.failure_reason
+            }
+        }
+    
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to execute goal: {str(e)}")
+
+
+@router.get("/goals/{goal_id}/plan")
+async def get_goal_plan(goal_id: str, request: Request):
+    """Get GOAP plan for a goal"""
+    try:
+        system = get_executive_system(request)
+        
+        # Check if execution context exists
+        context = system.execution_contexts.get(goal_id)
+        if not context or not context.plan:
+            return {
+                "status": "no_plan",
+                "message": "No plan generated yet. Execute the goal first."
+            }
+        
+        plan = context.plan
+        
+        # Convert plan to JSON-serializable format
+        plan_data = {
+            "steps": [
+                {
+                    "name": step.name,
+                    "preconditions": step.preconditions.state if hasattr(step.preconditions, 'state') else {},
+                    "effects": step.effects.state if hasattr(step.effects, 'state') else {},
+                    "cost": step.cost
+                }
+                for step in plan.steps
+            ],
+            "total_cost": plan.total_cost,
+            "length": len(plan.steps),
+            "planning_time_ms": context.planning_time_ms,
+            "heuristic": plan.metadata.get("heuristic", "unknown") if hasattr(plan, 'metadata') else "unknown"
+        }
+        
+        return {
+            "status": "success",
+            "plan": plan_data
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get plan: {str(e)}")
+
+
+@router.get("/goals/{goal_id}/schedule")
+async def get_goal_schedule(goal_id: str, request: Request):
+    """Get CP-SAT schedule for a goal"""
+    try:
+        system = get_executive_system(request)
+        
+        # Check if execution context exists
+        context = system.execution_contexts.get(goal_id)
+        if not context or not context.schedule:
+            return {
+                "status": "no_schedule",
+                "message": "No schedule generated yet. Execute the goal first."
+            }
+        
+        schedule = context.schedule
+        
+        # Convert schedule to JSON-serializable format
+        tasks_data = []
+        for task in schedule.tasks:
+            task_data = {
+                "id": task.id,
+                "name": task.name if hasattr(task, 'name') else task.id,
+                "scheduled_start": task.scheduled_start.isoformat() if task.scheduled_start else None,
+                "scheduled_end": task.scheduled_end.isoformat() if task.scheduled_end else None,
+                "duration": task.duration,
+                "priority": task.priority,
+                "resources": [r.name if hasattr(r, 'name') else str(r) for r in task.resource_requirements],
+                "dependencies": task.dependencies
+            }
+            tasks_data.append(task_data)
+        
+        schedule_data = {
+            "tasks": tasks_data,
+            "makespan": schedule.makespan,
+            "robustness_score": schedule.quality_metrics.get("robustness_score", 0.0) if hasattr(schedule, 'quality_metrics') else 0.0,
+            "cognitive_smoothness": schedule.quality_metrics.get("cognitive_smoothness", 0.0) if hasattr(schedule, 'quality_metrics') else 0.0,
+            "resource_utilization": {},  # Simplified for now
+            "scheduling_time_ms": context.scheduling_time_ms
+        }
+        
+        return {
+            "status": "success",
+            "schedule": schedule_data
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get schedule: {str(e)}")
+
+
+@router.get("/goals/{goal_id}/status")
+async def get_execution_status(goal_id: str, request: Request):
+    """Get execution context and pipeline status for a goal"""
+    try:
+        system = get_executive_system(request)
+        
+        context = system.execution_contexts.get(goal_id)
+        if not context:
+            return {
+                "status": "not_executed",
+                "message": "Goal has not been executed yet"
+            }
+        
+        # Build comprehensive context
+        context_data = {
+            "goal_id": context.goal_id,
+            "goal_title": context.goal_title,
+            "status": context.status.value,
+            "decision_time_ms": context.decision_time_ms,
+            "planning_time_ms": context.planning_time_ms,
+            "scheduling_time_ms": context.scheduling_time_ms,
+            "total_actions": context.total_actions,
+            "scheduled_tasks": context.scheduled_tasks,
+            "makespan": context.makespan,
+            "failure_reason": context.failure_reason,
+            "actual_success": context.actual_success,
+            "outcome_score": context.outcome_score,
+            "decision_result": {
+                "strategy": context.decision_result.strategy if context.decision_result else "unknown",
+                "confidence": context.decision_result.confidence if context.decision_result else 0.0,
+                "selected_option": str(context.decision_result.selected_option) if context.decision_result else None
+            } if context.decision_result else None,
+            "accuracy_metrics": context.accuracy_metrics if hasattr(context, 'accuracy_metrics') else None
+        }
+        
+        return {
+            "status": "success",
+            "context": context_data
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get execution status: {str(e)}")
+
+
+@router.get("/system/health")
+async def get_system_health(request: Request):
+    """Get comprehensive executive system health metrics"""
+    try:
+        system = get_executive_system(request)
+        health = system.get_system_health()
+        
+        # Convert to JSON-serializable format
+        health_data = {
+            "active_goals": health.get("active_goals", 0),
+            "total_executions": health.get("total_executions", 0),
+            "success_rate": health.get("success_rate", 0.0),
+            "avg_execution_time_ms": health.get("avg_execution_time_ms", 0.0),
+            "subsystems": health.get("subsystems", {}),
+            "recent_activity": health.get("recent_activity", []),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return {
+            "status": "success",
+            "health": health_data
+        }
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to get system health: {str(e)}"
+        }
+

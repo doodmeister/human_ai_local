@@ -14,9 +14,13 @@ sys.path.insert(0, str(project_root))
 try:
     from george_api_simple import app
     from src.interfaces.api.chat_endpoints import router as chat_router
+    from src.interfaces.api.executive_api import router as executive_router
 
     # Mount the advanced chat router
     app.include_router(chat_router)
+    
+    # Mount the executive functions router
+    app.include_router(executive_router, prefix="/executive", tags=["executive"])
 
 except ImportError as e:
     print(f"❌ Import error: {e}")
@@ -42,6 +46,12 @@ def main() -> None:
     print("   POST /reflect - Trigger metacognitive reflection")
     print("   GET  /reflection/status - Get reflection scheduler status")
     print("   GET  /reflection/report - Get last reflection report")
+    print()
+    print("🎯 Executive Functions:")
+    print("   POST /executive/goals - Create new goal")
+    print("   GET  /executive/goals - List all goals")
+    print("   GET  /executive/goals/{id} - Get goal details")
+    print("   GET  /executive/status - Executive system status")
     print()
 
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=False, log_level="info")

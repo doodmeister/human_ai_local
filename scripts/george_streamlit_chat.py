@@ -425,6 +425,164 @@ def ensure_state() -> None:
         st.session_state.ollama_base_url = "http://localhost:11434"
     if "ollama_model" not in st.session_state:
         st.session_state.ollama_model = "llama3.2"
+    # Executive function settings
+    if "active_goals" not in st.session_state:
+        st.session_state.active_goals = []
+    if "active_goals_refresh" not in st.session_state:
+        st.session_state.active_goals_refresh = False
+    if "selected_goal_id" not in st.session_state:
+        st.session_state.selected_goal_id = None
+
+
+def create_goal_remote(
+    base_url: str,
+    title: str,
+    description: str = "",
+    priority: float = 0.5,
+    deadline: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Create a new goal via executive API."""
+    payload = {
+        "title": title,
+        "description": description,
+        "priority": priority,
+    }
+    if deadline:
+        payload["deadline"] = deadline
+    
+    try:
+        resp = requests.post(f"{base_url}/executive/goals", json=payload, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        st.error(f"Failed to create goal: {exc}")
+        return None
+
+
+def get_goals_remote(base_url: str, active_only: bool = True) -> List[Dict[str, Any]]:
+    """Fetch goals from executive API."""
+    try:
+        params = {"active_only": "true" if active_only else "false"}
+        resp = requests.get(f"{base_url}/executive/goals", params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json().get("goals", [])
+    except requests.RequestException as exc:
+        st.error(f"Failed to fetch goals: {exc}")
+        return []
+
+
+def render_goal_creator(base_url: str) -> None:
+    """Render goal creation form in sidebar."""
+    with st.expander("➕ Create Goal", expanded=False):
+        goal_title = st.text_input(
+            "Goal title",
+            placeholder="e.g., Deploy new feature to production",
+            key="goal_title_input"
+        )
+        
+        goal_description = st.text_area(
+            "Description (optional)",
+            placeholder="Additional context about this goal...",
+            key="goal_description_input",
+            height=80
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            priority_label = st.selectbox(
+                "Priority",
+                options=["Low (0.25)", "Medium (0.5)", "High (0.75)", "Critical (0.95)"],
+                index=1,
+                key="goal_priority_input"
+            )
+            priority_map = {
+                "Low (0.25)": 0.25,
+                "Medium (0.5)": 0.5,
+                "High (0.75)": 0.75,
+                "Critical (0.95)": 0.95
+            }
+            priority = priority_map[priority_label]
+        
+        with col2:
+            use_deadline = st.checkbox("Set deadline", key="goal_has_deadline")
+        
+        deadline_str = None
+        if use_deadline:
+            deadline_date = st.date_input("Deadline", key="goal_deadline_input")
+            deadline_time = st.time_input("Time (optional)", key="goal_deadline_time_input")
+            if deadline_date:
+                if deadline_time:
+                    deadline_str = f"{deadline_date} {deadline_time}"
+                else:
+                    deadline_str = str(deadline_date)
+        
+        if st.button("Create Goal", key="create_goal_btn"):
+            if not goal_title.strip():
+                st.warning("Please provide a goal title")
+                return
+            
+            result = create_goal_remote(
+                base_url,
+                goal_title.strip(),
+                description=goal_description.strip(),
+                priority=priority,
+                deadline=deadline_str
+            )
+            
+            if result and result.get("status") == "success":
+                goal_id = result.get("goal_id")
+                st.success(f"Goal created: {goal_id[:8] if goal_id else 'success'}")
+                st.session_state.active_goals_refresh = True
+                st.rerun()
+
+
+def render_active_goals(base_url: str) -> None:
+    """Render active goals panel in sidebar."""
+    st.subheader("🎯 Active Goals")
+    
+    # Refresh trigger
+    if st.session_state.get("active_goals_refresh"):
+        st.session_state.active_goals_refresh = False
+    
+    goals = get_goals_remote(base_url, active_only=True)
+    st.session_state.active_goals = goals
+    
+    if not goals:
+        st.caption("No active goals")
+        return
+    
+    for goal in goals:
+        goal_id = goal.get("id", "")
+        title = goal.get("title", "Untitled goal")
+        priority = goal.get("priority", 0.5)
+        status = goal.get("status", "unknown")
+        progress = goal.get("progress", 0.0)
+        
+        # Priority emoji
+        if priority >= 0.75:
+            priority_emoji = "🔴"
+        elif priority >= 0.5:
+            priority_emoji = "🟡"
+        else:
+            priority_emoji = "🟢"
+        
+        with st.container():
+            st.markdown(f"{priority_emoji} **{title}**")
+            st.caption(f"Status: {status} | Progress: {progress*100:.0f}%")
+            
+            if progress > 0:
+                st.progress(progress)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📊 Details", key=f"view_goal_{goal_id}"):
+                    st.session_state.selected_goal_id = goal_id
+                    st.rerun()
+            with col2:
+                if st.button("🔗 Link", key=f"link_goal_{goal_id}", help="Copy goal ID to link with reminders"):
+                    st.info(f"Goal ID: {goal_id[:12]}")
+            
+            st.markdown("---")
 
 
 def update_llm_config(base_url: str, provider: str, openai_model: str, ollama_base_url: str, ollama_model: str) -> Dict[str, Any]:
@@ -646,6 +804,12 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
                 st.caption("No responses yet")
             else:
                 st.json(st.session_state.last_raw_response)
+        
+        st.markdown("---")
+        render_active_goals(st.session_state.api_base_url)
+        render_goal_creator(st.session_state.api_base_url)
+        
+        st.markdown("---")
         st.subheader("Upcoming reminders")
         render_sidebar_reminders(st.session_state.api_base_url)
         st.markdown("---")
@@ -682,18 +846,39 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
             value=reminder_form.get("metadata_note", ""),
             key="reminder_metadata_input",
         )
+        
+        # NEW: Goal linking
+        active_goals = st.session_state.get("active_goals", [])
+        goal_options = ["None (not linked)"] + [
+            f"{g.get('title', 'Untitled')} ({g.get('id', '')[:8]})" 
+            for g in active_goals
+        ]
+        selected_goal_idx = st.selectbox(
+            "Link to goal (optional)",
+            options=range(len(goal_options)),
+            format_func=lambda i: goal_options[i],
+            key="reminder_goal_link",
+            help="Associate this reminder with an active goal"
+        )
 
         if st.button("➕ Add reminder", key="create_reminder_button"):
             trimmed = reminder_content.strip()
             if not trimmed:
                 st.warning("Provide reminder content first")
             else:
-                metadata = {"note": reminder_metadata_note.strip()} if reminder_metadata_note.strip() else None
+                metadata = {"note": reminder_metadata_note.strip()} if reminder_metadata_note.strip() else {}
+                
+                # Add goal link to metadata if selected
+                if selected_goal_idx > 0:  # 0 is "None"
+                    goal = active_goals[selected_goal_idx - 1]
+                    metadata["goal_id"] = goal.get("id")
+                    metadata["goal_title"] = goal.get("title")
+                
                 reminder = create_reminder_remote(
                     st.session_state.api_base_url,
                     trimmed,
                     int(reminder_minutes) * 60,
-                    metadata=metadata,
+                    metadata=metadata if metadata else None,
                 )
                 if reminder:
                     st.success("Reminder created")
