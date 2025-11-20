@@ -536,6 +536,50 @@ def render_goal_creator(base_url: str) -> None:
                 st.rerun()
 
 
+def execute_goal_remote(base_url: str, goal_id: str) -> Optional[Dict[str, Any]]:
+    """Execute a goal through the integrated pipeline."""
+    try:
+        resp = requests.post(f"{base_url}/executive/goals/{goal_id}/execute", timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        st.error(f"Failed to execute goal: {exc}")
+        return None
+
+
+def get_goal_plan_remote(base_url: str, goal_id: str) -> Optional[Dict[str, Any]]:
+    """Get GOAP plan for a goal."""
+    try:
+        resp = requests.get(f"{base_url}/executive/goals/{goal_id}/plan", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        st.error(f"Failed to get plan: {exc}")
+        return None
+
+
+def get_goal_schedule_remote(base_url: str, goal_id: str) -> Optional[Dict[str, Any]]:
+    """Get CP-SAT schedule for a goal."""
+    try:
+        resp = requests.get(f"{base_url}/executive/goals/{goal_id}/schedule", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        st.error(f"Failed to get schedule: {exc}")
+        return None
+
+
+def get_goal_execution_status_remote(base_url: str, goal_id: str) -> Optional[Dict[str, Any]]:
+    """Get execution status for a goal."""
+    try:
+        resp = requests.get(f"{base_url}/executive/goals/{goal_id}/status", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        st.error(f"Failed to get execution status: {exc}")
+        return None
+
+
 def render_active_goals(base_url: str) -> None:
     """Render active goals panel in sidebar."""
     st.subheader("🎯 Active Goals")
@@ -573,13 +617,21 @@ def render_active_goals(base_url: str) -> None:
             if progress > 0:
                 st.progress(progress)
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
-                if st.button("📊 Details", key=f"view_goal_{goal_id}"):
+                if st.button("▶️", key=f"exec_goal_{goal_id}", help="Execute pipeline"):
+                    with st.spinner("Executing..."):
+                        result = execute_goal_remote(base_url, goal_id)
+                        if result and result.get("status") == "success":
+                            st.session_state[f"exec_result_{goal_id}"] = result
+                            st.success("Executed!")
+                            st.rerun()
+            with col2:
+                if st.button("📊", key=f"view_goal_{goal_id}", help="View details"):
                     st.session_state.selected_goal_id = goal_id
                     st.rerun()
-            with col2:
-                if st.button("🔗 Link", key=f"link_goal_{goal_id}", help="Copy goal ID to link with reminders"):
+            with col3:
+                if st.button("🔗", key=f"link_goal_{goal_id}", help="Copy goal ID"):
                     st.info(f"Goal ID: {goal_id[:12]}")
             
             st.markdown("---")
@@ -986,6 +1038,120 @@ def render_message(message: Dict[str, Any]) -> None:
                     st.caption("; ".join(parts))
 
 
+def render_goal_details_page(base_url: str, goal_id: str) -> None:
+    """Render detailed goal execution view."""
+    st.subheader("📋 Goal Execution Details")
+    
+    if st.button("⬅️ Back to Chat"):
+        st.session_state.selected_goal_id = None
+        st.rerun()
+    
+    # Get execution status
+    status_response = get_goal_execution_status_remote(base_url, goal_id)
+    
+    if not status_response or status_response.get("status") == "not_executed":
+        st.info("This goal has not been executed yet. Click the ▶️ button to execute.")
+        return
+    
+    context = status_response.get("context", {})
+    
+    # Header with status
+    st.markdown(f"### {context.get('goal_title', 'Goal Details')}")
+    exec_status = context.get("status", "UNKNOWN")
+    
+    status_colors = {
+        "COMPLETED": "green",
+        "FAILED": "red",
+        "EXECUTING": "orange",
+        "PLANNING": "blue",
+        "SCHEDULING": "blue"
+    }
+    color = status_colors.get(exec_status, "gray")
+    st.markdown(f"**Status:** :{color}[{exec_status}]")
+    
+    # Pipeline stages
+    st.markdown("#### Pipeline Stages")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("1️⃣ Decision", f"{context.get('decision_time_ms', 0)}ms")
+        if context.get("decision_result"):
+            st.caption(f"Strategy: {context['decision_result'].get('strategy', 'N/A')}")
+            st.caption(f"Confidence: {context['decision_result'].get('confidence', 0):.1%}")
+    
+    with col2:
+        st.metric("2️⃣ Planning", f"{context.get('planning_time_ms', 0)}ms")
+        st.caption(f"Actions: {context.get('total_actions', 0)}")
+    
+    with col3:
+        st.metric("3️⃣ Scheduling", f"{context.get('scheduling_time_ms', 0)}ms")
+        st.caption(f"Tasks: {context.get('scheduled_tasks', 0)}")
+    
+    # GOAP Plan viewer
+    st.markdown("#### 📝 GOAP Plan")
+    plan_response = get_goal_plan_remote(base_url, goal_id)
+    
+    if plan_response and plan_response.get("status") == "success":
+        plan = plan_response.get("plan", {})
+        steps = plan.get("steps", [])
+        
+        st.info(f"**Plan:** {plan.get('length', 0)} steps | Cost: {plan.get('total_cost', 0):.1f} | Planning: {plan.get('planning_time_ms', 0)}ms")
+        
+        for i, step in enumerate(steps, 1):
+            with st.expander(f"Step {i}: {step.get('name', 'Unknown')}" + (" ✅" if i == 1 else "")):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Preconditions:**")
+                    preconditions = step.get("preconditions", {})
+                    if preconditions:
+                        for key, value in preconditions.items():
+                            st.caption(f"- {key}: {value}")
+                    else:
+                        st.caption("None")
+                
+                with col2:
+                    st.markdown("**Effects:**")
+                    effects = step.get("effects", {})
+                    if effects:
+                        for key, value in effects.items():
+                            st.caption(f"- {key}: {value}")
+                    else:
+                        st.caption("None")
+                
+                st.metric("Cost", f"{step.get('cost', 0):.1f}")
+    else:
+        st.warning("No plan available yet.")
+    
+    # Schedule viewer (simplified for now)
+    st.markdown("#### 📅 Schedule")
+    schedule_response = get_goal_schedule_remote(base_url, goal_id)
+    
+    if schedule_response and schedule_response.get("status") == "success":
+        schedule = schedule_response.get("schedule", {})
+        tasks = schedule.get("tasks", [])
+        
+        st.info(f"**Schedule:** {len(tasks)} tasks | Makespan: {schedule.get('makespan', 0)}s | Robustness: {schedule.get('robustness_score', 0):.1%}")
+        
+        for task in tasks:
+            with st.expander(f"Task: {task.get('name', task.get('id', 'Unknown'))}"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.caption(f"**Start:** {task.get('scheduled_start', 'N/A')}")
+                    st.caption(f"**End:** {task.get('scheduled_end', 'N/A')}")
+                    st.caption(f"**Duration:** {task.get('duration', 0)}s")
+                
+                with col2:
+                    st.caption(f"**Priority:** {task.get('priority', 0)}")
+                    resources = task.get('resources', [])
+                    st.caption(f"**Resources:** {', '.join(resources) if resources else 'None'}")
+                    dependencies = task.get('dependencies', [])
+                    st.caption(f"**Dependencies:** {', '.join(dependencies) if dependencies else 'None'}")
+    else:
+        st.warning("No schedule available yet.")
+
+
 def main() -> None:
     st.set_page_config(page_title="George Chat", page_icon="G", layout="wide")
     ensure_state()
@@ -995,6 +1161,11 @@ def main() -> None:
     config = render_sidebar(backend_ok)
     flags = config["flags"]
     salience_threshold = config["salience_threshold"]
+    
+    # Check if viewing goal details
+    if st.session_state.get("selected_goal_id"):
+        render_goal_details_page(base_url, st.session_state.selected_goal_id)
+        return
 
     st.title("George Chat Interface")
     st.write("Chat with the cognitive backend. Each turn retrieves short-term memories first, then falls back to long-term memories when needed.")
