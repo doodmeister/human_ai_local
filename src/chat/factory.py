@@ -64,11 +64,20 @@ def build_chat_service(
                 executive = ExecutiveAgent()
             except Exception:
                 executive = None
+    
+    # Prospective memory for reminders
+    prospective = None
+    try:
+        from src.memory.prospective.prospective_memory import get_prospective_memory
+        prospective = get_prospective_memory()
+    except Exception:
+        prospective = None
+    
     cfg_obj = get_chat_config()
     cfg = cfg_obj.to_dict()
     cfg.setdefault("retrieval_timeout_ms", cfg_obj.retrieval_timeout_ms)
     builder = ContextBuilder(chat_config=cfg, stm=stm, ltm=ltm, episodic=episodic,
-                             attention=attention, executive=executive)
+                             attention=attention, executive=executive, prospective=prospective)
     # Lazy create consolidator (won't fail if memory systems absent)
     consolidator = None
     try:

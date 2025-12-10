@@ -52,14 +52,23 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 @router.get("/prospective/search")
-def list_prospective_reminders(request: Request, include_completed: bool = False):
+def list_prospective_reminders(request: Request, include_completed: bool = False, goal_id: Optional[str] = None):
     """
     List all prospective reminders (optionally include completed).
+    Optionally filter by goal_id for auto-generated plan reminders.
     Returns a list of reminders as dicts.
     """
     agent = request.app.state.agent
     memsys = agent.memory.prospective
     reminders = memsys.list_reminders(include_completed=include_completed)
+    
+    # Filter by goal_id if specified
+    if goal_id:
+        reminders = [
+            r for r in reminders 
+            if r.metadata.get("goal_id") == goal_id or f"goal:{goal_id}" in r.tags
+        ]
+    
     # Convert dataclass objects to dicts for JSON serialization
     reminders_dicts = [jsonable_encoder(r) for r in reminders]
     return JSONResponse(content={"results": reminders_dicts})

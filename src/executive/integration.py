@@ -258,6 +258,12 @@ class ExecutiveSystem:
             context.scheduling_time_ms = (datetime.now() - scheduling_start).total_seconds() * 1000
             self.active_schedules[goal_id] = schedule
             
+            # Stage 4: Auto-generate reminders from scheduled tasks
+            logger.info("Stage 4: Creating reminders from plan...")
+            reminder_count = self._create_reminders_from_schedule(goal_id, schedule, plan)
+            if reminder_count > 0:
+                logger.info(f"  - Created {reminder_count} reminders for plan steps")
+            
             # Mark as ready for execution
             context.status = ExecutionStatus.EXECUTING
             context.total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
@@ -474,6 +480,101 @@ class ExecutiveSystem:
         }
         return mapping.get(priority, 0.5)
     
+    def _create_reminders_from_schedule(
+        self, 
+        goal_id: str, 
+        schedule: Schedule, 
+        plan: Plan
+    ) -> int:
+        """
+        Auto-generate prospective memory reminders from scheduled tasks.
+        
+        Bridges the executive planning system with prospective memory,
+        ensuring plan steps become actionable reminders.
+        
+        Args:
+            goal_id: Associated goal ID
+            schedule: The computed schedule
+            plan: The GOAP plan (for action descriptions)
+            
+        Returns:
+            Number of reminders created
+        """
+        try:
+            # Lazy import to avoid circular dependencies
+            from src.memory.prospective.prospective_memory import (
+                create_prospective_memory,
+                get_prospective_memory,
+            )
+            
+            # Get or create prospective memory system
+            try:
+                prospective = get_prospective_memory()
+            except Exception:
+                prospective = create_prospective_memory(use_vector=False)
+            
+            if prospective is None:
+                logger.warning("Prospective memory not available - skipping reminder creation")
+                return 0
+            
+            # Create action name to description mapping from plan
+            action_descriptions = {}
+            for i, step in enumerate(plan.steps):
+                action_name = getattr(step, 'name', str(step))
+                action_descriptions[action_name] = {
+                    'description': getattr(step, 'description', action_name),
+                    'sequence': i + 1,
+                    'total': len(plan.steps)
+                }
+            
+            reminders_created = 0
+            base_time = datetime.now()
+            
+            # Create reminder for each scheduled task
+            for task in schedule.tasks:
+                # Calculate due time from scheduled start
+                if task.scheduled_start is not None:
+                    # scheduled_start is typically in minutes from base time
+                    due_time = base_time + timedelta(minutes=task.scheduled_start)
+                else:
+                    # Fallback: spread tasks evenly
+                    due_time = base_time + timedelta(hours=reminders_created + 1)
+                
+                # Get action description if available
+                action_info = action_descriptions.get(task.id, {})
+                seq = action_info.get('sequence', reminders_created + 1)
+                total = action_info.get('total', len(schedule.tasks))
+                
+                # Create reminder content
+                task_name = getattr(task, 'name', task.id)
+                content = f"[Step {seq}/{total}] {task_name}"
+                
+                # Add reminder
+                reminder = prospective.add_reminder(
+                    content=content,
+                    due_time=due_time,
+                    tags=["auto-generated", "plan-step", f"goal:{goal_id}"],
+                    metadata={
+                        "goal_id": goal_id,
+                        "task_id": task.id,
+                        "sequence": seq,
+                        "total_steps": total,
+                        "auto_generated": True,
+                        "source": "executive_system"
+                    }
+                )
+                
+                if reminder:
+                    reminders_created += 1
+                    logger.debug(f"Created reminder: {content} due at {due_time}")
+            
+            logger.info(f"Created {reminders_created} reminders for goal {goal_id}")
+            return reminders_created
+            
+        except Exception as e:
+            logger.warning(f"Failed to create reminders from schedule: {e}")
+            return 0
+
     def get_execution_status(self, goal_id: str) -> Optional[ExecutionContext]:
         """Get execution context for a goal."""
         return self.execution_contexts.get(goal_id)

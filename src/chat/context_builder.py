@@ -34,6 +34,7 @@ class ContextBuilder:
         episodic: Any = None,
         attention: Any = None,
         executive: Any = None,
+        prospective: Any = None,
     ):
         # Accept provided configuration dict directly (already from global ChatConfig.to_dict())
         self.cfg = dict(chat_config) if chat_config else {}
@@ -45,6 +46,7 @@ class ContextBuilder:
         self.episodic = episodic
         self.attention = attention
         self.executive = executive
+        self.prospective = prospective
         self._last_stage_stats: Dict[str, Any] = {}
 
     # Public API
@@ -105,6 +107,12 @@ class ContextBuilder:
         self._run_stage(
             name="executive_mode",
             func=self._inject_executive_mode,
+            sink=items,
+            trace=trace,
+        )
+        self._run_stage(
+            name="prospective_reminders",
+            func=self._inject_upcoming_reminders,
             sink=items,
             trace=trace,
         )
@@ -581,8 +589,13 @@ class ContextBuilder:
         return out
 
     def _inject_executive_mode(self) -> List[ContextItem]:
+        """Inject executive state including active goals into context."""
+        items: List[ContextItem] = []
+        
         if not self.executive:
-            return []
+            return items
+            
+        # Basic mode info
         try:
             mode = getattr(self.executive, "mode", "UNKNOWN")
         except Exception:  # pragma: no cover
@@ -591,7 +604,8 @@ class ContextBuilder:
             perf = getattr(self.executive, "performance_state", None)
         except Exception:
             perf = None
-        return [
+        
+        items.append(
             ContextItem(
                 source_id="executive_mode",
                 source_system="executive",
@@ -600,7 +614,149 @@ class ContextBuilder:
                 reason="executive_state",
                 scores={"state": 1.0, "mode_confidence": getattr(perf, "confidence", 0.0) if perf else 0.0},
             )
-        ]
+        )
+        
+        # Inject active goals if goal_manager available
+        try:
+            goal_manager = getattr(self.executive, "goal_manager", None)
+            if goal_manager is not None:
+                active_goals = []
+                # Try to get active goals
+                if hasattr(goal_manager, "get_active_goals"):
+                    active_goals = goal_manager.get_active_goals()
+                elif hasattr(goal_manager, "goals"):
+                    all_goals = goal_manager.goals
+                    active_goals = [g for g in all_goals.values() if g.status in ("pending", "in_progress", "active")]
+                
+                if active_goals:
+                    # Create a concise summary of active goals for LLM context
+                    goal_summaries = []
+                    for goal in active_goals[:5]:  # Limit to top 5 goals
+                        title = getattr(goal, "title", getattr(goal, "description", str(goal)))
+                        priority = getattr(goal, "priority", 0.5)
+                        status = getattr(goal, "status", "pending")
+                        deadline = getattr(goal, "deadline", None)
+                        
+                        summary = f"- {title} (priority: {priority:.0%}, status: {status})"
+                        if deadline:
+                            summary += f" [deadline: {deadline}]"
+                        goal_summaries.append(summary)
+                    
+                    goals_content = "USER'S ACTIVE GOALS:\n" + "\n".join(goal_summaries)
+                    if len(active_goals) > 5:
+                        goals_content += f"\n... and {len(active_goals) - 5} more goals"
+                    
+                    items.append(
+                        ContextItem(
+                            source_id="active_goals",
+                            source_system="executive",
+                            content=goals_content,
+                            rank=RANK_BASE_EXECUTIVE - 1,  # Slightly higher priority than mode
+                            reason="active_goals_context",
+                            scores={"relevance": 0.9, "goal_count": len(active_goals)},
+                            metadata={"goal_count": len(active_goals)},
+                        )
+                    )
+        except Exception:
+            # Don't fail if goal injection doesn't work
+            pass
+        
+        return items
+
+    def _inject_upcoming_reminders(self) -> List[ContextItem]:
+        """
+        Inject upcoming reminders (especially plan steps) into LLM context.
+        
+        This enables the LLM to proactively suggest next actions based on
+        the user's scheduled tasks and auto-generated plan reminders.
+        """
+        from datetime import timedelta
+        
+        items: List[ContextItem] = []
+        
+        if not self.prospective:
+            return items
+        
+        try:
+            # Get reminders due within next 2 hours
+            upcoming = self.prospective.get_upcoming(within=timedelta(hours=2))
+            
+            if not upcoming:
+                return items
+            
+            # Separate plan steps from regular reminders
+            plan_reminders = []
+            regular_reminders = []
+            
+            for r in upcoming:
+                if r.metadata.get("auto_generated") or "plan-step" in r.tags:
+                    plan_reminders.append(r)
+                else:
+                    regular_reminders.append(r)
+            
+            # Build plan steps content (higher priority)
+            if plan_reminders:
+                plan_lines = []
+                for r in plan_reminders[:5]:  # Limit to 5
+                    due_in = ""
+                    if r.due_time:
+                        delta = r.due_time - datetime.now()
+                        mins = int(delta.total_seconds() / 60)
+                        if mins < 60:
+                            due_in = f" (due in {mins}m)"
+                        else:
+                            due_in = f" (due in {mins // 60}h {mins % 60}m)"
+                    plan_lines.append(f"• {r.content}{due_in}")
+                
+                plan_content = "UPCOMING PLAN STEPS:\n" + "\n".join(plan_lines)
+                if len(plan_reminders) > 5:
+                    plan_content += f"\n... and {len(plan_reminders) - 5} more steps"
+                
+                items.append(
+                    ContextItem(
+                        source_id="plan_steps",
+                        source_system="prospective",
+                        content=plan_content,
+                        rank=RANK_BASE_EXECUTIVE - 2,  # High priority, before goals
+                        reason="upcoming_plan_steps",
+                        scores={"urgency": 0.95, "count": len(plan_reminders)},
+                        metadata={"reminder_type": "plan_step", "count": len(plan_reminders)},
+                    )
+                )
+            
+            # Build regular reminders content
+            if regular_reminders:
+                reminder_lines = []
+                for r in regular_reminders[:3]:  # Limit to 3
+                    due_in = ""
+                    if r.due_time:
+                        delta = r.due_time - datetime.now()
+                        mins = int(delta.total_seconds() / 60)
+                        if mins < 60:
+                            due_in = f" (in {mins}m)"
+                        else:
+                            due_in = f" (in {mins // 60}h)"
+                    reminder_lines.append(f"• {r.content}{due_in}")
+                
+                reminders_content = "UPCOMING REMINDERS:\n" + "\n".join(reminder_lines)
+                
+                items.append(
+                    ContextItem(
+                        source_id="reminders",
+                        source_system="prospective",
+                        content=reminders_content,
+                        rank=RANK_BASE_EXECUTIVE,
+                        reason="upcoming_reminders",
+                        scores={"urgency": 0.8, "count": len(regular_reminders)},
+                        metadata={"reminder_type": "regular", "count": len(regular_reminders)},
+                    )
+                )
+            
+        except Exception:
+            # Don't fail if reminder injection doesn't work
+            pass
+        
+        return items
 
     # --- Existing stage runner & recent turns selection (unchanged logic with minor adjustments) ---
 

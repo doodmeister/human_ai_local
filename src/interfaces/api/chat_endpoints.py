@@ -342,3 +342,48 @@ async def update_llm_config(config: LLMConfigUpdate):
     
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# Proactive suggestions endpoint
+@router.get("/suggestions")
+async def get_proactive_suggestions():
+    """
+    Get proactive suggestions based on due reminders, upcoming plan steps, and goal deadlines.
+    
+    Returns suggestions sorted by priority (highest first).
+    """
+    try:
+        from src.chat.proactive_agency import get_proactive_system
+        
+        proactive = get_proactive_system()
+        suggestions = proactive.get_suggestions()
+        
+        return {
+            "suggestions": [s.to_dict() for s in suggestions],
+            "urgent_count": len([s for s in suggestions if s.priority >= 0.8]),
+            "total_count": len(suggestions)
+        }
+    except Exception as e:
+        return {"suggestions": [], "urgent_count": 0, "total_count": 0, "error": str(e)}
+
+
+@router.get("/suggestions/urgent")
+async def get_urgent_suggestions():
+    """
+    Get only high-priority (>= 0.8) proactive suggestions.
+    
+    Use this for notifications or alerts.
+    """
+    try:
+        from src.chat.proactive_agency import get_proactive_system
+        
+        proactive = get_proactive_system()
+        suggestions = proactive.get_urgent_suggestions()
+        
+        return {
+            "suggestions": [s.to_dict() for s in suggestions],
+            "count": len(suggestions)
+        }
+    except Exception as e:
+        return {"suggestions": [], "count": 0, "error": str(e)}
+

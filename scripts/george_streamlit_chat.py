@@ -472,68 +472,65 @@ def get_goals_remote(base_url: str, active_only: bool = True) -> List[Dict[str, 
 
 
 def render_goal_creator(base_url: str) -> None:
-    """Render goal creation form in sidebar."""
-    with st.expander("➕ Create Goal", expanded=False):
+    """Render compact goal creation form."""
+    # Inline quick-add form
+    col1, col2 = st.columns([3, 1])
+    with col1:
         goal_title = st.text_input(
-            "Goal title",
-            placeholder="e.g., Deploy new feature to production",
-            key="goal_title_input"
+            "Quick goal",
+            placeholder="What do you want to accomplish?",
+            key="quick_goal_input",
+            label_visibility="collapsed"
         )
-        
-        goal_description = st.text_area(
-            "Description (optional)",
-            placeholder="Additional context about this goal...",
-            key="goal_description_input",
-            height=80
+    with col2:
+        create_clicked = st.button("➕", key="quick_create_goal", help="Create goal")
+    
+    if create_clicked and goal_title.strip():
+        result = create_goal_remote(base_url, goal_title.strip(), priority=0.5)
+        if result and result.get("status") == "success":
+            st.success("✓ Created")
+            st.session_state.active_goals_refresh = True
+            st.rerun()
+    
+    # Advanced options in expander
+    with st.expander("⚙️ Advanced options", expanded=False):
+        adv_description = st.text_area(
+            "Description",
+            placeholder="Additional context...",
+            key="adv_goal_description",
+            height=60
         )
         
         col1, col2 = st.columns(2)
         with col1:
             priority_label = st.selectbox(
                 "Priority",
-                options=["Low (0.25)", "Medium (0.5)", "High (0.75)", "Critical (0.95)"],
+                options=["🟢 Low", "🟡 Medium", "🔴 High", "⚫ Critical"],
                 index=1,
-                key="goal_priority_input"
+                key="adv_goal_priority"
             )
-            priority_map = {
-                "Low (0.25)": 0.25,
-                "Medium (0.5)": 0.5,
-                "High (0.75)": 0.75,
-                "Critical (0.95)": 0.95
-            }
+            priority_map = {"🟢 Low": 0.25, "🟡 Medium": 0.5, "🔴 High": 0.75, "⚫ Critical": 0.95}
             priority = priority_map[priority_label]
         
         with col2:
-            use_deadline = st.checkbox("Set deadline", key="goal_has_deadline")
+            deadline_date = st.date_input("Deadline (optional)", value=None, key="adv_goal_deadline")
         
-        deadline_str = None
-        if use_deadline:
-            deadline_date = st.date_input("Deadline", key="goal_deadline_input")
-            deadline_time = st.time_input("Time (optional)", key="goal_deadline_time_input")
-            if deadline_date:
-                if deadline_time:
-                    deadline_str = f"{deadline_date} {deadline_time}"
-                else:
-                    deadline_str = str(deadline_date)
-        
-        if st.button("Create Goal", key="create_goal_btn"):
-            if not goal_title.strip():
-                st.warning("Please provide a goal title")
-                return
-            
-            result = create_goal_remote(
-                base_url,
-                goal_title.strip(),
-                description=goal_description.strip(),
-                priority=priority,
-                deadline=deadline_str
-            )
-            
-            if result and result.get("status") == "success":
-                goal_id = result.get("goal_id")
-                st.success(f"Goal created: {goal_id[:8] if goal_id else 'success'}")
-                st.session_state.active_goals_refresh = True
-                st.rerun()
+        if st.button("Create with options", key="adv_create_goal"):
+            if not goal_title.strip() and not st.session_state.get("quick_goal_input", "").strip():
+                st.warning("Enter a goal title above")
+            else:
+                title = goal_title.strip() or st.session_state.get("quick_goal_input", "").strip()
+                deadline_str = str(deadline_date) if deadline_date else None
+                result = create_goal_remote(
+                    base_url, title,
+                    description=adv_description.strip(),
+                    priority=priority,
+                    deadline=deadline_str
+                )
+                if result and result.get("status") == "success":
+                    st.success("✓ Goal created")
+                    st.session_state.active_goals_refresh = True
+                    st.rerun()
 
 
 def execute_goal_remote(base_url: str, goal_id: str) -> Optional[Dict[str, Any]]:
@@ -581,8 +578,8 @@ def get_goal_execution_status_remote(base_url: str, goal_id: str) -> Optional[Di
 
 
 def render_active_goals(base_url: str) -> None:
-    """Render active goals panel in sidebar."""
-    st.subheader("🎯 Active Goals")
+    """Render compact active goals panel in sidebar."""
+    st.subheader("🎯 Goals")
     
     # Refresh trigger
     if st.session_state.get("active_goals_refresh"):
@@ -592,49 +589,44 @@ def render_active_goals(base_url: str) -> None:
     st.session_state.active_goals = goals
     
     if not goals:
-        st.caption("No active goals")
+        st.caption("No active goals. Add one below!")
         return
     
+    # Compact goal list
     for goal in goals:
         goal_id = goal.get("id", "")
         title = goal.get("title", "Untitled goal")
         priority = goal.get("priority", 0.5)
-        status = goal.get("status", "unknown")
+        status = goal.get("status", "pending")
         progress = goal.get("progress", 0.0)
         
-        # Priority emoji
-        if priority >= 0.75:
-            priority_emoji = "🔴"
-        elif priority >= 0.5:
-            priority_emoji = "🟡"
-        else:
-            priority_emoji = "🟢"
+        # Priority indicator
+        priority_dot = "🔴" if priority >= 0.75 else "🟡" if priority >= 0.5 else "🟢"
         
-        with st.container():
-            st.markdown(f"{priority_emoji} **{title}**")
-            st.caption(f"Status: {status} | Progress: {progress*100:.0f}%")
-            
-            if progress > 0:
-                st.progress(progress)
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("▶️", key=f"exec_goal_{goal_id}", help="Execute pipeline"):
-                    with st.spinner("Executing..."):
-                        result = execute_goal_remote(base_url, goal_id)
-                        if result and result.get("status") == "success":
-                            st.session_state[f"exec_result_{goal_id}"] = result
-                            st.success("Executed!")
-                            st.rerun()
-            with col2:
-                if st.button("📊", key=f"view_goal_{goal_id}", help="View details"):
-                    st.session_state.selected_goal_id = goal_id
-                    st.rerun()
-            with col3:
-                if st.button("🔗", key=f"link_goal_{goal_id}", help="Copy goal ID"):
-                    st.info(f"Goal ID: {goal_id[:12]}")
-            
-            st.markdown("---")
+        # Compact single-line display with hover actions
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            # Clickable goal title
+            if st.button(
+                f"{priority_dot} {title[:25]}{'...' if len(title) > 25 else ''}",
+                key=f"select_goal_{goal_id}",
+                help=f"{title}\nStatus: {status} | Progress: {progress*100:.0f}%",
+                use_container_width=True
+            ):
+                st.session_state.selected_goal_id = goal_id
+                st.rerun()
+        
+        with col2:
+            # Single action button - execute (most important action)
+            exec_result = st.session_state.get(f"exec_result_{goal_id}")
+            if exec_result:
+                st.caption("✅")
+            elif st.button("▶️", key=f"exec_{goal_id}", help="Execute"):
+                with st.spinner("..."):
+                    result = execute_goal_remote(base_url, goal_id)
+                    if result and result.get("status") == "success":
+                        st.session_state[f"exec_result_{goal_id}"] = result
+                        st.rerun()
 
 
 def update_llm_config(base_url: str, provider: str, openai_model: str, ollama_base_url: str, ollama_model: str) -> Dict[str, Any]:
@@ -849,82 +841,45 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
             st.success("Backend reachable")
         else:
             st.error("Backend unreachable")
-        if st.session_state.last_error:
-            st.warning(f"Last error: {st.session_state.last_error}")
-        with st.expander("Last backend response", expanded=False):
-            if st.session_state.last_raw_response is None:
-                st.caption("No responses yet")
-            else:
-                st.json(st.session_state.last_raw_response)
         
         st.markdown("---")
         render_active_goals(st.session_state.api_base_url)
         render_goal_creator(st.session_state.api_base_url)
         
         st.markdown("---")
-        st.subheader("Upcoming reminders")
+        st.subheader("⏰ Reminders")
         render_sidebar_reminders(st.session_state.api_base_url)
-        st.markdown("---")
-        st.subheader("Create reminder")
-        reminder_form = st.session_state.reminder_form
-        reminder_content = st.text_input(
-            "Content",
-            value=reminder_form.get("content", ""),
-            key="reminder_content_input",
-        )
-        reminder_minutes = st.number_input(
-            "Due in (minutes)",
-            min_value=1,
-            max_value=1440,
-            value=int(reminder_form.get("due_in_minutes", 15)),
-            step=5,
-            key="reminder_due_minutes_input",
-        )
-        snooze_options = [5, 10, 15, 30, 45, 60]
-        current_snooze = reminder_form.get("snooze_minutes", 15)
-        if current_snooze not in snooze_options:
-            snooze_options.append(current_snooze)
-            snooze_options = sorted(set(snooze_options))
-        default_index = snooze_options.index(current_snooze)
-        snooze_minutes = st.selectbox(
-            "Default snooze length (minutes)",
-            options=snooze_options,
-            index=default_index,
-            key="reminder_snooze_minutes_input",
-        )
-        st.session_state.reminder_form["snooze_minutes"] = snooze_minutes
-        reminder_metadata_note = st.text_area(
-            "Metadata notes (optional)",
-            value=reminder_form.get("metadata_note", ""),
-            key="reminder_metadata_input",
-        )
         
-        # NEW: Goal linking
-        active_goals = st.session_state.get("active_goals", [])
-        goal_options = ["None (not linked)"] + [
-            f"{g.get('title', 'Untitled')} ({g.get('id', '')[:8]})" 
-            for g in active_goals
-        ]
-        selected_goal_idx = st.selectbox(
-            "Link to goal (optional)",
-            options=range(len(goal_options)),
-            format_func=lambda i: goal_options[i],
-            key="reminder_goal_link",
-            help="Associate this reminder with an active goal"
-        )
-
-        if st.button("➕ Add reminder", key="create_reminder_button"):
+        # Compact reminder creation
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            reminder_content = st.text_input(
+                "Quick reminder",
+                placeholder="Remind me to...",
+                key="quick_reminder_input",
+                label_visibility="collapsed"
+            )
+        with col2:
+            reminder_minutes = st.number_input(
+                "min",
+                min_value=1,
+                max_value=480,
+                value=15,
+                step=5,
+                key="quick_reminder_minutes",
+                label_visibility="collapsed"
+            )
+        
+        if st.button("➕ Add", key="quick_add_reminder", use_container_width=True):
             trimmed = reminder_content.strip()
-            if not trimmed:
-                st.warning("Provide reminder content first")
-            else:
-                metadata = {"note": reminder_metadata_note.strip()} if reminder_metadata_note.strip() else {}
-                
-                # Add goal link to metadata if selected
-                if selected_goal_idx > 0:  # 0 is "None"
-                    goal = active_goals[selected_goal_idx - 1]
-                    metadata["goal_id"] = goal.get("id")
-                    metadata["goal_title"] = goal.get("title")
+            if trimmed:
+                # Auto-link to selected goal if viewing one
+                metadata = {}
+                active_goals = st.session_state.get("active_goals", [])
+                if active_goals and len(active_goals) == 1:
+                    # Auto-link to only goal
+                    metadata["goal_id"] = active_goals[0].get("id")
+                    metadata["goal_title"] = active_goals[0].get("title")
                 
                 reminder = create_reminder_remote(
                     st.session_state.api_base_url,
@@ -933,35 +888,22 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
                     metadata=metadata if metadata else None,
                 )
                 if reminder:
-                    st.success("Reminder created")
+                    st.success("✓")
                     _add_reminder_to_upcoming_cache(reminder)
-                    st.session_state.reminder_form = {
-                        "content": "",
-                        "due_in_minutes": reminder_minutes,
-                        "snooze_minutes": snooze_minutes,
-                        "metadata_note": reminder_metadata_note,
-                    }
-
-        metrics = st.session_state.get("reminder_metrics", {"counts": {}, "events": []})
-        with st.expander("Reminder telemetry", expanded=False):
-            counts = metrics.get("counts", {})
-            if counts:
-                cols = st.columns(len(counts))
-                for idx, (label, value) in enumerate(counts.items()):
-                    with cols[idx]:
-                        st.metric(label.replace("_", " ").title(), value)
+                    st.rerun()
             else:
-                st.caption("No reminder interactions yet")
-            events = metrics.get("events", [])
-            if events:
-                st.caption("Recent events")
-                for event in reversed(events[-5:]):
-                    stamp = event.get("timestamp", "")
-                    ev_label = event.get("type", "")
-                    content = event.get("content", "")
-                    st.write(f"{stamp}: **{ev_label}** – {content}")
-            else:
-                st.caption("No telemetry events recorded")
+                st.warning("Enter reminder text")
+        
+        # Debug section (collapsed)
+        with st.expander("🔧 Debug", expanded=False):
+            if st.session_state.last_error:
+                st.warning(f"Last error: {st.session_state.last_error}")
+            if st.session_state.last_raw_response:
+                st.json(st.session_state.last_raw_response)
+            metrics = st.session_state.get("reminder_metrics", {"counts": {}})
+            if metrics.get("counts"):
+                st.caption("Reminder telemetry")
+                st.json(metrics["counts"])
 
         return {
             "flags": {
