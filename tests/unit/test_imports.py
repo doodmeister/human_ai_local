@@ -9,8 +9,8 @@ import asyncio
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-async def test_cognitive_agent():
-    """Test basic CognitiveAgent functionality"""
+async def run_cognitive_agent_demo():
+    """Demo basic CognitiveAgent functionality (not a pytest test)"""
     try:
         print("Testing imports...")
         
@@ -45,4 +45,4 @@ async def test_cognitive_agent():
     return True
 
 if __name__ == "__main__":
-    asyncio.run(test_cognitive_agent())
+    asyncio.run(run_cognitive_agent_demo())

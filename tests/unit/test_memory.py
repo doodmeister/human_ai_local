@@ -14,31 +14,42 @@ def test_memory_components():
     print("Testing Vector STM import...")
     from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration
     import uuid
+    import atexit
+    import shutil
     print("✓ Successfully imported VectorShortTermMemory")
     
-    with tempfile.TemporaryDirectory() as temp_dir:
-        config = STMConfiguration(
-            chroma_persist_dir=os.path.join(temp_dir, "test_stm"),
-            collection_name="test_memory",
-            capacity=10
-        )
-        stm = VectorShortTermMemory(config)
-        print("✓ Successfully created VectorShortTermMemory")
-        
+    # Use a persistent temp dir to avoid Windows file locking issues
+    temp_dir = tempfile.mkdtemp()
+    
+    def cleanup():
         try:
-            memory_id = str(uuid.uuid4())
-            content = "test item"
-            assert stm.store(memory_id, content) is True
-            print(f"✓ Stored item: {content}")
-            
-            item = stm.retrieve(memory_id)
-            assert item is not None
-            assert item.content == content
-            print(f"✓ Retrieved memory: {item.content if item else 'None'}")
-            print("\n🎉 Vector STM tests passed!")
-        finally:
-            # Properly shutdown STM to release file locks
-            stm.shutdown()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+    atexit.register(cleanup)
+    
+    config = STMConfiguration(
+        chroma_persist_dir=os.path.join(temp_dir, "test_stm"),
+        collection_name="test_memory",
+        capacity=10
+    )
+    stm = VectorShortTermMemory(config)
+    print("✓ Successfully created VectorShortTermMemory")
+    
+    try:
+        memory_id = str(uuid.uuid4())
+        content = "test item"
+        assert stm.store(memory_id, content) is True
+        print(f"✓ Stored item: {content}")
+        
+        item = stm.retrieve(memory_id)
+        assert item is not None
+        assert item.content == content
+        print(f"✓ Retrieved memory: {item.content if item else 'None'}")
+        print("\n🎉 Vector STM tests passed!")
+    finally:
+        # Properly shutdown STM to release file locks
+        stm.shutdown()
         
     # Test LTM
     print("\nTesting LTM import...")

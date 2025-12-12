@@ -5,6 +5,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import pytest
 from fastapi.testclient import TestClient
 from src.interfaces.api.reflection_api import app
+from src.core.agent_singleton import create_agent
+
+# Initialize the agent in app state for testing
+@pytest.fixture(scope="module", autouse=True)
+def setup_agent():
+    """Set up the agent in the app state before tests run."""
+    agent = create_agent()
+    app.state.agent = agent
+    yield
 
 client = TestClient(app)
 

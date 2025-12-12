@@ -13,7 +13,7 @@ making the system feel more like a proactive assistant.
 
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, cast
 from enum import Enum
 import logging
 
@@ -306,12 +306,18 @@ class ProactiveAgencySystem:
     
     def _create_inactivity_suggestion(self) -> ProactiveSuggestion:
         """Create suggestion for inactive user."""
+        # Safely compute minutes inactive; last_user_activity may be None per type hints
+        if self.last_user_activity:
+            minutes_inactive = int((datetime.now() - self.last_user_activity).total_seconds() / 60)
+        else:
+            minutes_inactive = 0
+
         return ProactiveSuggestion(
             type=SuggestionType.INACTIVITY_CHECK,
             message="You've been quiet for a while. Need any help with your goals?",
             priority=0.5,
             action_hint="I can summarize your pending tasks or suggest next steps.",
-            metadata={"minutes_inactive": int((datetime.now() - self.last_user_activity).total_seconds() / 60)}
+            metadata={"minutes_inactive": minutes_inactive}
         )
 
 
@@ -335,7 +341,30 @@ def get_proactive_system() -> ProactiveAgencySystem:
         
         try:
             from src.executive.executive_agent import ExecutiveAgent
-            executive = ExecutiveAgent()
+            try:
+                # Prefer default constructor if it works
+                executive = ExecutiveAgent()
+            except TypeError:
+                # Fallback: inspect the constructor signature and provide None for
+                # any required parameters. This avoids hard-coding specific
+                # argument names and handles different versions of ExecutiveAgent.
+                try:
+                    import inspect
+
+                    sig = inspect.signature(ExecutiveAgent)
+                    ctor_kwargs: Dict[str, Any] = {}
+                    for pname, p in sig.parameters.items():
+                        if pname == "self":
+                            continue
+                        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                            continue
+                        if p.default is inspect._empty:
+                            ctor_kwargs[pname] = cast(Any, None)
+
+                    executive = ExecutiveAgent(**ctor_kwargs)
+                except Exception:
+                    # If we still can't instantiate, leave executive as None
+                    executive = None
         except Exception:
             pass
         

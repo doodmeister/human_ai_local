@@ -935,6 +935,26 @@ def render_message(message: Dict[str, Any]) -> None:
                         rank = item.get("rank")
                         content = item.get("content", "")
                         st.markdown(f"**{rank}. [{source}]** {content}\n*reason:* {reason}")
+            # Show detected goal notification
+            detected_goal = message.get("detected_goal")
+            if detected_goal:
+                goal_id = detected_goal.get("goal_id", "")
+                goal_title = detected_goal.get("title", "Untitled goal")
+                goal_priority = detected_goal.get("priority", "MEDIUM")
+                deadline = detected_goal.get("deadline")
+                
+                st.success(f"🎯 **Goal Created:** {goal_title}")
+                col1, col2, col3 = st.columns([2, 2, 1])
+                with col1:
+                    st.caption(f"Priority: {goal_priority}")
+                with col2:
+                    st.caption(f"Deadline: {deadline or 'None'}")
+                with col3:
+                    if st.button("📊 View", key=f"view_detected_{goal_id}", help="View goal details"):
+                        st.session_state.selected_goal_id = goal_id
+                        st.session_state.active_goals_refresh = True
+                        st.rerun()
+            
             if captured:
                 with st.expander("Captured memories"):
                     for mem in captured:
@@ -978,6 +998,15 @@ def render_message(message: Dict[str, Any]) -> None:
                     parts.append(f"consolidation: {cons_status}")
                 if parts:
                     st.caption("; ".join(parts))
+            
+            # Show intent classification (in debug expander)
+            intent = message.get("intent")
+            if intent and intent.get("intent_type"):
+                with st.expander("🧠 Intent Classification", expanded=False):
+                    st.caption(f"**Type:** {intent.get('intent_type')}")
+                    st.caption(f"**Confidence:** {intent.get('confidence', 0):.0%}")
+                    if intent.get("entities"):
+                        st.caption(f"**Entities:** {intent.get('entities')}")
 
 
 def render_goal_details_page(base_url: str, goal_id: str) -> None:
@@ -1111,6 +1140,19 @@ def main() -> None:
 
     st.title("George Chat Interface")
     st.write("Chat with the cognitive backend. Each turn retrieves short-term memories first, then falls back to long-term memories when needed.")
+    
+    # Tip about natural language goal creation
+    with st.expander("💡 **Tip:** You can create goals naturally!", expanded=False):
+        st.markdown("""
+        Try saying things like:
+        - *"I need to finish the report by Friday"*
+        - *"Help me plan a project for next week"*
+        - *"My goal is to learn Python this month"*
+        - *"I should review the code before the meeting"*
+        
+        George will automatically detect your goal, create it, and start the **Goal→Decision→Plan→Schedule** pipeline!
+        """)
+    
     render_proactive_banner(base_url)
     render_session_context_panel()
 
@@ -1149,8 +1191,14 @@ def main() -> None:
                 "context_items": response.get("context_items", []),
                 "captured_memories": response.get("captured_memories", []),
                 "metrics": response.get("metrics", {}),
+                "detected_goal": response.get("detected_goal"),
+                "intent": response.get("intent"),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+            
+            # Auto-refresh goals sidebar if a goal was detected
+            if response.get("detected_goal"):
+                st.session_state.active_goals_refresh = True
         except requests.HTTPError as exc:
             st.error(f"Chat request failed: {exc}")
             st.session_state.last_error = str(exc)

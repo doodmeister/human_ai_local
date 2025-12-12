@@ -36,8 +36,11 @@ class ContextBuilder:
         executive: Any = None,
         prospective: Any = None,
     ):
-        # Accept provided configuration dict directly (already from global ChatConfig.to_dict())
-        self.cfg = dict(chat_config) if chat_config else {}
+        # Start with global defaults, then overlay any provided config
+        from src.core.config import get_chat_config
+        self.cfg = get_chat_config().to_dict()
+        if chat_config:
+            self.cfg.update(chat_config)
         # Backward compatibility: ensure timeouts structure
         if "timeouts" not in self.cfg:
             self.cfg["timeouts"] = {"retrieval_ms": self.cfg.get("retrieval_timeout_ms", 400)}

@@ -8,6 +8,19 @@ Test cases for STM and LTM memory API endpoints (FastAPI)
 import pytest
 from fastapi.testclient import TestClient
 from src.interfaces.api.memory_api import app
+from src.core.agent_singleton import create_agent
+
+# Initialize the agent in app state for testing
+_agent = None
+
+@pytest.fixture(scope="module", autouse=True)
+def setup_agent():
+    """Set up the agent in the app state before tests run."""
+    global _agent
+    _agent = create_agent()
+    app.state.agent = _agent
+    yield
+    # Cleanup not strictly needed since it's module-scoped
 
 client = TestClient(app)
 
