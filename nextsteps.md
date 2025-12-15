@@ -165,7 +165,14 @@ Skipped tests are due to:
 - ChromaDB PyO3 reinitialization issues (Python 3.12+ limitation)
 - Test isolation issues with shared singleton state
 
-### 2. Future Enhancements
+### 2. Server Startup Notes
+The server (`python start_server.py`) works correctly when the Python environment is properly activated. If you see KeyboardInterrupt during imports, this is typically a terminal/environment issue, not a code problem. Code imports work correctly in isolation:
+```bash
+python -c "import sentence_transformers; print('OK')"  # Works
+```
+**Solution:** Ensure venv is activated (`source venv/Scripts/activate` on Windows) before starting the server.
+
+### 3. Future Enhancements
 - **Authentication**: No user authentication yet
 - **Rate Limiting**: Not implemented
 - **Error Tracking**: Sentry integration pending
