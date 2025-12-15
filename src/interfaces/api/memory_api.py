@@ -116,18 +116,17 @@ def store_memory(system: str, req: StoreMemoryRequest, request: Request):
         return {"memory_id": memory_id}
     
     elif system == "episodic":
-        # Episodic memory requires 'content' (as a summary), and optional 'detailed_content'
-        if not isinstance(req.content, dict) or "summary" not in req.content:
-            raise HTTPException(status_code=422, detail="For episodic memory, 'content' must be a dictionary with a 'summary' key.")
+        # Episodic memory requires 'content' with detailed_content
+        if not isinstance(req.content, dict):
+            raise HTTPException(status_code=422, detail="For episodic memory, 'content' must be a dictionary.")
+        
+        # Support both 'summary' (legacy) and 'detailed_content' (current)
+        detailed_content = req.content.get("detailed_content") or req.content.get("summary", "")
         
         memory_id = memsys.store(
-            summary=req.content["summary"],
-            detailed_content=req.content.get("detailed_content", ""),
-            timestamp=datetime.fromisoformat(req.content["timestamp"]) if "timestamp" in req.content else datetime.now(),
+            detailed_content=detailed_content,
             importance=req.importance,
             emotional_valence=req.emotional_valence,
-            tags=req.tags,
-            associations=req.associations,
         )
         return {"memory_id": memory_id}
     

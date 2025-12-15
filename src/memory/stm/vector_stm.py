@@ -1138,6 +1138,18 @@ class VectorShortTermMemory:
             logger.error(f"Failed to remove memory {memory_id}: {e}")
             return False
     
+    def delete(self, memory_id: str) -> bool:
+        """
+        Delete a specific memory item (alias for remove_item).
+        
+        Args:
+            memory_id: Memory identifier
+            
+        Returns:
+            bool: True if successful, False if item doesn't exist or other error
+        """
+        return self.remove_item(memory_id)
+    
     def clear(self) -> bool:
         """
         Clear all memories from the STM.

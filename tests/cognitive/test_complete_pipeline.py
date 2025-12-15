@@ -7,11 +7,13 @@ import sys
 import os
 import asyncio
 import time
+import pytest
 sys.path.insert(0, os.path.abspath('.'))
 
 from src.core.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 
+@pytest.mark.asyncio
 async def test_complete_pipeline():
     """Test the complete cognitive pipeline with conversation flow"""
     print("🧠 COMPLETE COGNITIVE PIPELINE TEST")
@@ -57,8 +59,8 @@ async def test_complete_pipeline():
         
         print("📊 Cognitive State:")
         print(f"   Fatigue: {status['fatigue_level']:.3f}")
-        print(f"   Memory: STM({status['memory_status']['stm']['size']}) "
-              f"LTM({status['memory_status']['ltm']['total_memories']})")
+        print(f"   Memory: STM({status['memory_status']['stm'].get('vector_db_count', 0)}) "
+              f"LTM({status['memory_status']['ltm'].get('total_memories', status['memory_status']['ltm'].get('vector_db_count', 0))})")
         print(f"   Attention Load: {status['attention_status']['cognitive_load']:.3f}")
         print(f"   Sensory Processed: {status['sensory_processing']['total_processed']}")
         
@@ -70,7 +72,7 @@ async def test_complete_pipeline():
             'processing_time': processing_time,
             'cognitive_state': {
                 'fatigue': status['fatigue_level'],
-                'memory_items': status['memory_status']['stm']['size'],
+                'memory_items': status['memory_status']['stm'].get('vector_db_count', 0),
                 'attention_load': status['attention_status']['cognitive_load']
             }
         })
@@ -99,11 +101,13 @@ async def test_complete_pipeline():
     
     # Memory analysis
     memory = final_status['memory_status']
+    stm_count = memory['stm'].get('vector_db_count', 0)
+    stm_capacity = memory['stm'].get('capacity', 7)
     print("\n💾 MEMORY ANALYSIS")
-    print(f"STM utilization: {memory['stm']['size']}/{memory['stm']['capacity']} "
-          f"({(memory['stm']['size']/memory['stm']['capacity']*100):.1f}%)")
-    print(f"LTM memories created: {memory['ltm']['total_memories']}")
-    print(f"Session memories: {memory['session_memories']}")
+    print(f"STM utilization: {stm_count}/{stm_capacity} "
+          f"({(stm_count/stm_capacity*100):.1f}%)")
+    print(f"LTM memories created: {memory['ltm'].get('total_memories', memory['ltm'].get('vector_db_count', 0))}")
+    print(f"Session memories: {memory.get('session_memories', 'N/A')}")
     
     # Attention analysis  
     attention = final_status['attention_status']

@@ -7,6 +7,7 @@ import os
 import asyncio
 import time
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.abspath('.'))
 
@@ -145,6 +146,7 @@ async def benchmark_sensory_cognitive_performance():
         "throughput": len(test_inputs)/total_time
     }
 
+@pytest.mark.asyncio
 async def test_enhanced_attention_integration():
     """Test enhanced attention-sensory integration with corrected field names"""
     print("\n🔧 ENHANCED ATTENTION-SENSORY INTEGRATION TEST")
@@ -222,6 +224,7 @@ async def test_enhanced_attention_integration():
     await agent.shutdown()
     print("\nEnhanced attention integration test completed!")
 
+@pytest.mark.asyncio
 async def test_multimodal_extension():
     """Test basic multimodal input support extension"""
     print("\n🎯 MULTIMODAL INPUT SUPPORT TEST")

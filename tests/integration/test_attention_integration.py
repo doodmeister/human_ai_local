@@ -3,9 +3,11 @@
 Comprehensive test for attention mechanism integration with cognitive agent
 """
 import asyncio
+import pytest
 from datetime import datetime
 from src.core.cognitive_agent import CognitiveAgent
 
+@pytest.mark.asyncio
 async def test_attention_integration():
     """Test the full attention mechanism integration"""
     
@@ -128,8 +130,8 @@ async def test_attention_integration():
     
     final_status = agent.get_cognitive_status()
     print(f"   ✓ Total conversations processed: {len(test_inputs) + len(rapid_inputs[:4])}")
-    print(f"   ✓ Memory entries (STM): {final_status['memory_status']['stm']['size']}")
-    print(f"   ✓ Memory entries (LTM): {final_status['memory_status']['ltm']['total_memories']}")
+    print(f"   ✓ Memory entries (STM): {final_status['memory_status']['stm'].get('vector_db_count', 0)}")
+    print(f"   ✓ Memory entries (LTM): {final_status['memory_status']['ltm'].get('total_memories', final_status['memory_status']['ltm'].get('vector_db_count', 0))}")
     print(f"   ✓ Current attention items: {final_status['attention_status']['focused_items']}")
     print(f"   ✓ Total focus switches: {final_status['attention_status']['focus_switches']}")
     print(f"   ✓ Final cognitive load: {final_status['attention_status']['cognitive_load']:.3f}")

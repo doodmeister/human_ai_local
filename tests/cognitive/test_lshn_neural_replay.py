@@ -63,8 +63,8 @@ async def test_lshn_neural_replay_integration():
     # Check memory status
     status = agent.get_cognitive_status()
     memory_status = status["memory_status"]
-    stm_count = memory_status['stm']['size']
-    initial_ltm_count = memory_status['ltm']['total_memories']
+    stm_count = memory_status['stm'].get('vector_db_count', 0)
+    initial_ltm_count = memory_status['ltm'].get('total_memories', memory_status['ltm'].get('vector_db_count', 0))
     
     print("\n📊 Initial Memory Status:")
     print(f"   STM: {stm_count} items")
@@ -132,8 +132,8 @@ async def test_lshn_neural_replay_integration():
     print("\n📈 STEP 5: Final analysis...")
     final_status = agent.get_cognitive_status()
     final_memory_status = final_status["memory_status"]
-    final_stm_count = final_memory_status['stm']['size']
-    final_ltm_count = final_memory_status['ltm']['total_memories']
+    final_stm_count = final_memory_status['stm'].get('vector_db_count', 0)
+    final_ltm_count = final_memory_status['ltm'].get('total_memories', final_memory_status['ltm'].get('vector_db_count', 0))
     
     print(f"   Final STM: {final_stm_count} items (was {stm_count})")
     print(f"   Final LTM: {final_ltm_count} items (was {initial_ltm_count})")

@@ -1,19 +1,92 @@
 """
 Simplified George API for testing - delayed agent initialization
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import sys
+import logging
+import traceback
 from pathlib import Path
 import threading
+from datetime import datetime
 
 # Add project root to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-# Create FastAPI app without lifespan for now
-app = FastAPI(title="George Cognitive API", version="1.0.0")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Create FastAPI app with production settings
+app = FastAPI(
+    title="George Cognitive API",
+    version="1.0.0",
+    description="Human-AI Cognition Framework API"
+)
+
+# Add CORS middleware for web clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Global error handler for unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions gracefully."""
+    error_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    
+    # Log the full traceback
+    logger.error(
+        f"Unhandled exception [{error_id}] on {request.method} {request.url.path}: "
+        f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+    )
+    
+    # Return sanitized error to client
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_server_error",
+            "message": "An unexpected error occurred. Please try again.",
+            "error_id": error_id,
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all requests for monitoring."""
+    start_time = datetime.now()
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Calculate duration
+    duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+    
+    # Log request (skip health checks to reduce noise)
+    if request.url.path != "/health":
+        logger.info(
+            f"{request.method} {request.url.path} - "
+            f"Status: {response.status_code} - "
+            f"Duration: {duration_ms:.1f}ms"
+        )
+    
+    return response
+
 
 # Global agent variable
 _agent = None
@@ -56,6 +129,50 @@ def get_agent():
 async def health_check():
     """Health check endpoint for verifying server is running."""
     return {"status": "healthy", "service": "George Cognitive API"}
+
+
+# Enhanced health check with component status
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """Detailed health check with component status."""
+    global _agent, _agent_initializing, _initialization_error
+    
+    components = {
+        "api": {"healthy": True, "message": "API server running"},
+        "agent": {"healthy": False, "message": "Not initialized"}
+    }
+    
+    # Check agent status
+    if _agent is not None:
+        components["agent"] = {"healthy": True, "message": "Agent ready"}
+        
+        # Check memory systems
+        try:
+            if hasattr(_agent, 'memory'):
+                components["memory"] = {"healthy": True, "message": "Memory system available"}
+        except Exception as e:
+            components["memory"] = {"healthy": False, "message": str(e)}
+        
+        # Check executive system
+        try:
+            if hasattr(_agent, 'executive_agent'):
+                components["executive"] = {"healthy": True, "message": "Executive system available"}
+        except Exception as e:
+            components["executive"] = {"healthy": False, "message": str(e)}
+    
+    elif _agent_initializing:
+        components["agent"] = {"healthy": False, "message": "Initializing..."}
+    elif _initialization_error:
+        components["agent"] = {"healthy": False, "message": f"Init failed: {_initialization_error}"}
+    
+    overall_healthy = all(c.get("healthy", False) for c in components.values())
+    
+    return {
+        "status": "healthy" if overall_healthy else "degraded",
+        "timestamp": datetime.now().isoformat(),
+        "components": components
+    }
+
 
 # Initialization status endpoint
 @app.get("/api/agent/init-status")
@@ -362,6 +479,38 @@ async def reflection_stop():
         return {"status": "stopped"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to stop reflection: {str(e)}")
+
+
+# Telemetry endpoint
+@app.get("/telemetry")
+async def get_telemetry_metrics():
+    """Get telemetry metrics for monitoring."""
+    try:
+        from src.core.resilience import get_telemetry
+        telemetry = get_telemetry()
+        return {"status": "ok", "metrics": telemetry.get_metrics()}
+    except ImportError:
+        return {"status": "ok", "metrics": {}, "message": "Telemetry not available"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+# Circuit breaker status endpoint
+@app.get("/circuit-breakers")
+async def get_circuit_breaker_status():
+    """Get status of all circuit breakers."""
+    try:
+        from src.core.resilience import CircuitBreaker
+        statuses = {
+            name: breaker.get_status()
+            for name, breaker in CircuitBreaker._instances.items()
+        }
+        return {"status": "ok", "circuit_breakers": statuses}
+    except ImportError:
+        return {"status": "ok", "circuit_breakers": {}, "message": "Resilience module not available"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 
 if __name__ == "__main__":
     import uvicorn

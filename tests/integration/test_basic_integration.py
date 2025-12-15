@@ -2,9 +2,11 @@
 Test basic integration of cognitive agent with direct configuration
 """
 import asyncio
+import pytest
 from src.core.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 
+@pytest.mark.asyncio
 async def test_basic_integration():
     """Test basic cognitive agent functionality"""
     print("🧠 Testing basic cognitive agent integration...")

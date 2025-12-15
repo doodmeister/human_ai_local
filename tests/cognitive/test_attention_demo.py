@@ -3,8 +3,10 @@
 Focused test demonstrating attention mechanism integration
 """
 import asyncio
+import pytest
 from src.core.cognitive_agent import CognitiveAgent
 
+@pytest.mark.asyncio
 async def test_attention_features():
     """Demonstrate key attention mechanism features"""
     
@@ -57,7 +59,7 @@ async def test_attention_features():
     
     print(f"   Pre-break fatigue: {pre_fatigue:.3f}")
     print(f"   Post-break fatigue: {post_fatigue:.3f}")
-    print(f"   Fatigue reduction: {break_results['fatigue_reduction']:.3f}")
+    print(f"   Fatigue reduction: {break_results['fatigue_before'] - break_results['fatigue_after']:.3f}")
     print(f"   Items lost focus: {break_results['attention_items_lost']}")
     
     # Test 5: Integration status

@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 import uuid
 import shutil
 import os
+import gc
+import time
 
 from src.core.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
@@ -21,8 +23,29 @@ class TestProactiveRecall(unittest.TestCase):
 
     def tearDown(self):
         """Clean up the temporary directory after the test."""
+        # Give ChromaDB time to release file handles
+        if hasattr(self, 'agent') and self.agent:
+            # Attempt to close/cleanup any ChromaDB connections
+            try:
+                if hasattr(self.agent, 'memory'):
+                    if hasattr(self.agent.memory, 'ltm') and hasattr(self.agent.memory.ltm, '_chroma_client'):
+                        del self.agent.memory.ltm._chroma_client
+                    if hasattr(self.agent.memory, 'stm') and hasattr(self.agent.memory.stm, '_chroma_client'):
+                        del self.agent.memory.stm._chroma_client
+            except Exception:
+                pass
+            del self.agent
+        
+        gc.collect()
+        time.sleep(0.1)  # Small delay for file handle release
+        
         if os.path.exists(self.test_dir):
-            shutil.rmtree(self.test_dir)
+            try:
+                shutil.rmtree(self.test_dir)
+            except PermissionError:
+                # On Windows, ChromaDB files may still be locked
+                # Mark for later cleanup or ignore
+                pass
 
     @patch('src.core.cognitive_agent.CognitiveAgent._generate_response', new_callable=AsyncMock)
     def test_proactive_recall_retrieves_contextual_memory(self, mock_generate_response):

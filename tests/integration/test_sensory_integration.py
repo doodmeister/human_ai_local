@@ -5,8 +5,10 @@ Test sensory processing integration with cognitive agent
 import sys
 import os
 import asyncio
+import pytest
 sys.path.insert(0, os.path.abspath('.'))
 
+@pytest.mark.asyncio
 async def test_sensory_integration():
     """Test sensory processing integration with cognitive agent"""
     print("Testing Sensory Processing Integration with Cognitive Agent...")
@@ -132,6 +134,7 @@ async def test_sensory_integration():
         traceback.print_exc()
         return False
 
+@pytest.mark.asyncio
 async def test_attention_sensory_interaction():
     """Test how attention mechanism interacts with sensory processing"""
     print("\nTesting Attention-Sensory Interaction...")

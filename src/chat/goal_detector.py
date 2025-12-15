@@ -265,33 +265,100 @@ class GoalDetector:
     
     def _generate_success_criteria(self, entities: Dict, message: str) -> List[str]:
         """
-        Generate success criteria for the goal.
+        Generate GOAP-compatible success criteria for the goal.
+        
+        Success criteria are in the format "variable=value" for GOAP WorldState parsing.
+        Examples: "report_written=True", "data_analyzed=True"
         
         Args:
             entities: Extracted entities
             message: Original message
             
         Returns:
-            List of success criteria strings
+            List of GOAP-compatible success criteria strings
         """
         criteria = []
+        description = entities.get('goal_description', message).lower()
         
-        # Default criterion: task completion
-        description = entities.get('goal_description', '')
-        if description:
-            # Extract the main action
-            criteria.append(f"Task completed: {description}")
+        # Map action keywords to GOAP state variables
+        action_state_mapping = {
+            # Document/content creation
+            'write': 'document_created',
+            'create': 'document_created',
+            'draft': 'document_created',
+            'compose': 'document_created',
+            # Reports
+            'report': 'report_finished',
+            # Analysis
+            'analyze': 'data_analyzed',
+            'analysis': 'data_analyzed',
+            'examine': 'data_analyzed',
+            'evaluate': 'data_analyzed',
+            # Research/gathering
+            'research': 'research_complete',
+            'investigate': 'research_complete',
+            'gather': 'data_gathered',
+            'collect': 'data_gathered',
+            # Review/check
+            'review': 'review_complete',
+            'check': 'review_complete',
+            'verify': 'review_complete',
+            'audit': 'review_complete',
+            # Communication
+            'send': 'message_sent',
+            'email': 'message_sent',
+            'notify': 'message_sent',
+            'contact': 'message_sent',
+            # Meetings/scheduling
+            'schedule': 'meeting_scheduled',
+            'book': 'meeting_scheduled',
+            'arrange': 'meeting_scheduled',
+            'meet': 'meeting_scheduled',
+            # Implementation/development
+            'implement': 'implementation_complete',
+            'develop': 'implementation_complete',
+            'build': 'implementation_complete',
+            'code': 'implementation_complete',
+            # Planning
+            'plan': 'plan_created',
+            'prepare': 'plan_created',
+            'organize': 'plan_created',
+            # Fixing/updating
+            'fix': 'issue_resolved',
+            'resolve': 'issue_resolved',
+            'update': 'update_complete',
+            'modify': 'update_complete',
+            # Learning/training
+            'learn': 'learning_complete',
+            'study': 'learning_complete',
+            'train': 'training_complete',
+            # Presentation
+            'present': 'presentation_ready',
+            'demo': 'presentation_ready',
+            'showcase': 'presentation_ready',
+        }
         
-        # Add deadline criterion if present
+        # Find matching state variables from the description
+        matched_states = set()
+        for keyword, state_var in action_state_mapping.items():
+            if keyword in description:
+                matched_states.add(state_var)
+        
+        # Add matched state assertions
+        for state_var in matched_states:
+            criteria.append(f"{state_var}=True")
+        
+        # Add deadline criterion if present (as a human-readable note, not GOAP state)
+        # GOAP doesn't parse deadlines, but we keep it for display purposes
         if entities.get('deadline'):
-            criteria.append(f"Completed by deadline: {entities['deadline']}")
+            # Deadlines are handled by the scheduler, not GOAP state
+            pass
         
-        # Add quality/review criterion for certain keywords
-        quality_keywords = ['review', 'analyze', 'prepare', 'create', 'write']
-        if any(keyword in message.lower() for keyword in quality_keywords):
-            criteria.append("Quality standards met")
+        # Default fallback: generic task completion
+        if not criteria:
+            criteria.append("task_complete=True")
         
-        return criteria if criteria else ["Task completed successfully"]
+        return criteria
     
     def _estimate_duration(self, entities: Dict, title: str) -> Optional[timedelta]:
         """

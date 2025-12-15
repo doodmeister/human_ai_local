@@ -48,6 +48,7 @@ class ChatService:
     """
 
     _INTENT_HANDLER_PRIORITY = (
+        "goal_update",
         "goal_query",
         "memory_query",
         "reminder_request",
@@ -55,6 +56,7 @@ class ChatService:
         "system_status",
     )
     _INTENT_SECTION_HEADERS = {
+        "goal_update": "Goal update",
         "goal_query": "Goal update",
         "memory_query": "Memory lookup",
         "performance_query": "Performance metrics",
@@ -865,7 +867,19 @@ class ChatService:
         for handler_name in plan:
             confidence = self._get_intent_confidence(intent, handler_name)
             handler_callable = None
-            if handler_name == "goal_query":
+            if handler_name == "goal_update":
+                if self._orchestrator is None:
+                    execution_log.append({
+                        "intent": handler_name,
+                        "confidence": confidence,
+                        "handled": False,
+                        "response": None,
+                        "error": "orchestrator_unavailable",
+                        "duration_ms": 0.0,
+                    })
+                    continue
+                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_goal_update(_intent, _sid)
+            elif handler_name == "goal_query":
                 if self._orchestrator is None:
                     execution_log.append({
                         "intent": handler_name,
@@ -1181,20 +1195,25 @@ class ChatService:
         if not self._orchestrator:
             return None
         
+        # Check query subtype
+        query_subtype = intent.entities.get('query_subtype', 'general')
+        
+        # Handle "list all goals" query
+        if query_subtype == 'list_all':
+            return self._format_all_goals_for_chat()
+        
+        # Handle execution progress query - show all active executions
+        if query_subtype == 'execution_progress':
+            return self._format_execution_progress_for_chat()
+        
         # Extract goal identifier from entities
         goal_identifier = (
             intent.entities.get('goal_identifier')
             or intent.entities.get('goal_reference')
         )
         if not goal_identifier:
-            # Try to find recent goals for this session
-            active_executions = self._orchestrator.list_active_executions()
-            if not active_executions:
-                return "You don't have any active goals at the moment."
-            
-            # Show status of most recent active goal
-            progress = active_executions[0]
-            return self._orchestrator.format_status_for_chat(progress.goal_id)
+            # No specific goal - list all goals
+            return self._format_all_goals_for_chat()
         
         # Try to find goal by identifier (title substring match) via orchestrator
         try:
@@ -1227,6 +1246,250 @@ class ChatService:
             if not active_executions:
                 return "You don't have any active goals at the moment."
             return self._orchestrator.format_status_for_chat(active_executions[0].goal_id)
+    
+    def _format_all_goals_for_chat(self) -> str:
+        """
+        Format all goals for chat display.
+        
+        Returns:
+            Formatted string with all goals
+        """
+        try:
+            # Access goal manager through orchestrator's executive system
+            goal_manager = None
+            if hasattr(self._orchestrator, 'executive_system'):
+                goal_manager = self._orchestrator.executive_system.goal_manager
+            elif hasattr(self._orchestrator, '_executive_system'):
+                goal_manager = getattr(self._orchestrator, '_executive_system').goal_manager
+            
+            if not goal_manager or not goal_manager.goals:
+                return "You don't have any goals at the moment. Try saying something like 'I need to finish the report by Friday' to create one!"
+            
+            # Group goals by status
+            active_goals = []
+            completed_goals = []
+            failed_goals = []
+            
+            for goal_id, goal in goal_manager.goals.items():
+                status = getattr(goal, 'status', 'unknown')
+                if hasattr(status, 'value'):
+                    status = status.value
+                status_lower = str(status).lower()
+                
+                goal_info = {
+                    'id': goal_id,
+                    'title': goal.title,
+                    'priority': getattr(goal, 'priority', 'medium'),
+                    'deadline': getattr(goal, 'deadline', None),
+                    'status': status_lower,
+                }
+                
+                if status_lower in ['completed', 'done']:
+                    completed_goals.append(goal_info)
+                elif status_lower in ['failed', 'cancelled']:
+                    failed_goals.append(goal_info)
+                else:
+                    active_goals.append(goal_info)
+            
+            # Build response
+            lines = ["📋 **Your Goals**\n"]
+            
+            if active_goals:
+                lines.append("**Active:**")
+                for g in active_goals:
+                    priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
+                        str(getattr(g['priority'], 'value', g['priority'])).lower(), "⚪"
+                    )
+                    deadline_str = ""
+                    if g['deadline']:
+                        if hasattr(g['deadline'], 'strftime'):
+                            deadline_str = f" (due: {g['deadline'].strftime('%b %d')})"
+                        else:
+                            deadline_str = f" (due: {str(g['deadline'])[:10]})"
+                    lines.append(f"  {priority_emoji} {g['title']}{deadline_str}")
+            
+            if completed_goals:
+                lines.append("\n**Completed:** ✅")
+                for g in completed_goals[:3]:  # Show last 3 completed
+                    lines.append(f"  ✓ {g['title']}")
+                if len(completed_goals) > 3:
+                    lines.append(f"  ...and {len(completed_goals) - 3} more")
+            
+            if not active_goals and not completed_goals:
+                return "You don't have any goals yet. Try saying something like 'I need to finish the report by Friday' to create one!"
+            
+            lines.append(f"\n*{len(active_goals)} active, {len(completed_goals)} completed*")
+            lines.append("\nAsk me about a specific goal for details, or say 'I need to...' to create a new one.")
+            
+            return "\n".join(lines)
+            
+        except Exception as e:
+            return f"I had trouble getting your goals. Error: {str(e)}"
+    
+    def _format_execution_progress_for_chat(self) -> str:
+        """
+        Format all active goal executions for chat display.
+        
+        Returns:
+            Formatted string with execution progress
+        """
+        try:
+            if not self._orchestrator:
+                return "Goal execution is not available right now."
+            
+            active_executions = self._orchestrator.list_active_executions()
+            
+            if not active_executions:
+                return "No goals are currently being executed. All your goals are either waiting to start or already complete."
+            
+            lines = ["⚙️ **Currently Executing:**\n"]
+            
+            for progress in active_executions:
+                # Phase emoji
+                phase_emoji = {
+                    'queued': '⏳',
+                    'deciding': '🤔',
+                    'planning': '📝',
+                    'scheduling': '📅',
+                    'executing': '▶️',
+                    'completed': '✅',
+                    'failed': '❌',
+                    'cancelled': '🚫'
+                }.get(progress.phase.value, '⚙️')
+                
+                lines.append(f"{phase_emoji} **{progress.goal_title}**")
+                lines.append(f"   Phase: {progress.phase.value.title()}")
+                
+                if progress.total_actions > 0:
+                    lines.append(f"   Progress: {progress.progress_percent:.0f}% ({progress.actions_completed}/{progress.total_actions} steps)")
+                
+                if progress.current_action:
+                    lines.append(f"   Current: {progress.current_action}")
+                
+                # Show elapsed time
+                if hasattr(progress, 'start_time') and progress.start_time:
+                    from datetime import datetime
+                    elapsed = datetime.now() - progress.start_time
+                    if elapsed.total_seconds() < 60:
+                        lines.append(f"   Running: {int(elapsed.total_seconds())}s")
+                    else:
+                        lines.append(f"   Running: {int(elapsed.total_seconds() / 60)}m")
+                
+                lines.append("")  # Blank line between goals
+            
+            lines.append(f"*{len(active_executions)} goal(s) in progress*")
+            lines.append("\nSay 'check my goals' to see all goals, or ask about a specific one for details.")
+            
+            return "\n".join(lines)
+            
+        except Exception as e:
+            return f"I had trouble getting execution progress: {str(e)}"
+    
+    def _handle_goal_update(self, intent: "IntentV2", session_id: str) -> Optional[str]:
+        """
+        Handle goal update intent (complete, cancel, change priority/deadline).
+        
+        Args:
+            intent: Classified intent with goal_update entities
+            session_id: Current session ID
+            
+        Returns:
+            Confirmation message or error
+        """
+        try:
+            # Get orchestrator and goal_manager
+            orchestrator = getattr(self, '_orchestrator', None)
+            if not orchestrator:
+                return "Goal management is not available right now."
+            
+            goal_manager = getattr(orchestrator, 'goal_manager', None)
+            if not goal_manager:
+                return "Goal management is not available right now."
+            
+            # Extract entities from intent
+            entities = intent.entities if hasattr(intent, 'entities') else {}
+            goal_reference = entities.get('goal_reference', '')
+            update_action = entities.get('update_action', '')
+            new_priority = entities.get('new_priority')
+            new_deadline = entities.get('new_deadline')
+            
+            if not goal_reference:
+                return "I couldn't identify which goal you want to update. Try being more specific, like 'mark the report goal as complete'."
+            
+            if not update_action:
+                return "I'm not sure what you want to do with that goal. You can complete it, cancel it, or change its priority or deadline."
+            
+            # Find the goal by reference (fuzzy matching on title)
+            all_goals = goal_manager.goals if hasattr(goal_manager, 'goals') else {}
+            matching_goal = None
+            matching_goal_id = None
+            goal_reference_lower = goal_reference.lower()
+            
+            for goal_id, goal in all_goals.items():
+                goal_title = getattr(goal, 'title', str(goal)).lower() if hasattr(goal, 'title') else str(goal).lower()
+                if goal_reference_lower in goal_title or goal_title in goal_reference_lower:
+                    matching_goal = goal
+                    matching_goal_id = goal_id
+                    break
+            
+            if not matching_goal:
+                # Try partial match
+                for goal_id, goal in all_goals.items():
+                    goal_title = getattr(goal, 'title', str(goal)).lower() if hasattr(goal, 'title') else str(goal).lower()
+                    # Check if any word from reference matches goal title
+                    ref_words = set(goal_reference_lower.split())
+                    title_words = set(goal_title.split())
+                    if ref_words & title_words:  # Any common words
+                        matching_goal = goal
+                        matching_goal_id = goal_id
+                        break
+            
+            if not matching_goal:
+                return f"I couldn't find a goal matching '{goal_reference}'. Try saying 'check my goals' to see your current goals."
+            
+            goal_title = getattr(matching_goal, 'title', str(matching_goal))
+            
+            # Apply the update
+            if update_action == 'complete':
+                if hasattr(goal_manager, 'complete_goal'):
+                    goal_manager.complete_goal(matching_goal_id)
+                elif hasattr(matching_goal, 'status'):
+                    matching_goal.status = 'completed'
+                return f"✅ Marked '{goal_title}' as complete. Nice work!"
+                
+            elif update_action == 'cancel':
+                if hasattr(goal_manager, 'cancel_goal'):
+                    goal_manager.cancel_goal(matching_goal_id)
+                elif hasattr(goal_manager, 'remove_goal'):
+                    goal_manager.remove_goal(matching_goal_id)
+                elif hasattr(matching_goal, 'status'):
+                    matching_goal.status = 'cancelled'
+                return f"🚫 Cancelled '{goal_title}'."
+                
+            elif update_action == 'priority_change':
+                if new_priority and hasattr(goal_manager, 'update_goal_priority'):
+                    goal_manager.update_goal_priority(matching_goal_id, new_priority)
+                    return f"📊 Updated priority of '{goal_title}' to {new_priority}."
+                elif new_priority and hasattr(matching_goal, 'priority'):
+                    matching_goal.priority = new_priority
+                    return f"📊 Updated priority of '{goal_title}' to {new_priority}."
+                else:
+                    return f"I couldn't update the priority. Try saying 'set {goal_title} to high priority'."
+                    
+            elif update_action == 'deadline_change':
+                if new_deadline and hasattr(goal_manager, 'update_goal_deadline'):
+                    goal_manager.update_goal_deadline(matching_goal_id, new_deadline)
+                    return f"📅 Updated deadline of '{goal_title}' to {new_deadline}."
+                elif new_deadline and hasattr(matching_goal, 'deadline'):
+                    matching_goal.deadline = new_deadline
+                    return f"📅 Updated deadline of '{goal_title}' to {new_deadline}."
+                else:
+                    return f"I couldn't update the deadline. Try saying 'change {goal_title} deadline to Friday'."
+            
+            return f"I'm not sure how to '{update_action}' a goal. You can complete, cancel, or change the priority or deadline."
+            
+        except Exception as e:
+            return f"I had trouble updating the goal: {str(e)}"
     
     def _handle_memory_query(self, message: str, session_id: str) -> Optional[str]:
         """

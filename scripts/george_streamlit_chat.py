@@ -384,6 +384,372 @@ def trigger_reflection(base_url: str) -> Dict[str, Any]:
     return resp.json()
 
 
+# ============================================================================
+# Memory Browser API Functions
+# ============================================================================
+
+def fetch_memories(base_url: str, system: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """Fetch memories from a specific memory system."""
+    try:
+        resp = requests.get(f"{base_url}/memory/{system}/list", params={"limit": limit}, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("memories", data.get("items", []))
+    except requests.RequestException as exc:
+        st.error(f"Failed to fetch {system} memories: {exc}")
+        return []
+
+
+def search_memories(base_url: str, system: str, query: str, max_results: int = 20) -> List[Dict[str, Any]]:
+    """Search memories in a specific memory system."""
+    try:
+        payload = {"query": query, "max_results": max_results}
+        resp = requests.post(f"{base_url}/memory/{system}/search", json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("results", data.get("memories", []))
+    except requests.RequestException as exc:
+        st.error(f"Failed to search {system} memories: {exc}")
+        return []
+
+
+def delete_memory(base_url: str, system: str, memory_id: str) -> bool:
+    """Delete a memory from a specific memory system."""
+    try:
+        resp = requests.delete(f"{base_url}/memory/{system}/delete/{memory_id}", timeout=10)
+        resp.raise_for_status()
+        return True
+    except requests.RequestException as exc:
+        st.error(f"Failed to delete memory: {exc}")
+        return False
+
+
+def fetch_semantic_facts(base_url: str, query: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Fetch or search semantic facts."""
+    try:
+        if query:
+            payload = {"query": query}
+            resp = requests.post(f"{base_url}/semantic/fact/search", json=payload, timeout=10)
+        else:
+            # List all - use search with empty query
+            payload = {"query": ""}
+            resp = requests.post(f"{base_url}/semantic/fact/search", json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("facts", data.get("results", []))
+    except requests.RequestException as exc:
+        st.error(f"Failed to fetch semantic facts: {exc}")
+        return []
+
+
+def fetch_prospective_memories(base_url: str) -> List[Dict[str, Any]]:
+    """Fetch prospective memories (reminders)."""
+    try:
+        resp = requests.get(f"{base_url}/prospective/search", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("events", data.get("reminders", []))
+    except requests.RequestException as exc:
+        st.error(f"Failed to fetch prospective memories: {exc}")
+        return []
+
+
+def fetch_procedural_memories(base_url: str) -> List[Dict[str, Any]]:
+    """Fetch procedural memories (skills/procedures)."""
+    try:
+        resp = requests.get(f"{base_url}/procedural/list", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("procedures", data.get("items", []))
+    except requests.RequestException as exc:
+        st.error(f"Failed to fetch procedural memories: {exc}")
+        return []
+
+
+# ============== Learning Dashboard Helpers ==============
+
+def fetch_learning_metrics(base_url: str) -> Dict[str, Any]:
+    """Fetch learning metrics from the executive system."""
+    try:
+        resp = requests.get(f"{base_url}/executive/learning/metrics", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException:
+        # Try alternative endpoint
+        try:
+            resp = requests.get(f"{base_url}/executive/status", timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("learning_metrics", {})
+        except requests.RequestException as exc:
+            st.error(f"Failed to fetch learning metrics: {exc}")
+            return {}
+
+
+def fetch_experiments(base_url: str) -> List[Dict[str, Any]]:
+    """Fetch A/B test experiments."""
+    try:
+        resp = requests.get(f"{base_url}/executive/experiments", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("experiments", [])
+    except requests.RequestException:
+        return []
+
+
+def fetch_execution_outcomes(base_url: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Fetch recent execution outcomes."""
+    try:
+        resp = requests.get(f"{base_url}/executive/outcomes", params={"limit": limit}, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("outcomes", [])
+    except requests.RequestException:
+        return []
+
+
+def render_learning_dashboard(base_url: str) -> None:
+    """Render the learning dashboard interface."""
+    st.header("📊 Learning Dashboard")
+    st.write("Monitor ML model performance, A/B test results, and system learning trends.")
+    
+    # Refresh button
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        refresh = st.button("🔄 Refresh", key="learning_refresh")
+    
+    # Fetch learning metrics
+    metrics = {}
+    if refresh or "learning_metrics_cache" not in st.session_state:
+        with st.spinner("Loading learning metrics..."):
+            metrics = fetch_learning_metrics(base_url)
+            st.session_state.learning_metrics_cache = metrics
+    else:
+        metrics = st.session_state.get("learning_metrics_cache", {})
+    
+    # Overview metrics
+    st.subheader("📈 Performance Overview")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    decision_acc = metrics.get("decision_accuracy", {})
+    planning_acc = metrics.get("planning_accuracy", {})
+    scheduling_acc = metrics.get("scheduling_accuracy", {})
+    trends = metrics.get("improvement_trends", {})
+    
+    with col1:
+        overall_acc = decision_acc.get("overall_accuracy", 0) if decision_acc else 0
+        st.metric(
+            "Decision Accuracy",
+            f"{overall_acc:.1%}" if overall_acc else "N/A",
+            delta=f"{trends.get('decision_improvement', 0):.1%}" if trends.get('decision_improvement') else None
+        )
+    
+    with col2:
+        plan_success = planning_acc.get("plan_success_rate", 0) if planning_acc else 0
+        st.metric(
+            "Planning Success",
+            f"{plan_success:.1%}" if plan_success else "N/A",
+            delta=f"{trends.get('planning_improvement', 0):.1%}" if trends.get('planning_improvement') else None
+        )
+    
+    with col3:
+        sched_acc = scheduling_acc.get("time_accuracy", 0) if scheduling_acc else 0
+        st.metric(
+            "Scheduling Accuracy",
+            f"{sched_acc:.1%}" if sched_acc else "N/A",
+            delta=f"{trends.get('scheduling_improvement', 0):.1%}" if trends.get('scheduling_improvement') else None
+        )
+    
+    with col4:
+        total_outcomes = decision_acc.get("total_decisions", 0) if decision_acc else 0
+        st.metric("Total Decisions", total_outcomes if total_outcomes else "N/A")
+    
+    st.divider()
+    
+    # Tabs for different views
+    tab_strategies, tab_experiments, tab_outcomes = st.tabs([
+        "🎯 Strategy Performance",
+        "🧪 A/B Experiments",
+        "📜 Recent Outcomes"
+    ])
+    
+    with tab_strategies:
+        render_strategy_performance(metrics)
+    
+    with tab_experiments:
+        render_experiments(base_url)
+    
+    with tab_outcomes:
+        render_recent_outcomes(base_url)
+
+
+def render_strategy_performance(metrics: Dict[str, Any]) -> None:
+    """Render strategy performance comparison."""
+    st.markdown("#### Strategy Comparison")
+    
+    decision_acc = metrics.get("decision_accuracy", {})
+    
+    if not decision_acc:
+        st.info("No strategy performance data available yet. Execute some goals to generate data.")
+        return
+    
+    # Strategy breakdown
+    strategy_stats = decision_acc.get("by_strategy", {})
+    
+    if strategy_stats:
+        st.markdown("**Performance by Strategy:**")
+        
+        for strategy, stats in strategy_stats.items():
+            with st.expander(f"📊 {strategy.replace('_', ' ').title()}", expanded=True):
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    success_rate = stats.get("success_rate", 0)
+                    st.metric("Success Rate", f"{success_rate:.1%}")
+                
+                with col2:
+                    avg_confidence = stats.get("avg_confidence", 0)
+                    st.metric("Avg Confidence", f"{avg_confidence:.2f}")
+                
+                with col3:
+                    count = stats.get("count", 0)
+                    st.metric("Uses", count)
+    else:
+        # Show sample data placeholder
+        st.info("Strategy comparison will appear here after multiple goals are executed with different strategies.")
+        
+        # Show available strategies
+        st.markdown("**Available Decision Strategies:**")
+        strategies = [
+            ("weighted_scoring", "Classic weighted sum of criteria scores"),
+            ("ahp", "Analytic Hierarchy Process - multi-criteria with consistency checks"),
+            ("pareto", "Multi-objective Pareto frontier analysis"),
+        ]
+        
+        for name, desc in strategies:
+            st.caption(f"• **{name}**: {desc}")
+
+
+def render_experiments(base_url: str) -> None:
+    """Render A/B experiment results."""
+    st.markdown("#### A/B Test Experiments")
+    
+    experiments = fetch_experiments(base_url)
+    
+    if not experiments:
+        st.info("No A/B experiments running. Experiments allow comparing decision strategies to find the best performer.")
+        
+        # Show how to create an experiment
+        with st.expander("💡 How to create an experiment"):
+            st.markdown("""
+            A/B experiments compare different decision strategies:
+            
+            ```python
+            from src.executive.learning import create_experiment_manager, AssignmentMethod
+            
+            manager = create_experiment_manager()
+            exp = manager.create_experiment(
+                name="Strategy Comparison",
+                strategies=["weighted_scoring", "ahp"],
+                assignment_method=AssignmentMethod.EPSILON_GREEDY
+            )
+            manager.start_experiment(exp.experiment_id)
+            ```
+            
+            The system will automatically assign strategies and track outcomes.
+            """)
+        return
+    
+    for exp in experiments:
+        status_emoji = {
+            "running": "🟢",
+            "completed": "✅",
+            "stopped": "🔴"
+        }.get(exp.get("status", ""), "⚪")
+        
+        with st.expander(f"{status_emoji} {exp.get('name', 'Experiment')}", expanded=True):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.caption(f"**Status:** {exp.get('status', 'unknown')}")
+                st.caption(f"**Method:** {exp.get('assignment_method', 'N/A')}")
+            
+            with col2:
+                st.caption(f"**Strategies:** {', '.join(exp.get('strategies', []))}")
+                st.caption(f"**Total Assignments:** {exp.get('total_assignments', 0)}")
+            
+            with col3:
+                if exp.get("recommended_strategy"):
+                    st.success(f"**Winner:** {exp.get('recommended_strategy')}")
+                    st.caption(f"**Confidence:** {exp.get('confidence', 'N/A')}")
+            
+            # Strategy results
+            results = exp.get("strategy_results", {})
+            if results:
+                st.markdown("**Results by Strategy:**")
+                
+                result_cols = st.columns(len(results))
+                for i, (strategy, data) in enumerate(results.items()):
+                    with result_cols[i]:
+                        st.markdown(f"**{strategy}**")
+                        st.metric("Success Rate", f"{data.get('success_rate', 0):.1%}")
+                        st.caption(f"Samples: {data.get('count', 0)}")
+
+
+def render_recent_outcomes(base_url: str) -> None:
+    """Render recent execution outcomes."""
+    st.markdown("#### Recent Execution Outcomes")
+    
+    outcomes = fetch_execution_outcomes(base_url)
+    
+    if not outcomes:
+        st.info("No execution outcomes recorded yet. Complete some goal executions to see results here.")
+        return
+    
+    for outcome in outcomes:
+        success = outcome.get("success", False)
+        status_emoji = "✅" if success else "❌"
+        
+        with st.expander(f"{status_emoji} {outcome.get('goal_title', 'Goal')}", expanded=False):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.caption(f"**Goal ID:** {outcome.get('goal_id', 'N/A')}")
+                st.caption(f"**Success:** {'Yes' if success else 'No'}")
+                st.caption(f"**Score:** {outcome.get('outcome_score', 0):.2f}")
+            
+            with col2:
+                st.caption(f"**Strategy:** {outcome.get('strategy', 'N/A')}")
+                st.caption(f"**Plan Steps:** {outcome.get('plan_length', 0)}")
+                st.caption(f"**Time:** {outcome.get('execution_time', 'N/A')}")
+            
+            # Accuracy metrics
+            acc_metrics = outcome.get("accuracy_metrics", {})
+            if acc_metrics:
+                st.markdown("**Accuracy Metrics:**")
+                metric_cols = st.columns(3)
+                
+                with metric_cols[0]:
+                    time_acc = acc_metrics.get("time_accuracy", 0)
+                    st.metric("Time Accuracy", f"{time_acc:.1%}" if time_acc else "N/A")
+                
+                with metric_cols[1]:
+                    plan_adh = acc_metrics.get("plan_adherence", 0)
+                    st.metric("Plan Adherence", f"{plan_adh:.1%}" if plan_adh else "N/A")
+                
+                with metric_cols[2]:
+                    goal_ach = acc_metrics.get("goal_achievement", 0)
+                    st.metric("Goal Achievement", f"{goal_ach:.1%}" if goal_ach else "N/A")
+            
+            # Deviations
+            deviations = outcome.get("deviations", [])
+            if deviations:
+                st.markdown("**Deviations:**")
+                for dev in deviations:
+                    st.caption(f"⚠️ {dev}")
+
+
 def ensure_state() -> None:
     """Initialize Streamlit session state fields used by the UI."""
     if "session_id" not in st.session_state:
@@ -432,6 +798,18 @@ def ensure_state() -> None:
         st.session_state.active_goals_refresh = False
     if "selected_goal_id" not in st.session_state:
         st.session_state.selected_goal_id = None
+    # Memory browser settings
+    if "memory_browser_system" not in st.session_state:
+        st.session_state.memory_browser_system = "stm"
+    if "memory_browser_search" not in st.session_state:
+        st.session_state.memory_browser_search = ""
+    if "memory_browser_cache" not in st.session_state:
+        st.session_state.memory_browser_cache = {}
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = "Chat"
+    # Learning dashboard settings
+    if "learning_metrics_cache" not in st.session_state:
+        st.session_state.learning_metrics_cache = {}
 
 
 def create_goal_remote(
@@ -1123,6 +1501,143 @@ def render_goal_details_page(base_url: str, goal_id: str) -> None:
         st.warning("No schedule available yet.")
 
 
+# ============================================================================
+# Memory Browser UI
+# ============================================================================
+
+def render_memory_item(memory: Dict[str, Any], system: str, base_url: str, index: int) -> None:
+    """Render a single memory item with actions."""
+    memory_id = memory.get("id") or memory.get("memory_id") or f"memory_{index}"
+    content = memory.get("content") or memory.get("detailed_content") or memory.get("summary") or str(memory)
+    
+    # Truncate long content for display
+    display_content = content[:300] + "..." if len(str(content)) > 300 else content
+    
+    with st.expander(f"📝 {display_content[:60]}...", expanded=False):
+        st.markdown(f"**Content:** {content}")
+        
+        # Show metadata in columns
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if memory.get("importance"):
+                st.metric("Importance", f"{memory.get('importance', 0):.2f}")
+            if memory.get("activation"):
+                st.metric("Activation", f"{memory.get('activation', 0):.2f}")
+        
+        with col2:
+            if memory.get("encoding_time"):
+                st.caption(f"**Created:** {memory.get('encoding_time', 'Unknown')[:19]}")
+            elif memory.get("timestamp"):
+                ts = memory.get("timestamp")
+                if isinstance(ts, str):
+                    st.caption(f"**Created:** {ts[:19]}")
+            if memory.get("last_access"):
+                st.caption(f"**Last Access:** {memory.get('last_access', 'N/A')[:19]}")
+        
+        with col3:
+            if memory.get("access_count"):
+                st.caption(f"**Access Count:** {memory.get('access_count', 0)}")
+            if memory.get("tags"):
+                tags = memory.get("tags", [])
+                if isinstance(tags, list):
+                    st.caption(f"**Tags:** {', '.join(tags[:5])}")
+                elif isinstance(tags, str):
+                    st.caption(f"**Tags:** {tags}")
+        
+        # Additional metadata
+        with st.expander("📊 Full Metadata", expanded=False):
+            st.json(memory)
+        
+        # Delete button
+        if st.button(f"🗑️ Delete", key=f"delete_{system}_{memory_id}_{index}"):
+            if delete_memory(base_url, system, memory_id):
+                st.success(f"Memory deleted successfully")
+                # Clear cache to force refresh
+                if system in st.session_state.memory_browser_cache:
+                    del st.session_state.memory_browser_cache[system]
+                st.rerun()
+
+
+def render_memory_browser(base_url: str) -> None:
+    """Render the memory browser interface."""
+    st.header("🧠 Memory Browser")
+    st.write("Browse, search, and manage memories across all memory systems.")
+    
+    # Memory system selector
+    col1, col2 = st.columns([2, 3])
+    
+    with col1:
+        system = st.selectbox(
+            "Memory System",
+            options=["stm", "ltm", "episodic", "semantic", "prospective", "procedural"],
+            format_func=lambda x: {
+                "stm": "📝 Short-Term Memory (STM)",
+                "ltm": "💾 Long-Term Memory (LTM)",
+                "episodic": "📖 Episodic Memory",
+                "semantic": "🔤 Semantic Memory",
+                "prospective": "⏰ Prospective Memory",
+                "procedural": "⚙️ Procedural Memory"
+            }.get(x, x),
+            key="memory_browser_system"
+        )
+    
+    with col2:
+        search_query = st.text_input(
+            "Search memories",
+            value=st.session_state.memory_browser_search,
+            placeholder="Enter search query...",
+            key="memory_search_input"
+        )
+        st.session_state.memory_browser_search = search_query
+    
+    # Action buttons
+    col1, col2, col3 = st.columns([1, 1, 2])
+    
+    with col1:
+        refresh = st.button("🔄 Refresh", use_container_width=True)
+    
+    with col2:
+        clear_cache = st.button("🧹 Clear Cache", use_container_width=True)
+        if clear_cache:
+            st.session_state.memory_browser_cache = {}
+            st.success("Cache cleared")
+    
+    # Fetch memories based on system type
+    memories = []
+    cache_key = f"{system}_{search_query}"
+    
+    if refresh or cache_key not in st.session_state.memory_browser_cache:
+        with st.spinner(f"Loading {system} memories..."):
+            if system in ["stm", "ltm", "episodic"]:
+                if search_query:
+                    memories = search_memories(base_url, system, search_query)
+                else:
+                    memories = fetch_memories(base_url, system)
+            elif system == "semantic":
+                memories = fetch_semantic_facts(base_url, search_query if search_query else None)
+            elif system == "prospective":
+                memories = fetch_prospective_memories(base_url)
+            elif system == "procedural":
+                memories = fetch_procedural_memories(base_url)
+            
+            st.session_state.memory_browser_cache[cache_key] = memories
+    else:
+        memories = st.session_state.memory_browser_cache.get(cache_key, [])
+    
+    # Display memories
+    st.divider()
+    
+    if not memories:
+        st.info(f"No memories found in {system}. Try a different search or memory system.")
+    else:
+        st.success(f"Found **{len(memories)}** memories in {system}")
+        
+        # Display memories
+        for i, memory in enumerate(memories):
+            render_memory_item(memory, system, base_url, i)
+
+
 def main() -> None:
     st.set_page_config(page_title="George Chat", page_icon="G", layout="wide")
     ensure_state()
@@ -1139,80 +1654,97 @@ def main() -> None:
         return
 
     st.title("George Chat Interface")
-    st.write("Chat with the cognitive backend. Each turn retrieves short-term memories first, then falls back to long-term memories when needed.")
     
-    # Tip about natural language goal creation
-    with st.expander("💡 **Tip:** You can create goals naturally!", expanded=False):
-        st.markdown("""
-        Try saying things like:
-        - *"I need to finish the report by Friday"*
-        - *"Help me plan a project for next week"*
-        - *"My goal is to learn Python this month"*
-        - *"I should review the code before the meeting"*
+    # Create tabs for Chat, Memory Browser, and Learning Dashboard
+    tab_chat, tab_memory, tab_learning = st.tabs(["💬 Chat", "🧠 Memory Browser", "📊 Learning"])
+    
+    with tab_chat:
+        st.write("Chat with the cognitive backend. Each turn retrieves short-term memories first, then falls back to long-term memories when needed.")
         
-        George will automatically detect your goal, create it, and start the **Goal→Decision→Plan→Schedule** pipeline!
-        """)
-    
-    render_proactive_banner(base_url)
-    render_session_context_panel()
+        # Tip about natural language goal creation
+        with st.expander("💡 **Tip:** You can create goals naturally!", expanded=False):
+            st.markdown("""
+            Try saying things like:
+            - *"I need to finish the report by Friday"*
+            - *"Help me plan a project for next week"*
+            - *"My goal is to learn Python this month"*
+            - *"I should review the code before the meeting"*
+            
+            George will automatically detect your goal, create it, and start the **Goal→Decision→Plan→Schedule** pipeline!
+            """)
+        
+        render_proactive_banner(base_url)
+        render_session_context_panel()
 
-    prompt: Optional[str] = None
-    if backend_ok:
-        prompt = st.chat_input("Send a message")
-    else:
-        st.info("Start the backend with `python start_server.py` to enable chatting.")
+        prompt: Optional[str] = None
+        if backend_ok:
+            prompt = st.chat_input("Send a message")
+        else:
+            st.info("Start the backend with `python start_server.py` to enable chatting.")
 
-    assistant_record: Optional[Dict[str, Any]] = None
-    if prompt:
-        user_record = {
-            "role": "user",
-            "content": prompt,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        st.session_state.messages.append(user_record)
-        st.session_state.last_error = None
-
-        try:
-            with st.spinner("Retrieving context and generating response..."):
-                response = post_chat(
-                    base_url,
-                    prompt,
-                    st.session_state.session_id,
-                    flags,
-                    salience_threshold,
-                )
-            st.session_state.last_raw_response = response
-            st.session_state.session_context = response.get("session_context")
-            _update_proactive_state_from_response(response)
-            reply_text = response.get("response") or "[Empty response from backend]"
-            assistant_record = {
-                "role": "assistant",
-                "content": reply_text,
-                "context_items": response.get("context_items", []),
-                "captured_memories": response.get("captured_memories", []),
-                "metrics": response.get("metrics", {}),
-                "detected_goal": response.get("detected_goal"),
-                "intent": response.get("intent"),
+        assistant_record: Optional[Dict[str, Any]] = None
+        if prompt:
+            user_record = {
+                "role": "user",
+                "content": prompt,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            
-            # Auto-refresh goals sidebar if a goal was detected
-            if response.get("detected_goal"):
-                st.session_state.active_goals_refresh = True
-        except requests.HTTPError as exc:
-            st.error(f"Chat request failed: {exc}")
-            st.session_state.last_error = str(exc)
-            st.session_state.last_raw_response = None
-        except requests.RequestException as exc:
-            st.error(f"Network error: {exc}")
-            st.session_state.last_error = str(exc)
-            st.session_state.last_raw_response = None
+            st.session_state.messages.append(user_record)
+            st.session_state.last_error = None
 
-        if assistant_record:
-            st.session_state.messages.append(assistant_record)
+            try:
+                with st.spinner("Retrieving context and generating response..."):
+                    response = post_chat(
+                        base_url,
+                        prompt,
+                        st.session_state.session_id,
+                        flags,
+                        salience_threshold,
+                    )
+                st.session_state.last_raw_response = response
+                st.session_state.session_context = response.get("session_context")
+                _update_proactive_state_from_response(response)
+                reply_text = response.get("response") or "[Empty response from backend]"
+                assistant_record = {
+                    "role": "assistant",
+                    "content": reply_text,
+                    "context_items": response.get("context_items", []),
+                    "captured_memories": response.get("captured_memories", []),
+                    "metrics": response.get("metrics", {}),
+                    "detected_goal": response.get("detected_goal"),
+                    "intent": response.get("intent"),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                
+                # Auto-refresh goals sidebar if a goal was detected
+                if response.get("detected_goal"):
+                    st.session_state.active_goals_refresh = True
+            except requests.HTTPError as exc:
+                st.error(f"Chat request failed: {exc}")
+                st.session_state.last_error = str(exc)
+                st.session_state.last_raw_response = None
+            except requests.RequestException as exc:
+                st.error(f"Network error: {exc}")
+                st.session_state.last_error = str(exc)
+                st.session_state.last_raw_response = None
 
-    for msg in st.session_state.messages:
-        render_message(msg)
+            if assistant_record:
+                st.session_state.messages.append(assistant_record)
+
+        for msg in st.session_state.messages:
+            render_message(msg)
+    
+    with tab_memory:
+        if backend_ok:
+            render_memory_browser(base_url)
+        else:
+            st.warning("Start the backend with `python start_server.py` to browse memories.")
+    
+    with tab_learning:
+        if backend_ok:
+            render_learning_dashboard(base_url)
+        else:
+            st.warning("Start the backend with `python start_server.py` to view learning metrics.")
 
 
 if __name__ == "__main__":

@@ -451,3 +451,130 @@ async def get_system_health(request: Request):
             "error": f"Failed to get system health: {str(e)}"
         }
 
+
+# ============== Learning & ML Endpoints ==============
+
+@router.get("/learning/metrics")
+async def get_learning_metrics(request: Request):
+    """Get learning and outcome metrics for the dashboard."""
+    try:
+        system = get_executive_system(request)
+        metrics = system.get_learning_metrics()
+        
+        return {
+            "status": "success",
+            **metrics
+        }
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to get learning metrics: {str(e)}",
+            "decision_accuracy": {},
+            "planning_accuracy": {},
+            "scheduling_accuracy": {},
+            "improvement_trends": {}
+        }
+
+
+@router.get("/experiments")
+async def list_experiments(request: Request):
+    """List all A/B test experiments."""
+    try:
+        system = get_executive_system(request)
+        
+        # Check if experiment_manager is available
+        if not hasattr(system, 'experiment_manager') or system.experiment_manager is None:
+            return {
+                "status": "success",
+                "experiments": [],
+                "message": "No experiment manager configured"
+            }
+        
+        manager = system.experiment_manager
+        experiments = []
+        
+        # Get all experiments
+        if hasattr(manager, 'experiments'):
+            for exp_id, exp in manager.experiments.items():
+                exp_data = {
+                    "experiment_id": exp_id,
+                    "name": getattr(exp, 'name', exp_id),
+                    "status": getattr(exp, 'status', 'unknown'),
+                    "strategies": getattr(exp, 'strategies', []),
+                    "assignment_method": str(getattr(exp, 'assignment_method', 'random')),
+                    "total_assignments": len(getattr(exp, 'assignments', {}))
+                }
+                
+                # Get analysis if available
+                try:
+                    analysis = manager.analyze_experiment(exp_id)
+                    exp_data["recommended_strategy"] = analysis.get("recommended_strategy")
+                    exp_data["confidence"] = analysis.get("confidence")
+                    exp_data["strategy_results"] = analysis.get("strategy_results", {})
+                except Exception:
+                    pass
+                
+                experiments.append(exp_data)
+        
+        return {
+            "status": "success",
+            "experiments": experiments
+        }
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to list experiments: {str(e)}",
+            "experiments": []
+        }
+
+
+@router.get("/outcomes")
+async def list_outcomes(request: Request, limit: int = 20):
+    """List recent execution outcomes."""
+    try:
+        system = get_executive_system(request)
+        
+        # Check if outcome_tracker is available
+        if not hasattr(system, 'outcome_tracker') or system.outcome_tracker is None:
+            return {
+                "status": "success",
+                "outcomes": [],
+                "message": "No outcome tracker configured"
+            }
+        
+        tracker = system.outcome_tracker
+        outcomes = []
+        
+        # Get recent outcomes
+        if hasattr(tracker, 'outcomes'):
+            recent = list(tracker.outcomes.values())[-limit:]
+            
+            for outcome in recent:
+                outcome_data = {
+                    "goal_id": getattr(outcome, 'goal_id', 'unknown'),
+                    "goal_title": getattr(outcome, 'goal_title', 'Unknown Goal'),
+                    "success": getattr(outcome, 'actual_success', getattr(outcome, 'success', False)),
+                    "outcome_score": getattr(outcome, 'outcome_score', 0.0),
+                    "strategy": getattr(outcome, 'strategy', 'unknown'),
+                    "plan_length": getattr(outcome, 'plan_length', 0),
+                    "execution_time": str(getattr(outcome, 'execution_time', 'N/A')),
+                    "accuracy_metrics": getattr(outcome, 'accuracy_metrics', {}),
+                    "deviations": getattr(outcome, 'deviations', [])
+                }
+                outcomes.append(outcome_data)
+        
+        return {
+            "status": "success",
+            "outcomes": outcomes
+        }
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to list outcomes: {str(e)}",
+            "outcomes": []
+        }
+
+

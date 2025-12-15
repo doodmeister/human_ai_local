@@ -8,10 +8,12 @@ import sys
 import os
 import asyncio
 import torch
+import pytest
 sys.path.insert(0, os.path.abspath('.'))
 
 from src.core.cognitive_agent import CognitiveAgent
 
+@pytest.mark.asyncio
 async def test_dpad_network_standalone():
     """Test the DPAD network in isolation"""
     print("\n🧠 TESTING DPAD NETWORK STANDALONE")
@@ -67,6 +69,7 @@ async def test_dpad_network_standalone():
         traceback.print_exc()
         return False
 
+@pytest.mark.asyncio
 async def test_neural_integration_manager():
     """Test the neural integration manager"""
     print("\n🔗 TESTING NEURAL INTEGRATION MANAGER")
@@ -124,6 +127,7 @@ async def test_neural_integration_manager():
         traceback.print_exc()
         return False
 
+@pytest.mark.asyncio
 async def test_cognitive_agent_dpad_integration():
     """Test DPAD integration within the cognitive agent"""
     print("\n🤖 TESTING COGNITIVE AGENT DPAD INTEGRATION")
@@ -199,6 +203,7 @@ async def test_cognitive_agent_dpad_integration():
         traceback.print_exc()
         return False
 
+@pytest.mark.asyncio
 async def test_dream_neural_replay():
     """Test neural replay during dream cycles"""
     print("\n😴 TESTING DREAM NEURAL REPLAY")

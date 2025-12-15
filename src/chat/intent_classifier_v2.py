@@ -92,8 +92,18 @@ class IntentClassifierV2:
         },
         'goal_query': {
             'patterns': [
-                # Explicit goal query
-                (r"(?:show|get|list)\s+(?:my\s+)?goals?(?:\?|$)", 0.95, 1.2),
+                # Explicit goal query - LIST ALL
+                (r"(?:show|get|list|what are)\s+(?:me\s+)?(?:my\s+)?(?:all\s+)?goals?(?:\?|$)", 0.95, 1.2),
+                (r"what(?:'s| is| are)\s+(?:my|all)\s+(?:current\s+)?goals?(?:\?|$)", 0.95, 1.2),
+                (r"check\s+(?:my|all)\s+goals?(?:\?|$)", 0.95, 1.2),
+                (r"(?:what|show)\s+am\s+i\s+working\s+on(?:\?|$)", 0.90, 1.1),
+                (r"do\s+i\s+have\s+any\s+(?:active\s+)?goals?(?:\?|$)", 0.90, 1.1),
+                # Execution progress queries
+                (r"what(?:'s| is)\s+(?:currently\s+)?(?:executing|running|in progress)(?:\?|$)", 0.95, 1.2),
+                (r"(?:show|what is)\s+(?:execution|current|running)\s+progress(?:\?|$)", 0.95, 1.2),
+                (r"what(?:'s| is)\s+(?:happening|being done|being executed)\s+(?:right now|currently|now)(?:\?|$)", 0.95, 1.2),
+                (r"(?:what|which)\s+goals?\s+(?:are|is)\s+(?:being\s+)?(?:executed|running)(?:\?|$)", 0.90, 1.1),
+                (r"(?:show|display|list)\s+(?:active\s+)?executions?(?:\?|$)", 0.90, 1.1),
                 # "How's my X goal?"
                 (r"(?:how['']s|what['']s the status of|status of|update on)\s+(?:my|the)\s+(.+?)(?:\s+goal)?(?:\?|$)", 0.90, 1.1),
                 # "Am I making progress on X?"
@@ -105,8 +115,27 @@ class IntentClassifierV2:
                 # "Did I finish X?"
                 (r"(?:did i|have i)\s+(?:finish|complete|done)\s+(.+?)(?:\?|$)", 0.85, 1.0),
             ],
-            'keywords': ['status', 'progress', 'update', 'check', 'goal', 'how', 'doing'],
-            'boost_words': ['finished', 'completed', 'done', 'ready'],
+            'keywords': ['status', 'progress', 'update', 'check', 'goal', 'goals', 'how', 'doing', 'working', 'executing', 'running', 'execution'],
+            'boost_words': ['finished', 'completed', 'done', 'ready', 'all', 'current', 'active', 'executing', 'running'],
+        },
+        'goal_update': {
+            'patterns': [
+                # Mark goal complete/done
+                (r"(?:mark|set)\s+(?:my\s+)?(?:the\s+)?(.+?)\s+(?:goal|task\s+)?(?:as\s+)?(?:complete|done|finished)(?:\.|$)", 0.95, 1.2),
+                (r"(?:i['']ve|i have)\s+(?:finished|completed|done)\s+(?:my\s+)?(?:the\s+)?(.+?)(?:\s+(?:goal|task))?(?:\.|$)", 0.90, 1.1),
+                (r"(.+?)\s+(?:goal|task\s+)?is\s+(?:complete|done|finished)(?:\.|$)", 0.85, 1.0),
+                # Cancel/delete goal
+                (r"(?:cancel|delete|remove|drop)\s+(?:my\s+)?(?:the\s+)?(.+?)(?:\s+(?:goal|task))?(?:\.|$)", 0.95, 1.2),
+                (r"(?:i don['']t need|forget about|nevermind|skip)\s+(?:the\s+)?(.+?)(?:\s+(?:goal|task))?(?:\.|$)", 0.85, 1.0),
+                # Change priority
+                (r"(?:change|set|update|make)\s+(?:my\s+)?(?:the\s+)?(.+?)\s+(?:(?:goal|task)\s+)?(?:priority\s+)?(?:to\s+)?(high|medium|low)(?:\.|$)", 0.90, 1.1),
+                (r"(?:make|set)\s+(.+?)\s+(?:a\s+)?(high|medium|low)\s+priority(?:\.|$)", 0.85, 1.0),
+                # Change deadline
+                (r"(?:change|move|extend|update)\s+(?:my\s+)?(?:the\s+)?(.+?)\s+(?:(?:goal|task)\s+)?deadline\s+(?:to\s+)?(.+?)(?:\.|$)", 0.90, 1.1),
+                (r"(?:extend|push back|postpone)\s+(?:my\s+)?(?:the\s+)?(.+?)(?:\s+(?:goal|task))?\s+(?:to|until)\s+(.+?)(?:\.|$)", 0.85, 1.0),
+            ],
+            'keywords': ['complete', 'done', 'finished', 'cancel', 'delete', 'remove', 'drop', 'priority', 'deadline', 'extend', 'postpone', 'skip'],
+            'boost_words': ['urgent', 'high', 'low', 'medium', 'nevermind', 'forget'],
         },
         'memory_query': {
             'patterns': [
@@ -349,6 +378,33 @@ class IntentClassifierV2:
             
             # Detect specific query type
             entities['query_subtype'] = self._detect_goal_query_subtype(message)
+        
+        elif intent_type == 'goal_update':
+            groups = match.groups()
+            # Extract goal reference (first group usually)
+            if groups and groups[0]:
+                entities['goal_reference'] = groups[0].strip()
+            
+            # Detect update action type
+            entities['update_action'] = self._detect_goal_update_action(message)
+            
+            # Extract new values based on action type
+            message_lower = message.lower()
+            
+            # Priority change - extract new priority
+            if 'priority' in message_lower or any(p in message_lower for p in ['high', 'medium', 'low']):
+                if 'high' in message_lower:
+                    entities['new_priority'] = 'high'
+                elif 'low' in message_lower:
+                    entities['new_priority'] = 'low'
+                else:
+                    entities['new_priority'] = 'medium'
+            
+            # Deadline change - extract new deadline
+            if len(groups) >= 2 and groups[1]:
+                deadline_str = groups[1].strip()
+                if deadline_str and deadline_str.lower() not in ['high', 'medium', 'low', 'done', 'complete', 'finished']:
+                    entities['new_deadline'] = deadline_str
         
         elif intent_type == 'memory_query':
             groups = match.groups()
@@ -605,6 +661,25 @@ class IntentClassifierV2:
         """Detect specific type of goal query"""
         message_lower = message.lower()
         
+        # List all goals - no specific goal mentioned
+        list_all_patterns = [
+            'show my goals', 'show me my goals', 'list my goals', 'list goals',
+            'what are my goals', 'what goals', 'my goals', 'all goals',
+            'check my goals', 'check goals', 'what am i working on',
+            'do i have any goals', 'current goals', 'active goals'
+        ]
+        if any(pattern in message_lower for pattern in list_all_patterns):
+            return 'list_all'
+        
+        # Execution progress queries
+        execution_patterns = [
+            'execution', 'executing', 'running', 'in progress',
+            'what is happening', "what's happening", 'currently doing',
+            'right now', 'being done', 'being executed'
+        ]
+        if any(pattern in message_lower for pattern in execution_patterns):
+            return 'execution_progress'
+        
         if any(word in message_lower for word in ['finished', 'complete', 'done']):
             return 'completion_status'
         elif any(word in message_lower for word in ['progress', 'how far', 'percentage']):
@@ -615,6 +690,31 @@ class IntentClassifierV2:
             return 'timeline'
         
         return 'general'
+    
+    def _detect_goal_update_action(self, message: str) -> str:
+        """Detect the type of goal update action"""
+        message_lower = message.lower()
+        
+        # Complete/done
+        if any(word in message_lower for word in ['complete', 'done', 'finished', 'completed']):
+            return 'complete'
+        
+        # Cancel/delete
+        if any(word in message_lower for word in ['cancel', 'delete', 'remove', 'forget', 'nevermind', 'drop', 'skip']):
+            return 'cancel'
+        
+        # Priority change
+        if 'priority' in message_lower or any(
+            f'{p} priority' in message_lower or f'priority {p}' in message_lower 
+            for p in ['high', 'medium', 'low']
+        ):
+            return 'priority_change'
+        
+        # Deadline change
+        if any(word in message_lower for word in ['deadline', 'extend', 'postpone', 'push back', 'move']):
+            return 'deadline_change'
+        
+        return 'unknown'
     
     def _detect_detail_level(self, message: str) -> str:
         """Detect desired detail level"""

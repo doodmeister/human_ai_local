@@ -2,9 +2,11 @@
 Test memory system integration with cognitive agent
 """
 import asyncio
+import pytest
 from src.core.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 
+@pytest.mark.asyncio
 async def test_memory_integration():
     """Test memory system functionality with the cognitive agent"""
     print("🧠 Testing memory integration with cognitive agent...")

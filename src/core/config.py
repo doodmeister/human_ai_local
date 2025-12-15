@@ -201,6 +201,56 @@ class CognitiveConfig:
             config.processing.embedding_model = embedding_model
             
         return config
+    
+    def validate(self) -> list[str]:
+        """
+        Validate configuration and return list of warnings/errors.
+        
+        Returns:
+            List of validation warning messages (empty if all valid)
+        """
+        warnings = []
+        
+        # Memory config validation
+        if self.memory.stm_capacity < 3 or self.memory.stm_capacity > 20:
+            warnings.append(f"STM capacity {self.memory.stm_capacity} outside recommended range (3-20)")
+        
+        if not 0.0 <= self.memory.stm_decay_threshold <= 1.0:
+            warnings.append(f"STM decay threshold {self.memory.stm_decay_threshold} must be 0.0-1.0")
+        
+        if not 0.0 <= self.memory.ltm_similarity_threshold <= 1.0:
+            warnings.append(f"LTM similarity threshold {self.memory.ltm_similarity_threshold} must be 0.0-1.0")
+        
+        # Attention config validation
+        if not 0.0 <= self.attention.salience_threshold <= 1.0:
+            warnings.append(f"Salience threshold {self.attention.salience_threshold} must be 0.0-1.0")
+        
+        if self.attention.max_attention_items < 1:
+            warnings.append(f"Max attention items must be >= 1")
+        
+        # Agent config validation
+        if self.agent.max_active_goals < 1:
+            warnings.append(f"Max active goals must be >= 1")
+        
+        # LLM config validation
+        if self.llm.provider not in ("openai", "ollama"):
+            warnings.append(f"Unknown LLM provider: {self.llm.provider}")
+        
+        if self.llm.provider == "openai" and not self.llm.openai_api_key:
+            warnings.append("OpenAI API key not set (OPENAI_API_KEY)")
+        
+        if self.llm.temperature < 0.0 or self.llm.temperature > 2.0:
+            warnings.append(f"LLM temperature {self.llm.temperature} outside typical range (0.0-2.0)")
+        
+        # Chat config validation
+        if self.chat.max_context_items < 1:
+            warnings.append(f"Max context items must be >= 1")
+        
+        if not 0.0 <= self.chat.salience_threshold <= 1.0:
+            warnings.append(f"Chat salience threshold {self.chat.salience_threshold} must be 0.0-1.0")
+        
+        return warnings
+
 
 # Global configuration instance
 config = CognitiveConfig.from_env()
@@ -217,4 +267,14 @@ def get_chat_config() -> ChatConfig:
         return getattr(global_config, "chat", ChatConfig())
     except Exception:
         return ChatConfig()
-        return ChatConfig()
+
+
+def validate_config() -> tuple[bool, list[str]]:
+    """
+    Validate the global configuration.
+    
+    Returns:
+        Tuple of (is_valid, list of warnings)
+    """
+    warnings = config.validate()
+    return len(warnings) == 0, warnings

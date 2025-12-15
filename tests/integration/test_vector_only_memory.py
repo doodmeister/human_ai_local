@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 # Import the vector-only classes
 from src.memory.ltm.vector_ltm import VectorLongTermMemory
-from src.memory.stm.vector_stm import VectorShortTermMemory, MemoryItem
+from src.memory.stm.vector_stm import VectorShortTermMemory, MemoryItem, STMConfiguration
 from datetime import datetime
 
 class TestVectorOnlyMemory:
@@ -99,10 +99,11 @@ class TestVectorOnlyMemory:
     
     def test_stm_vector_only_operations(self):
         """Test STM vector-only store, retrieve, search, remove"""
-        stm = VectorShortTermMemory(
+        config = STMConfiguration(
             chroma_persist_dir=str(self.stm_chroma_path),
             collection_name="test_stm"
         )
+        stm = VectorShortTermMemory(config=config)
         
         # Create test memory item
         memory_item = MemoryItem(
@@ -210,11 +211,12 @@ class TestVectorOnlyMemory:
     
     def test_stm_decay_and_cleanup(self):
         """Test STM decay mechanisms"""
-        stm = VectorShortTermMemory(
+        config = STMConfiguration(
             chroma_persist_dir=str(self.stm_chroma_path),
             collection_name="test_stm_decay",
             max_decay_hours=1
         )
+        stm = VectorShortTermMemory(config=config)
         
         # Add multiple memories
         for i in range(3):

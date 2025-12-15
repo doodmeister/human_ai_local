@@ -4,11 +4,13 @@ Simple async test to debug the hanging issue
 import asyncio
 import sys
 import os
+import pytest
 sys.path.insert(0, os.path.abspath('.'))
 
 from src.core.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 
+@pytest.mark.asyncio
 async def test_process_input_step_by_step():
     """Test process_input method step by step"""
     print("🔍 Testing process_input step by step...")
