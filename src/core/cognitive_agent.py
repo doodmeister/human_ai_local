@@ -259,21 +259,43 @@ class CognitiveAgent:
             # Convert to expected format
             context_memories = []
             for memory_obj, relevance, source in memories:
-                if source == "stm":
+                source_key = str(source).lower()
+                if source_key == "stm":
                     context_memories.append({
-                        "id": memory_obj.id,
-                        "content": memory_obj.content,
+                        "id": getattr(memory_obj, "id", None),
+                        "content": getattr(memory_obj, "content", ""),
                         "source": "STM",
                         "relevance": relevance,
-                        "timestamp": memory_obj.encoding_time
+                        "timestamp": getattr(memory_obj, "encoding_time", None),
                     })
-                elif source == "ltm":
+                elif source_key == "ltm":
+                    if isinstance(memory_obj, dict):
+                        mem_id = memory_obj.get("id") or memory_obj.get("memory_id")
+                        mem_content = memory_obj.get("content", "")
+                        mem_timestamp = memory_obj.get("encoding_time")
+                    else:
+                        mem_id = getattr(memory_obj, "id", None)
+                        mem_content = getattr(memory_obj, "content", "")
+                        mem_timestamp = getattr(memory_obj, "encoding_time", None)
+
                     context_memories.append({
-                        "id": memory_obj.id,
-                        "content": memory_obj.content,
+                        "id": mem_id,
+                        "content": mem_content,
                         "source": "LTM",
                         "relevance": relevance,
-                        "timestamp": memory_obj.encoding_time                    })
+                        "timestamp": mem_timestamp,
+                    })
+                elif source_key == "episodic":
+                    mem_content = getattr(memory_obj, "detailed_content", None)
+                    if mem_content is None:
+                        mem_content = getattr(memory_obj, "content", "")
+                    context_memories.append({
+                        "id": getattr(memory_obj, "id", None),
+                        "content": str(mem_content),
+                        "source": "Episodic",
+                        "relevance": relevance,
+                        "timestamp": getattr(memory_obj, "encoding_time", None),
+                    })
             
             return context_memories
             

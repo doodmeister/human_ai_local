@@ -1,5 +1,9 @@
 # Backend API Completion Summary
 
+> **Status note (Jan 2026):** For current priorities and P1 execution, see:
+> - Current state: [nextsteps.md](../nextsteps.md)
+> - P1 plan: [docs/P1_ACTION_PLAN.md](P1_ACTION_PLAN.md)
+
 **Date**: January 2025  
 **Status**: ✅ COMPLETE - All ExecutiveSystem functionality exposed via REST API  
 **Location**: `src/interfaces/api/executive_api.py`

@@ -1,5 +1,7 @@
 # Human-AI Cognition Framework: Actionable Roadmap
 
+**Execution tracking:** For the current P1 workstream (observability + reliability), see [docs/P1_ACTION_PLAN.md](P1_ACTION_PLAN.md). For current system status, see [nextsteps.md](../nextsteps.md).
+
 ## 1. Mid-Term Goals (Next 3–6 Months)
 
 ### Episodic & Semantic Memory Expansion

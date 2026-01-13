@@ -1,11 +1,15 @@
-"""
-Simplified George API for testing - delayed agent initialization
+"""Simplified George API for testing - delayed agent initialization.
+
+P1 Observability:
+- Optional Sentry error reporting via `SENTRY_DSN`
+- Optional Prometheus `/metrics` via `PROMETHEUS_ENABLED=1`
 """
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+import os
 import sys
 import logging
 import traceback
@@ -41,11 +45,95 @@ app.add_middleware(
 )
 
 
+def _get_bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _setup_sentry_if_configured(target_app: FastAPI) -> None:
+    dsn = os.getenv("SENTRY_DSN")
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
+
+        traces_sample_rate = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0"))
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
+            release=os.getenv("SENTRY_RELEASE"),
+            traces_sample_rate=traces_sample_rate,
+        )
+        target_app.add_middleware(SentryAsgiMiddleware)
+        logger.info("Sentry enabled")
+    except Exception as exc:
+        logger.warning(f"Sentry disabled (init failed): {type(exc).__name__}: {exc}")
+
+
+def _setup_prometheus_if_configured(target_app: FastAPI) -> None:
+    if not _get_bool_env("PROMETHEUS_ENABLED", default=False):
+        return
+    try:
+        from prometheus_client import Counter, Histogram, generate_latest
+        from prometheus_client import CONTENT_TYPE_LATEST
+
+        request_count = Counter(
+            "http_requests_total",
+            "Total HTTP requests",
+            ["method", "path", "status"],
+        )
+        request_latency = Histogram(
+            "http_request_duration_seconds",
+            "HTTP request duration (seconds)",
+            ["method", "path"],
+        )
+
+        @target_app.middleware("http")
+        async def prometheus_middleware(request: Request, call_next):
+            start_time = datetime.now()
+            response = await call_next(request)
+
+            # Prefer route template to avoid high-cardinality labels.
+            route = request.scope.get("route")
+            path = getattr(route, "path", request.url.path)
+            duration_s = (datetime.now() - start_time).total_seconds()
+
+            request_count.labels(request.method, path, str(response.status_code)).inc()
+            request_latency.labels(request.method, path).observe(duration_s)
+            return response
+
+        @target_app.get("/metrics")
+        async def metrics():
+            return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+        logger.info("Prometheus /metrics enabled")
+    except Exception as exc:
+        logger.warning(
+            f"Prometheus disabled (init failed): {type(exc).__name__}: {exc}"
+        )
+
+
+# Optional observability integrations (env-driven)
+_setup_sentry_if_configured(app)
+_setup_prometheus_if_configured(app)
+
+
 # Global error handler for unhandled exceptions
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Handle all unhandled exceptions gracefully."""
     error_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+    # Report to Sentry if enabled.
+    try:
+        import sentry_sdk
+
+        sentry_sdk.capture_exception(exc)
+    except Exception:
+        pass
     
     # Log the full traceback
     logger.error(
@@ -77,8 +165,8 @@ async def log_requests(request: Request, call_next):
     # Calculate duration
     duration_ms = (datetime.now() - start_time).total_seconds() * 1000
     
-    # Log request (skip health checks to reduce noise)
-    if request.url.path != "/health":
+    # Log request (skip health/metrics checks to reduce noise)
+    if request.url.path not in {"/health", "/metrics"}:
         logger.info(
             f"{request.method} {request.url.path} - "
             f"Status: {response.status_code} - "

@@ -178,6 +178,16 @@ fastapi>=0.104.0
 # ASGI Server for FastAPI
 uvicorn>=0.24.0
 
+# ========================================
+# OBSERVABILITY (P1)
+# ========================================
+
+# Error tracking (optional; enabled via SENTRY_DSN)
+sentry-sdk>=2.0.0
+
+# Metrics endpoint (optional; enabled via PROMETHEUS_ENABLED=1)
+prometheus-client>=0.20.0
+
 # WebSocket Support
 # websockets>=12.0  # Uncomment if adding real-time features
 

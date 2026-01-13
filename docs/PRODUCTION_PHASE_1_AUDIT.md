@@ -1,5 +1,12 @@
 # Production Phase 1: George Interface Audit
 
+> **Historical document:** This audit reflects the state as of Nov 2025 and may be out of date.
+> 
+> Canonical references:
+> - Current state: [nextsteps.md](../nextsteps.md)
+> - P1 plan (Jan 2026): [docs/P1_ACTION_PLAN.md](P1_ACTION_PLAN.md)
+> - Long-term roadmap: [docs/roadmap.md](roadmap.md)
+
 **Date**: November 11, 2025  
 **Status**: Audit Complete ✅  
 **Auditor**: AI Assistant

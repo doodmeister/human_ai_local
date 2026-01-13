@@ -2,6 +2,8 @@
 
 **Date:** December 15, 2025
 
+**P1 Tracking (Jan 2026):** See [docs/P1_ACTION_PLAN.md](docs/P1_ACTION_PLAN.md) for the consolidated P1 plan (observability + skipped tests + doc consolidation).
+
 ---
 
 ## 📊 Project Health Summary
@@ -196,6 +198,10 @@ python -c "import sentence_transformers; print('OK')"  # Works
 | Add Sentry error tracking | 4h | P1 |
 | Add Prometheus metrics | 6h | P1 |
 | Add distributed tracing | 4h | P2 |
+
+**Status (Jan 13, 2026):**
+- Sentry integration implemented (optional; enabled via `SENTRY_DSN`).
+- Prometheus `GET /metrics` implemented (optional; enabled via `PROMETHEUS_ENABLED=1`).
 
 ### Phase 8: Deployment (2 weeks)
 | Task | Effort | Priority |

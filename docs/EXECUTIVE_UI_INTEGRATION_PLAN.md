@@ -1,5 +1,10 @@
 # Executive Function UI Integration Plan
 
+> **Historical plan:** This document describes a Nov 2025 integration plan. For current status and priorities, use:
+> - Current state: [nextsteps.md](../nextsteps.md)
+> - P1 plan (Jan 2026): [docs/P1_ACTION_PLAN.md](P1_ACTION_PLAN.md)
+> - Long-term roadmap: [docs/roadmap.md](roadmap.md)
+
 **Date**: November 20, 2025  
 **Goal**: Bridge the 90% gap between backend executive capabilities and UI exposure  
 **Duration**: 6-8 weeks  
