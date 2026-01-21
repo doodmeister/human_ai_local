@@ -1,0 +1,67 @@
+<svg width="1100" height="1500" viewBox="0 0 1100 1500" xmlns="http://www.w3.org/2000/svg" font-family="Inter, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#333" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="550" y="40" text-anchor="middle" font-size="28" font-weight="bold">Human‑AI Local — Cognitive Architecture</text>
+  <text x="550" y="70" text-anchor="middle" font-size="14" fill="#555">Sense → Attend → Recall → Decide → Act → Learn</text>
+
+  <!-- Box helper -->
+  <!-- Interfaces -->
+  <rect x="325" y="100" width="450" height="90" rx="12" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2" />
+  <text x="550" y="130" text-anchor="middle" font-size="16" font-weight="bold">INTERFACES</text>
+  <text x="550" y="155" text-anchor="middle" font-size="13">CLI · API · Streamlit · Chat UI</text>
+
+  <!-- Chat -->
+  <rect x="325" y="230" width="450" height="110" rx="12" fill="#e1d5e7" stroke="#9673a6" stroke-width="2" />
+  <text x="550" y="260" text-anchor="middle" font-size="16" font-weight="bold">CHAT & ORCHESTRATION</text>
+  <text x="550" y="285" text-anchor="middle" font-size="13">Intent Detection · Context Building</text>
+
+  <!-- Perception -->
+  <rect x="325" y="380" width="450" height="100" rx="12" fill="#fff2cc" stroke="#d6b656" stroke-width="2" />
+  <text x="550" y="410" text-anchor="middle" font-size="16" font-weight="bold">PERCEPTION & ATTENTION</text>
+  <text x="550" y="435" text-anchor="middle" font-size="13">Sensory Processing · Salience · Emotion</text>
+
+  <!-- Executive -->
+  <rect x="325" y="520" width="450" height="130" rx="12" fill="#f8cecc" stroke="#b85450" stroke-width="2" />
+  <text x="550" y="550" text-anchor="middle" font-size="16" font-weight="bold">EXECUTIVE CONTROL CORE</text>
+  <text x="550" y="575" text-anchor="middle" font-size="13">Goals · Decisions · Planning</text>
+  <text x="550" y="595" text-anchor="middle" font-size="12">GOAP · Hierarchical Planners</text>
+
+  <!-- Memory -->
+  <rect x="325" y="690" width="450" height="140" rx="12" fill="#d5e8d4" stroke="#82b366" stroke-width="2" />
+  <text x="550" y="720" text-anchor="middle" font-size="16" font-weight="bold">MEMORY SYSTEM</text>
+  <text x="550" y="745" text-anchor="middle" font-size="13">STM · Episodic · Semantic</text>
+  <text x="550" y="765" text-anchor="middle" font-size="13">Procedural · Prospective · LTM</text>
+
+  <!-- Learning -->
+  <rect x="325" y="870" width="450" height="120" rx="12" fill="#ffe6cc" stroke="#d79b00" stroke-width="2" />
+  <text x="550" y="900" text-anchor="middle" font-size="16" font-weight="bold">LEARNING & CONSOLIDATION</text>
+  <text x="550" y="925" text-anchor="middle" font-size="13">Dream Replay · Abstraction · Decay</text>
+
+  <!-- LLM -->
+  <rect x="325" y="1030" width="450" height="110" rx="12" fill="#f5f5f5" stroke="#666" stroke-width="2" />
+  <text x="550" y="1060" text-anchor="middle" font-size="16" font-weight="bold">LANGUAGE / LLM LAYER</text>
+  <text x="550" y="1085" text-anchor="middle" font-size="13">Reasoning · Natural Language</text>
+
+  <!-- Arrows -->
+  <line x1="550" y1="190" x2="550" y2="230" stroke="#333" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="550" y1="340" x2="550" y2="380" stroke="#333" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="550" y1="480" x2="550" y2="520" stroke="#333" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="550" y1="650" x2="550" y2="690" stroke="#333" stroke-width="2" marker-end="url(#arrow)" />
+  <line x1="550" y1="830" x2="550" y2="870" stroke="#333" stroke-width="2" marker-end="url(#arrow)" />
+
+  <!-- Feedback loops -->
+  <path d="M 780 930 C 900 930, 900 760, 780 760" fill="none" stroke="#666" stroke-width="2" stroke-dasharray="6,6" marker-end="url(#arrow)" />
+  <text x="910" y="845" font-size="12" fill="#555">Consolidation</text>
+
+  <path d="M 780 760 C 900 760, 900 590, 780 590" fill="none" stroke="#666" stroke-width="2" stroke-dasharray="6,6" marker-end="url(#arrow)" />
+  <text x="910" y="675" font-size="12" fill="#555">Recall</text>
+
+  <path d="M 780 590 C 900 590, 900 1080, 780 1080" fill="none" stroke="#666" stroke-width="2" stroke-dasharray="6,6" marker-end="url(#arrow)" />
+  <text x="910" y="900" font-size="12" fill="#555">Language Mediation</text>
+
+</svg>
