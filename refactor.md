@@ -241,4 +241,4 @@ Concrete execution checklist (next)
 	- Prefer `from src.memory import MemorySystem, MemorySystemConfig`.
 	- Prefer `from src.cognition.attention.attention_manager import get_attention_manager` for allocation/scoring.
 
-- [ ] Decide a cutoff for remaining deprecated compatibility packages (notably `src.chat` and `src.processing`) and remove them in one sweep after confirming there are no in-repo imports.
+- [x] Decide a cutoff for remaining deprecated compatibility packages (notably `src.chat` and `src.processing`) and remove them in one sweep after confirming there are no in-repo imports.
