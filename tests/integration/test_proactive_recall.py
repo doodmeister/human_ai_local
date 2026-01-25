@@ -7,7 +7,7 @@ import os
 import gc
 import time
 
-from src.core.cognitive_agent import CognitiveAgent
+from src.orchestration.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 
 class TestProactiveRecall(unittest.TestCase):
@@ -47,7 +47,7 @@ class TestProactiveRecall(unittest.TestCase):
                 # Mark for later cleanup or ignore
                 pass
 
-    @patch('src.core.cognitive_agent.CognitiveAgent._generate_response', new_callable=AsyncMock)
+    @patch('src.orchestration.cognitive_agent.CognitiveAgent._generate_response', new_callable=AsyncMock)
     def test_proactive_recall_retrieves_contextual_memory(self, mock_generate_response):
         """Test that the agent can proactively recall a memory based on conversation context."""
         # Arrange

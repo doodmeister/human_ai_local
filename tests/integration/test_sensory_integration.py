@@ -16,7 +16,7 @@ async def test_sensory_integration():
     try:
         # Test imports
         print("1. Testing imports...")
-        from src.core.cognitive_agent import CognitiveAgent
+        from src.orchestration.cognitive_agent import CognitiveAgent
         from src.core.config import CognitiveConfig
         print("All components imported successfully")
         
@@ -140,7 +140,7 @@ async def test_attention_sensory_interaction():
     print("\nTesting Attention-Sensory Interaction...")
     
     try:
-        from src.core.cognitive_agent import CognitiveAgent
+        from src.orchestration.cognitive_agent import CognitiveAgent
         
         agent = CognitiveAgent()
         

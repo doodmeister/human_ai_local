@@ -14,7 +14,6 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Any, Dict, Optional, Union
 from datetime import datetime
-from src.core.cognitive_agent import CognitiveAgent
 
 router = APIRouter()
 
@@ -67,7 +66,7 @@ def proactive_recall(req: ProactiveRecallRequest, request: Request):
 # Create FastAPI app for testing purposes (must be at end of file)
 
 # Helper to get the memory system
-def get_system(system: str, agent: CognitiveAgent):
+def get_system(system: str, agent: Any):
     SYSTEM_MAP = {
         "stm": lambda: agent.memory.stm,
         "ltm": lambda: agent.memory.ltm,
@@ -83,7 +82,6 @@ def get_system(system: str, agent: CognitiveAgent):
 @router.post("/memory/{system}/store")
 def store_memory(system: str, req: StoreMemoryRequest, request: Request):
     import uuid
-    from datetime import datetime
     agent = request.app.state.agent
     memsys = get_system(system, agent)
     

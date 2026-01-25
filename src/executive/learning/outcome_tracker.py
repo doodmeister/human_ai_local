@@ -16,8 +16,7 @@ import logging
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
-from collections import defaultdict
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .feature_extractor import FeatureExtractor, FeatureVector

@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Body, Request, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 import sys
 import os
 
@@ -95,8 +96,6 @@ async def list_memories(system: str, request: Request):
 
 
 # Trigger a dream state cycle
-from fastapi import Body
-from typing import Optional
 
 class DreamRequest(BaseModel):
     cycle_type: Optional[str] = "deep"  # 'light', 'deep', or 'rem'
@@ -225,8 +224,6 @@ async def take_cognitive_break(break_request: CognitiveBreakRequest, request: Re
     Take a cognitive break to reduce fatigue and reset attention.
     """
     try:
-        agent = request.app.state.agent
-        
         # Simulate cognitive break effects
         duration = break_request.duration_minutes or 1.0
         cognitive_load_reduction = min(0.3, duration * 0.1)
@@ -250,8 +247,6 @@ async def trigger_memory_consolidation(request: Request):
     Trigger dream-state memory consolidation.
     """
     try:
-        agent = request.app.state.agent
-        
         # Simulate consolidation events
         consolidation_events = [
             "Transferred 3 memories from STM to LTM",

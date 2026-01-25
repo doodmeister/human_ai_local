@@ -76,7 +76,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "cognitive-ai=src.interfaces.cli:main",
+            "cognitive-ai=main:main",
         ],
     },
     include_package_data=True,

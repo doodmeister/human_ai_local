@@ -1,14 +1,9 @@
 """
 Memory systems for the cognitive architecture
 """
-from .memory_system import MemorySystem
-from .stm import MemoryItem, VectorShortTermMemory
-from .ltm import VectorLongTermMemory, VectorSearchResult
+from .memory_system import MemorySystem, MemorySystemConfig
 
 __all__ = [
     "MemorySystem",
-    "VectorShortTermMemory", 
-    "MemoryItem", 
-    "VectorLongTermMemory",
-    "VectorSearchResult"
+    "MemorySystemConfig",
 ]

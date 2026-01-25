@@ -1,5 +1,5 @@
 from src.memory.procedural.procedural_memory import ProceduralMemory
-from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration
+from src.memory.stm import VectorShortTermMemory, STMConfiguration
 from src.memory.ltm.vector_ltm import VectorLongTermMemory
 import tempfile
 import os

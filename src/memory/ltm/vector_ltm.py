@@ -719,7 +719,29 @@ class VectorLongTermMemory(BaseMemorySystem):
         """Consolidate items from STM into LTM (vector DB only)"""
         consolidated = 0
         for item in stm_items:
-            if getattr(item, "importance", 0.0) > 0.6 or getattr(item, "access_count", 0) > 2:
+            # Phase 7: utility-based learning law.
+            # Benefit: importance + access evidence (retrieval success proxy).
+            # Cost: fixed small write cost.
+            try:
+                from src.learning.learning_law import clamp01, utility_score
+            except Exception:  # pragma: no cover
+                def clamp01(x: Any) -> float:  # type: ignore[no-redef]
+                    try:
+                        return float(x)
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                def utility_score(*, benefit: Any, cost: Any, benefit_weight: float = 1.0, cost_weight: float = 1.0) -> float:  # type: ignore[no-redef]
+                    return (benefit_weight * clamp01(benefit)) - (cost_weight * clamp01(cost))
+
+            imp = float(getattr(item, "importance", 0.0) or 0.0)
+            access = float(getattr(item, "access_count", 0) or 0.0)
+            benefit = clamp01(max(imp, min(1.0, access / 3.0)))
+            cost = 0.10
+            u = utility_score(benefit=benefit, cost=cost)
+
+            # Preserve prior thresholds by using a conservative utility gate.
+            if u >= 0.50:
                 item_id = getattr(item, "id", None)
                 item_content = getattr(item, "content", None)
                 if item_id and item_content:

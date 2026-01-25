@@ -25,7 +25,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 
@@ -43,18 +43,41 @@ except ImportError:
 
 try:
     import chromadb
-    from chromadb.config import Settings
-    from chromadb.api.types import Collection
+    try:
+        from chromadb.config import Settings
+    except Exception:  # pragma: no cover
+        Settings = None
     HAS_CHROMADB = True
 except ImportError:
     HAS_CHROMADB = False
     chromadb = None
     Settings = None
-    Collection = None
 
-# Local imports
-# MemoryItem defined in vector_stm module (legacy consolidation)
-from .vector_stm import MemoryItem
+# Local types
+
+
+@dataclass
+class MemoryItem:
+    """Represents a memory item with metadata."""
+
+    id: str
+    content: str
+    encoding_time: datetime
+    last_access: datetime
+    access_count: int = 0
+    importance: float = 0.5
+    attention_score: float = 0.0
+    emotional_valence: float = 0.0
+    decay_rate: float = 0.1
+    associations: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("Memory ID cannot be empty")
+        if not isinstance(self.encoding_time, datetime):
+            raise ValueError("Encoding time must be a datetime object")
+        if not isinstance(self.last_access, datetime):
+            raise ValueError("Last access must be a datetime object")
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -233,18 +256,19 @@ class ChromaDBManager:
             # Ensure directory exists
             self.persist_dir.mkdir(parents=True, exist_ok=True)
             
-            # Configure ChromaDB settings
-            settings = Settings(
-                allow_reset=True,
-                anonymized_telemetry=False,
-                persist_directory=str(self.persist_dir)
-            )
-            
-            # Initialize persistent client
-            self._client = chromadb.PersistentClient(
-                path=str(self.persist_dir),
-                settings=settings
-            )
+            # Initialize persistent client (Settings is optional across chromadb versions)
+            if Settings is not None:
+                settings = Settings(
+                    allow_reset=True,
+                    anonymized_telemetry=False,
+                    persist_directory=str(self.persist_dir),
+                )
+                self._client = chromadb.PersistentClient(
+                    path=str(self.persist_dir),
+                    settings=settings,
+                )
+            else:  # pragma: no cover
+                self._client = chromadb.PersistentClient(path=str(self.persist_dir))
             
             # Get or create collection
             self._initialize_collection()
@@ -613,64 +637,65 @@ class VectorShortTermMemory:
             bool: True if successful, False otherwise
         """
         try:
-            # Validate inputs
             memory_id = MetadataValidator.validate_memory_id(memory_id)
-        if not self._disable_storage:
-            self._enforce_capacity_limit()
-            
+
+            # No-op mode for lightweight tests / environments.
+            if self._disable_storage:
+                self._operation_count += 1
+                return True
+
+            content_str = MetadataValidator.validate_content(content)
             if not content_str:
                 logger.warning(f"Empty content for memory {memory_id}")
                 return False
-            
+
+            self._enforce_capacity_limit()
+
             # Generate embedding
             embedding = self.embedding_manager.encode(content_str)
             if not embedding:
                 logger.error(f"Failed to generate embedding for memory {memory_id}")
                 return False
-            
-            # Enforce capacity limit before storing
-            self._enforce_capacity_limit()
-            
-            # Prepare metadata
+
             now = datetime.now()
-            
-            # Check if memory already exists to preserve access count
+
+            # Preserve access_count if overwriting existing memory.
             access_count = 0
             try:
                 with self.chroma_manager.get_collection() as collection:
                     existing = collection.get(ids=[memory_id])
-                    if existing.get('ids') and existing.get('metadatas'):
-                        existing_meta = existing['metadatas'][0]
-                        access_count = max(0, int(existing_meta.get('access_count', 0)))
+                    if existing.get("ids") and existing.get("metadatas"):
+                        existing_meta = existing["metadatas"][0]
+                        access_count = max(0, int(existing_meta.get("access_count", 0)))
             except Exception:
-                pass  # New memory, access_count stays 0
-            
+                pass
+
             metadata = {
                 "memory_id": memory_id,
                 "content": content_str,
                 "encoding_time": now.isoformat(),
                 "last_access": now.isoformat(),
                 "access_count": access_count,
-                "importance": MetadataValidator.validate_numeric_field(importance, 'importance'),
-                "attention_score": MetadataValidator.validate_numeric_field(attention_score, 'attention_score'),
-                "emotional_valence": MetadataValidator.validate_numeric_field(emotional_valence, 'emotional_valence', -1.0, 1.0),
+                "importance": MetadataValidator.validate_numeric_field(importance, "importance"),
+                "attention_score": MetadataValidator.validate_numeric_field(attention_score, "attention_score"),
+                "emotional_valence": MetadataValidator.validate_numeric_field(
+                    emotional_valence, "emotional_valence", -1.0, 1.0
+                ),
                 "decay_rate": self.config.decay_rate,
-                "associations": ",".join(MetadataValidator.validate_associations(associations))
+                "associations": ",".join(MetadataValidator.validate_associations(associations)),
             }
-            
-            # Store in ChromaDB
+
             with self.chroma_manager.get_collection() as collection:
                 collection.upsert(
                     ids=[memory_id],
                     embeddings=[embedding],
                     documents=[content_str],
-                    metadatas=[metadata]
+                    metadatas=[metadata],
                 )
-            
+
             self._operation_count += 1
             logger.debug(f"Successfully stored memory {memory_id}")
             return True
-            
         except Exception as e:
             self._error_count += 1
             logger.error(f"Failed to store memory {memory_id}: {e}")
@@ -948,8 +973,12 @@ class VectorShortTermMemory:
         """
         try:
             memory_id = MetadataValidator.validate_memory_id(memory_id)
-            
+
             with self.chroma_manager.get_collection() as collection:
+                existing = collection.get(ids=[memory_id])
+                if not existing or not existing.get("ids"):
+                    return False
+
                 collection.delete(ids=[memory_id])
             
             self._operation_count += 1
@@ -960,6 +989,10 @@ class VectorShortTermMemory:
             self._error_count += 1
             logger.error(f"Failed to remove memory {memory_id}: {e}")
             return False
+
+    def delete(self, memory_id: str) -> bool:
+        """Delete is an alias for remove_item (API compatibility)."""
+        return self.remove_item(memory_id)
     
     def clear(self) -> bool:
         """

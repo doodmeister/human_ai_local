@@ -6,6 +6,7 @@ Provides tiered search quality: semantic (best) → TF-IDF/BM25 (good) → word 
 """
 
 import logging
+import importlib.util
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from collections import Counter
@@ -15,13 +16,8 @@ import re
 logger = logging.getLogger(__name__)
 
 # Optional imports for advanced search
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-    import numpy as np
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
+SKLEARN_AVAILABLE = importlib.util.find_spec("sklearn") is not None
+if not SKLEARN_AVAILABLE:
     logger.warning("scikit-learn not available. Advanced search fallbacks will be limited.")
 
 

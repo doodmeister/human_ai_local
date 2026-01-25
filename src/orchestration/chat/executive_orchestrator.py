@@ -22,15 +22,15 @@ Usage:
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Any
 import logging
 
-from src.executive.integration import ExecutiveSystem, ExecutionContext, ExecutionStatus
+from src.executive.integration import ExecutiveSystem
 from src.executive.planning.world_state import WorldState
-from src.executive.goal_manager import Goal, GoalStatus
-from src.chat.plan_summarizer import create_summarizer
+from src.executive.goal_manager import GoalStatus
+from .plan_summarizer import create_summarizer
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +185,9 @@ class ExecutiveOrchestrator:
             progress.recent_steps.append("Building schedule...")
             await asyncio.sleep(0)
             
-            # Execute synchronously (ExecutiveSystem.execute_goal is sync)
+            # Plan + schedule synchronously (advisor-only; no action execution)
             context = await asyncio.to_thread(
-                self.executive_system.execute_goal,
+                self.executive_system.plan_goal,
                 goal_id,
                 initial_state
             )
@@ -312,7 +312,7 @@ class ExecutiveOrchestrator:
                 lines.append(f"⚠️ Error: {progress.error_message}")
         
         elif progress.phase == ExecutionPhase.PLANNING:
-            lines.append(f"🔄 **Status**: Creating plan...")
+            lines.append("🔄 **Status**: Creating plan...")
             
             # If we have a plan in metadata, show summary
             if "plan" in progress.metadata:

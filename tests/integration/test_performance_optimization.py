@@ -18,8 +18,8 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.optimization import PerformanceConfig, create_performance_optimizer
-from src.processing.neural.dpad_network import DPADNetwork, DPADConfig
-from src.processing.neural.lshn_network import LSHNNetwork, LSHNConfig
+from src.cognition.processing.neural.dpad_network import DPADNetwork, DPADConfig
+from src.cognition.processing.neural.lshn_network import LSHNNetwork, LSHNConfig
 from src.core.config import CognitiveConfig
 
 logger = logging.getLogger(__name__)

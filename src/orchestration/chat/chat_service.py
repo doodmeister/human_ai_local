@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Any, Optional, Set, Tuple, List
+from functools import partial
 import time
 import asyncio
 import logging
@@ -33,6 +34,8 @@ from .executive_orchestrator import ExecutiveOrchestrator  # Production Phase 1 
 from .memory_query_parser import create_memory_query_parser  # Production Phase 1 - Task 8
 from .memory_query_interface import create_memory_query_interface  # Production Phase 1 - Task 8
 import re  # added for fact question pattern
+from src.orchestration import CognitiveStep, CognitiveTick
+from src.learning.learning_law import clamp01, utility_score
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +141,12 @@ class ChatService:
         t_start = time.time()
         flags = flags or {}
         sess = self.sessions.create_or_get(session_id)
+
+        tick = CognitiveTick(owner="chat_service", kind="chat_turn")
+        tick.state["session_id"] = sess.session_id
+
+        # Perceive
+        tick.assert_step(CognitiveStep.PERCEIVE)
         
         # Production Phase 1: Classify user intent
         intent: IntentV2
@@ -196,6 +205,11 @@ class ChatService:
             importance=importance,
         )
         sess.add_turn(user_turn)
+
+        tick.advance(CognitiveStep.PERCEIVE)
+
+        # Update STM
+        tick.assert_step(CognitiveStep.UPDATE_STM)
         # --- Phase 1 memory capture ---
         try:
             captures = self._capture.extract(message)
@@ -266,26 +280,55 @@ class ChatService:
             try:
                 freq = meta.get("frequency", 0)
                 if freq in (2, 3, 5, 8):  # key reinforcement milestones
-                    meta["reinforced"] = True
-                    # Boost importance proportionally (capped)
-                    boost = 0.05 if freq == 2 else 0.07 if freq == 3 else 0.10 if freq == 5 else 0.12
-                    user_turn.importance = min(1.0, (user_turn.importance or 0.0) + boost)
-                    metrics_registry.inc("captured_memory_reinforcements_total")
-                    # Attempt STM refresh (rehearsal) if stm supports method
-                    stm_obj = getattr(self.consolidator, "stm", None) if self.consolidator is not None else None
-                    if stm_obj is not None:
-                        # If STM has method to update activation; else re-add item to refresh recency
-                        if hasattr(stm_obj, "refresh_item_activation"):
-                            try:
-                                key = f"{cm.memory_type}:{meta['subject']}:{meta['object']}"
-                                stm_obj.refresh_item_activation(key)  # type: ignore
-                            except Exception:
-                                pass
-                        elif hasattr(stm_obj, "add_item"):
-                            try:
-                                stm_obj.add_item(content=cm.content, metadata={**meta, "rehearsal": True})  # type: ignore
-                            except Exception:
-                                pass
+                    # Phase 7: reinforcement is a utility-driven learning effect.
+                    # Benefit: milestone-scaled frequency signal.
+                    # Cost: small update cost + STM pressure (reinforcement increases downstream retrieval likelihood).
+                    stm_pressure = 0.0
+                    try:
+                        stm_obj = getattr(self.consolidator, "stm", None) if self.consolidator is not None else None
+                        if stm_obj is not None:
+                            cap = getattr(stm_obj, "capacity", None)
+                            size = None
+                            if hasattr(stm_obj, "get_all_memories"):
+                                try:
+                                    size = len(stm_obj.get_all_memories())  # type: ignore
+                                except Exception:
+                                    size = None
+                            if size is None:
+                                size = len(getattr(stm_obj, "items", {}) or {})
+                            if cap:
+                                stm_pressure = clamp01(float(size) / max(1.0, float(cap)))
+                    except Exception:
+                        stm_pressure = 0.0
+
+                    milestone_benefit = 0.40 if freq == 2 else 0.50 if freq == 3 else 0.70 if freq == 5 else 0.80
+                    u = utility_score(
+                        benefit=clamp01(milestone_benefit),
+                        cost=clamp01(0.05 + 0.25 * stm_pressure),
+                    )
+                    u01 = clamp01(u)
+                    if u01 > 0.0:
+                        meta["reinforced"] = True
+                        # Prior boosts preserved as upper-bounds; scaled by utility.
+                        max_boost = 0.05 if freq == 2 else 0.07 if freq == 3 else 0.10 if freq == 5 else 0.12
+                        boost = max_boost * u01
+                        user_turn.importance = min(1.0, (user_turn.importance or 0.0) + boost)
+                        metrics_registry.inc("captured_memory_reinforcements_total")
+
+                        # Attempt STM refresh (rehearsal) if stm supports method.
+                        if stm_obj is not None:
+                            # If STM has method to update activation; else re-add item to refresh recency
+                            if hasattr(stm_obj, "refresh_item_activation"):
+                                try:
+                                    key = f"{cm.memory_type}:{meta['subject']}:{meta['object']}"
+                                    stm_obj.refresh_item_activation(key)  # type: ignore
+                                except Exception:
+                                    pass
+                            elif hasattr(stm_obj, "add_item"):
+                                try:
+                                    stm_obj.add_item(content=cm.content, metadata={**meta, "rehearsal": True})  # type: ignore
+                                except Exception:
+                                    pass
             except Exception:
                 pass
             # Attempt to store in STM if accessible via consolidator
@@ -304,6 +347,35 @@ class ChatService:
             try:
                 freq = meta.get("frequency", 0)
                 if cm.memory_type in ("identity_fact", "preference", "goal_intent") and freq in (3, 5):
+                    # Phase 7: semantic promotion is a learning effect driven by utility.
+                    # Benefit: repeated mention (frequency) of high-value memory types.
+                    # Cost: write cost + STM pressure.
+                    stm_pressure = 0.0
+                    try:
+                        stm_obj = getattr(self.consolidator, "stm", None) if self.consolidator is not None else None
+                        if stm_obj is not None:
+                            cap = getattr(stm_obj, "capacity", None)
+                            size = None
+                            if hasattr(stm_obj, "get_all_memories"):
+                                try:
+                                    size = len(stm_obj.get_all_memories())  # type: ignore
+                                except Exception:
+                                    size = None
+                            if size is None:
+                                size = len(getattr(stm_obj, "items", {}) or {})
+                            if cap:
+                                stm_pressure = clamp01(float(size) / max(1.0, float(cap)))
+                    except Exception:
+                        stm_pressure = 0.0
+
+                    benefit = 0.65 if freq == 3 else 0.80
+                    # Prefer promoting identity/preference/goal slightly more.
+                    if cm.memory_type in ("identity_fact", "preference"):
+                        benefit = min(1.0, benefit + 0.05)
+                    u01 = clamp01(utility_score(benefit=clamp01(benefit), cost=clamp01(0.15 + 0.20 * stm_pressure)))
+                    if u01 <= 0.0:
+                        raise RuntimeError("semantic promotion utility <= 0")
+
                     # Access semantic memory through context_builder if available
                     sem = getattr(self.context_builder, "semantic", None)
                     if sem is not None and hasattr(sem, "add_item"):
@@ -311,6 +383,7 @@ class ChatService:
                         promo_meta.update({
                             "promotion_reason": "frequency_threshold",
                             "promotion_freq": freq,
+                            "promotion_utility": float(u01),
                             "source": "chat_capture",
                         })
                         try:
@@ -353,21 +426,40 @@ class ChatService:
                         size = getattr(stm_obj, "size", None)
                     if isinstance(size, int) and isinstance(cap, int) and cap:
                         stm_util_ratio = min(1.0, size / cap)
-            # Heuristic: if degraded or high STM utilization, reduce context size 25-50%
+
+            # Phase 7: utility-based learning law.
+            # Benefit estimate: rolling retrieval benefit (EMA), default neutral 0.5.
+            benefit_est = clamp01(metrics_registry.state.get("retrieval_benefit_ema", 0.5))
+            # Cost pressure: latency degradation + STM pressure.
+            cost = 0.0
+            if degraded_flag:
+                cost += 0.6
+            if stm_util_ratio is not None and stm_util_ratio >= 0.85:
+                cost += 0.6
+            cost = clamp01(cost)
+            u = utility_score(benefit=benefit_est, cost=cost)
+
+            # Reduce context size when utility indicates cost outweighs benefit.
             if original_max_ctx and isinstance(original_max_ctx, int) and original_max_ctx > 4:
-                reduce_factor = 1.0
-                if degraded_flag:
-                    reduce_factor *= 0.75
-                if stm_util_ratio is not None and stm_util_ratio >= 0.85:
-                    reduce_factor *= 0.75  # compounding -> potentially 0.56
-                if reduce_factor < 0.999:
-                    new_limit = max(4, int(original_max_ctx * reduce_factor))
-                    if new_limit < original_max_ctx:
-                        cfg["max_context_items"] = new_limit
-                        adaptive_retrieval_applied = True
-                        metrics_registry.inc("adaptive_retrieval_applied_total")
+                if u < 0.0:
+                    reduce_factor = 1.0
+                    if degraded_flag:
+                        reduce_factor *= 0.75
+                    if stm_util_ratio is not None and stm_util_ratio >= 0.85:
+                        reduce_factor *= 0.75  # compounding -> potentially 0.56
+                    if reduce_factor < 0.999:
+                        new_limit = max(4, int(original_max_ctx * reduce_factor))
+                        if new_limit < original_max_ctx:
+                            cfg["max_context_items"] = new_limit
+                            adaptive_retrieval_applied = True
+                            metrics_registry.inc("adaptive_retrieval_applied_total")
         except Exception:
             pass
+
+        tick.advance(CognitiveStep.UPDATE_STM)
+
+        # Retrieve
+        tick.assert_step(CognitiveStep.RETRIEVE)
 
         built = self.context_builder.build(
             session=sess,
@@ -376,6 +468,27 @@ class ChatService:
             include_memory=flags.get("include_memory", True),
             include_trace=flags.get("include_trace", True),
         )
+
+        # Phase 7: update rolling retrieval benefit signal (EMA) for next turn.
+        try:
+            hits = 0.0
+            try:
+                hits += float(getattr(built.metrics, "stm_hits", 0) or 0)
+                hits += float(getattr(built.metrics, "ltm_hits", 0) or 0)
+                hits += float(getattr(built.metrics, "episodic_hits", 0) or 0)
+            except Exception:
+                hits = 0.0
+            denom = 1.0
+            if isinstance(original_max_ctx, int) and original_max_ctx > 0:
+                denom = float(original_max_ctx)
+            elif hasattr(built, "items") and built.items:
+                denom = float(max(1, len(built.items)))
+            benefit_now = clamp01(hits / max(1.0, denom))
+            prev = metrics_registry.state.get("retrieval_benefit_ema")
+            alpha = 0.2
+            metrics_registry.state["retrieval_benefit_ema"] = benefit_now if prev is None else (float(prev) + alpha * (benefit_now - float(prev)))
+        except Exception:
+            pass
         # Restore original context limit after build
         if adaptive_retrieval_applied:
             try:
@@ -460,6 +573,11 @@ class ChatService:
             proactive_upcoming_surface = []
             proactive_summary = None
 
+        tick.advance(CognitiveStep.RETRIEVE)
+
+        # Decide (single decision owner per tick)
+        tick.assert_step(CognitiveStep.DECIDE)
+
         assistant_content = self._invoke_agent_response(message, built)
         # Before forming assistant response, check retrieval for simple questions
         try:
@@ -496,6 +614,15 @@ class ChatService:
             upcoming_reminders,
         )
         setattr(sess, "_session_context_snapshot", session_context)
+
+        tick.mark_decided({
+            "intent": getattr(intent, "intent_type", None) if intent else None,
+            "goal_detected": bool(detected_goal),
+        })
+        tick.advance(CognitiveStep.DECIDE)
+
+        # Act
+        tick.assert_step(CognitiveStep.ACT)
         
         if not assistant_content:
             assistant_content = self._generate_placeholder_response(message)
@@ -507,6 +634,11 @@ class ChatService:
             importance=importance * 0.5,
         )
         sess.add_turn(assistant_turn)
+
+        tick.advance(CognitiveStep.ACT)
+
+        # Reflect
+        tick.assert_step(CognitiveStep.REFLECT)
 
         t_cons = time.time()
         # Adaptive threshold tweak: if high STM utilization or performance degraded, raise salience threshold slightly.
@@ -541,16 +673,30 @@ class ChatService:
                 base_val = adaptive_cfg.get("consolidation_valence_threshold", 0.60)
                 sal_adj = base_sal
                 val_adj = base_val
-                if stm_util is not None and stm_util >= 0.85:
-                    sal_adj += 0.05  # slightly more selective
+                # Phase 7: utility-based learning law.
+                # Under high cost pressure, tighten consolidation selectivity (increase salience threshold).
+                cost = 0.0
                 if degraded:
-                    sal_adj += 0.05  # further tighten under performance pressure
+                    cost += 0.6
+                if stm_util is not None and stm_util >= 0.85:
+                    cost += 0.6
+                u = utility_score(benefit=clamp01(metrics_registry.state.get("retrieval_benefit_ema", 0.5)), cost=clamp01(cost))
+                if u < 0.0:
+                    if stm_util is not None and stm_util >= 0.85:
+                        sal_adj += 0.05  # slightly more selective
+                    if degraded:
+                        sal_adj += 0.05  # further tighten under performance pressure
                 # Cap adjustments
                 sal_adj = min(sal_adj, 0.85)
                 adaptive_cfg["consolidation_salience_threshold"] = sal_adj
                 adaptive_cfg["consolidation_valence_threshold"] = val_adj
         except Exception:
             pass
+
+        tick.advance(CognitiveStep.REFLECT)
+
+        # Consolidate
+        tick.assert_step(CognitiveStep.CONSOLIDATE)
         stored = self._maybe_consolidate(user_turn, assistant_turn)
         # Restore original thresholds to avoid permanent drift
         try:
@@ -697,7 +843,6 @@ class ChatService:
         try:
             # Use a simple stability heuristic: if last 5 turns not degraded and stm util < 70%, relax interval (+1 up to 10)
             # If degraded or high util (>=85%) tighten (-1 down to min 2)
-            history_util = []
             # Estimate current stm util again (cheap best-effort)
             stm_util = None
             cons = getattr(self, "consolidator", None)
@@ -718,7 +863,14 @@ class ChatService:
             degraded_flag = metrics_registry.state.get("performance_degraded")
             current_interval = self._metacog_interval
             new_interval = current_interval
-            if degraded_flag or (stm_util is not None and stm_util >= 0.85):
+            # Phase 7: utility-based learning law.
+            cost = 0.0
+            if degraded_flag:
+                cost += 0.6
+            if stm_util is not None and stm_util >= 0.85:
+                cost += 0.6
+            u = utility_score(benefit=clamp01(metrics_registry.state.get("retrieval_benefit_ema", 0.5)), cost=clamp01(cost))
+            if u < 0.0:
                 if current_interval > 2:
                     new_interval = current_interval - 1
             else:
@@ -755,12 +907,26 @@ class ChatService:
                 freq = weights.get('frequency', 0.3)
                 sal = weights.get('salience', 0.3)
                 adjusted = False
-                # If degraded: bias toward recency (fresh context more reliable)
+                # Phase 7: utility-based learning law.
+                cost = 0.0
                 if degraded_flag:
-                    rec += 0.05; sal -= 0.025; freq -= 0.025; adjusted = True
-                # If high utilization: bias toward salience (select stronger memories)
+                    cost += 0.6
                 if stm_util_ratio is not None and stm_util_ratio >= 0.85:
-                    sal += 0.05; rec -= 0.025; freq -= 0.025; adjusted = True
+                    cost += 0.6
+                u = utility_score(benefit=clamp01(metrics_registry.state.get("retrieval_benefit_ema", 0.5)), cost=clamp01(cost))
+                if u < 0.0:
+                    # If degraded: bias toward recency (fresh context more reliable)
+                    if degraded_flag:
+                        rec += 0.05
+                        sal -= 0.025
+                        freq -= 0.025
+                        adjusted = True
+                    # If high utilization: bias toward salience (select stronger memories)
+                    if stm_util_ratio is not None and stm_util_ratio >= 0.85:
+                        sal += 0.05
+                        rec -= 0.025
+                        freq -= 0.025
+                        adjusted = True
                 # Clamp non-negative
                 if adjusted:
                     rec = max(0.01, rec)
@@ -770,6 +936,7 @@ class ChatService:
                     metrics_registry.inc('metacog_activation_weight_adjustments_total')
         except Exception:
             pass
+        tick.finish()
         return payload
 
     async def process_user_message_stream(
@@ -878,7 +1045,7 @@ class ChatService:
                         "duration_ms": 0.0,
                     })
                     continue
-                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_goal_update(_intent, _sid)
+                handler_callable = partial(self._handle_goal_update, intent, session_id)
             elif handler_name == "goal_query":
                 if self._orchestrator is None:
                     execution_log.append({
@@ -890,15 +1057,15 @@ class ChatService:
                         "duration_ms": 0.0,
                     })
                     continue
-                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_goal_query(_intent, _sid)
+                handler_callable = partial(self._handle_goal_query, intent, session_id)
             elif handler_name == "memory_query":
-                handler_callable = lambda _message=message, _sid=session_id: self._handle_memory_query(_message, _sid)
+                handler_callable = partial(self._handle_memory_query, message, session_id)
             elif handler_name == "reminder_request":
-                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_reminder_request(_intent, _sid)
+                handler_callable = partial(self._handle_reminder_request, intent, session_id)
             elif handler_name == "performance_query":
-                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_performance_query(_intent, _sid)
+                handler_callable = partial(self._handle_performance_query, intent, session_id)
             elif handler_name == "system_status":
-                handler_callable = lambda _intent=intent, _sid=session_id: self._handle_system_status(_intent, _sid)
+                handler_callable = partial(self._handle_system_status, intent, session_id)
             if handler_callable is None:
                 continue
             metrics_registry.inc(f"intent_handler_{handler_name}_attempts_total")
@@ -1165,7 +1332,7 @@ class ChatService:
                 from src.executive.goal_manager import GoalPriority
                 if detected_goal.priority == GoalPriority.HIGH:
                     confirmation += " ⚡"
-            except:
+            except Exception:
                 pass
         
         # Add estimated duration if available

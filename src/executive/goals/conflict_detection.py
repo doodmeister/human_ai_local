@@ -11,11 +11,11 @@ Provides conflict reports with severity and resolution suggestions.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Set, Optional, Tuple, Any
 from enum import Enum
 
-from .priority_calculator import GoalContext, GoalPriorityCalculator
+from .priority_calculator import GoalContext
 
 
 class ConflictType(Enum):

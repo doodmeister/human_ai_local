@@ -6,7 +6,7 @@ from collections import deque
 from .executive_core import EventBus
 
 try:
-    from src.chat.metrics import metrics_registry
+    from src.memory.metrics import metrics_registry
 except Exception:  # Lightweight fallback if chat metrics unavailable
     class _Dummy:
         def inc(self, *args, **kwargs):

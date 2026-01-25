@@ -9,15 +9,15 @@ Implements a sophisticated task scheduler that:
 """
 
 from datetime import datetime, timedelta
-from typing import List, Dict, Set, Optional, Tuple, Any, cast
+from typing import List, Dict, Optional, Any, cast
 from dataclasses import dataclass
 import logging
 
 from ortools.sat.python import cp_model
 
 from .models import (
-    Task, Resource, Schedule, SchedulingProblem,
-    SchedulingConstraint, OptimizationObjective, TaskStatus
+    Task, Schedule, SchedulingProblem,
+    TaskStatus
 )
 
 logger = logging.getLogger(__name__)

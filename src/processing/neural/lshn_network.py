@@ -15,3 +15,7 @@ warnings.warn(
 )
 
 from src.cognition.processing.neural.lshn_network import *  # type: ignore
+
+# Some unit tests import this symbol explicitly. Star imports don't bring in
+# underscore-prefixed names, so re-export it here for backward compatibility.
+from src.cognition.processing.neural.lshn_network import _DummyHopfieldLayer  # type: ignore

@@ -5,12 +5,11 @@ Automatically detects and creates goals from natural language conversation.
 Integrates with Executive System for seamless goal management.
 """
 
-import re
 from dataclasses import dataclass
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 
-from src.chat.intent_classifier_v2 import (
+from .intent_classifier_v2 import (
     IntentClassifierV2,
     IntentV2,
     ConversationContext,

@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass, field
 import json
 
-from .models import Task, Resource, Schedule, TaskStatus
+from .models import Task, Schedule, TaskStatus
 
 
 @dataclass
@@ -276,10 +276,8 @@ class ScheduleVisualizer:
                     # Determine edge type
                     if task.id in critical_tasks and dep_id in critical_tasks:
                         edge_type = "critical_path"
-                        color = "#e74c3c"
                     else:
                         edge_type = "dependency"
-                        color = "#95a5a6"
                     
                     edges.append(DependencyEdge(
                         from_task_id=dep_id,

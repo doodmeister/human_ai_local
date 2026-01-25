@@ -35,6 +35,10 @@ import schedule
 import time
 from threading import Thread
 
+from src.core.cognitive_tick import CognitiveStep, CognitiveTick
+
+from src.learning.learning_law import clamp01, utility_score
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -187,26 +191,40 @@ class DreamProcessor:
         Returns:
             Dream cycle results
         """
+        tick = CognitiveTick(owner="dream_processor", kind=f"dream_cycle:{cycle_type}")
+        tick.state["cycle_type"] = cycle_type
+
+        # Perceive
+        tick.assert_step(CognitiveStep.PERCEIVE)
         if self.is_dreaming:
             logger.warning("Already in dream state, skipping cycle")
             return {"error": "already_dreaming"}
-        
-        self.is_dreaming = True
+
         cycle_config = self.dream_cycles.get(cycle_type, self.dream_cycles['deep'])
-        
+        tick.state["cycle_duration_minutes"] = cycle_config.duration_minutes
+        tick.advance(CognitiveStep.PERCEIVE)
+
+        # Update STM (enter dream-state / reserve resources)
+        tick.assert_step(CognitiveStep.UPDATE_STM)
+        self.is_dreaming = True
         logger.info(f"Entering {cycle_type} dream cycle for {cycle_config.duration_minutes} minutes")
-        
+        tick.advance(CognitiveStep.UPDATE_STM)
+
         try:
-            results = await self._process_dream_cycle(cycle_config)
+            results = await self._process_dream_cycle(cycle_config, tick=tick)
+
+            # Consolidate (persist dream-cycle state + stats)
+            tick.assert_step(CognitiveStep.CONSOLIDATE)
             self.last_dream_cycle = datetime.now()
             self.dream_statistics['total_cycles'] += 1
-            
+            tick.finish()
+
             return results
-        
+
         finally:
             self.is_dreaming = False
     
-    async def _process_dream_cycle(self, cycle_config: DreamCycle) -> Dict[str, Any]:
+    async def _process_dream_cycle(self, cycle_config: DreamCycle, tick: CognitiveTick | None = None) -> Dict[str, Any]:
         """
         Process a complete dream cycle
         
@@ -222,7 +240,11 @@ class DreamProcessor:
             "start_time": start_time,
             "duration_minutes": cycle_config.duration_minutes
         }
+
+        if tick is not None:
+            tick.assert_step(CognitiveStep.RETRIEVE)
         
+        # Retrieve
         # Phase 1: Identify consolidation candidates
         candidates = await self._identify_consolidation_candidates(cycle_config)
         results["candidates_identified"] = len(candidates)
@@ -235,13 +257,34 @@ class DreamProcessor:
         else:
             clusters = []
             results["clusters_formed"] = 0
+
+        if tick is not None:
+            tick.state["candidates_identified"] = results["candidates_identified"]
+            tick.state["clusters_formed"] = results["clusters_formed"]
+            tick.advance(CognitiveStep.RETRIEVE)
         
+        # Decide
+        if tick is not None:
+            tick.assert_step(CognitiveStep.DECIDE)
+
         # Phase 3: Meta-cognitive evaluation
         if self.meta_cognition:
             evaluated_candidates = await self._meta_cognitive_evaluation(candidates)
         else:
             evaluated_candidates = candidates
-          # Phase 4: Create associations (before consolidation, while memories are still in STM)
+
+        if tick is not None:
+            tick.mark_decided({
+                "evaluated_candidates": len(evaluated_candidates),
+                "has_meta_cognition": bool(self.meta_cognition),
+            })
+            tick.advance(CognitiveStep.DECIDE)
+
+        # Act
+        if tick is not None:
+            tick.assert_step(CognitiveStep.ACT)
+
+        # Phase 4: Create associations (before consolidation, while memories are still in STM)
         associations = await self._create_dream_associations(candidates, clusters, cycle_config)
         results["associations_created"] = associations
         self.dream_statistics['associations_created'] += associations
@@ -259,13 +302,28 @@ class DreamProcessor:
         # Phase 7: Cleanup and maintenance
         cleanup_results = await self._dream_cleanup(cycle_config)
         results["cleanup"] = cleanup_results
+
+        if tick is not None:
+            tick.advance(CognitiveStep.ACT)
         
+        # Reflect
+        if tick is not None:
+            tick.assert_step(CognitiveStep.REFLECT)
+
         end_time = datetime.now()
         results["actual_duration"] = (end_time - start_time).total_seconds() / 60
         results["end_time"] = end_time
         
         # Store in consolidation history
         self.consolidation_history.append(results)
+
+        if tick is not None:
+            tick.state["dream_results"] = {
+                "associations_created": associations,
+                "memories_consolidated": consolidated,
+                "cycle_type": cycle_config.cycle_type,
+            }
+            tick.advance(CognitiveStep.REFLECT)
         
         logger.info(f"Dream cycle completed: {results}")
         return results
@@ -308,13 +366,17 @@ class DreamProcessor:
                 temporal_relevance * 0.2 +
                 emotional_salience * 0.1
             )
+
+            # Phase 7: utility-based learning law.
+            # Candidate selection is a utility thresholding step; cost is treated as ~0 during dream retrieval.
+            utility = utility_score(benefit=combined_score, cost=0.0)
             
             # Check if meets threshold for this cycle type
-            if combined_score >= cycle_config.consolidation_threshold:
+            if utility >= cycle_config.consolidation_threshold:
                 candidate = ConsolidationCandidate(
                     memory_id=item.id,
                     content=item.content,
-                    importance_score=combined_score,
+                    importance_score=clamp01(utility),
                     access_frequency=access_frequency,
                     emotional_salience=emotional_salience,
                     temporal_relevance=temporal_relevance
@@ -633,17 +695,18 @@ class DreamProcessor:
         }
         
         try:
-            # Replay high-importance memories
-            high_importance_memories = [
-                c for c in candidates 
-                if c.importance_score > 0.7
-            ]
-            
-            for candidate in high_importance_memories:
+            # Phase 7: utility-based learning law.
+            # Replay is applied when reinforcement utility is sufficiently positive.
+            # Benefit: candidate utility; Cost: replay intensity (compute/energy proxy).
+            replay_cost = clamp01(cycle_config.replay_intensity)
+            for candidate in candidates:
+                u = utility_score(benefit=candidate.importance_score, cost=0.35 * replay_cost)
+                if u < 0.35:
+                    continue
                 stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
                 if stm_item:
                     # Strengthen memory through replay
-                    strength_boost = cycle_config.replay_intensity * 0.1
+                    strength_boost = float(cycle_config.replay_intensity) * 0.1 * clamp01(u)
                     stm_item.importance = min(1.0, stm_item.importance + strength_boost)
                     
                     replay_results["memories_replayed"] += 1
@@ -717,16 +780,26 @@ class DreamProcessor:
                     'neural_replayed_memories': neural_replay_results.get('replayed_memories', 0)
                 })
                 
-                # Apply consolidation effects back to memories
-                consolidation_strength = neural_replay_results.get('consolidation_strength', 0.0)
-                if consolidation_strength > 0.1:  # Threshold for meaningful consolidation
-                    for candidate in candidates:
-                        stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
-                        if stm_item:
-                            # Boost importance based on neural consolidation
-                            neural_boost = consolidation_strength * 0.1
-                            stm_item.importance = min(1.0, stm_item.importance + neural_boost)
-                            replay_results["strength_increased"] += neural_boost
+                # Apply consolidation effects back to memories.
+                # Phase 7: importance strengthening is utility-gated (benefit from consolidation vs replay cost).
+                consolidation_strength = float(neural_replay_results.get('consolidation_strength', 0.0) or 0.0)
+                replay_cost = clamp01(getattr(cycle_config, "replay_intensity", 0.5))
+                for candidate in candidates:
+                    stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
+                    if not stm_item:
+                        continue
+
+                    benefit = clamp01(clamp01(consolidation_strength) * clamp01(candidate.importance_score))
+                    u = utility_score(benefit=benefit, cost=clamp01(0.35 * replay_cost))
+                    if u <= 0.0:
+                        continue
+
+                    neural_boost = clamp01(consolidation_strength) * 0.1 * clamp01(u)
+                    if neural_boost <= 0.0:
+                        continue
+
+                    stm_item.importance = min(1.0, stm_item.importance + neural_boost)
+                    replay_results["strength_increased"] += neural_boost
                 
                 logger.debug(f"DPAD neural replay: {neural_replay_results.get('replayed_memories', 0)} memories, "
                            f"quality: {neural_replay_results.get('reconstruction_quality', 0.0):.3f}")

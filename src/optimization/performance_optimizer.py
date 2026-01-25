@@ -21,6 +21,7 @@ import psutil
 import asyncio
 
 from ..core.config import PerformanceConfig
+from src.learning.learning_law import clamp01, utility_score
 
 logger = logging.getLogger(__name__)
 
@@ -50,19 +51,35 @@ class BatchProcessor:
         if len(self.performance_history) > 20:
             self.performance_history = self.performance_history[-10:]
         
-        # Optimize batch size
-        if memory_usage < self.config.target_memory_usage and self.current_batch_size < self.config.max_batch_size:
-            # Increase batch size if memory allows
-            self.current_batch_size = min(
-                self.current_batch_size * 2,
-                self.config.max_batch_size
-            )
-        elif memory_usage > self.config.target_memory_usage * 1.1:
-            # Decrease batch size if memory pressure
-            self.current_batch_size = max(
-                self.current_batch_size // 2,
-                self.config.min_batch_size
-            )
+        # Phase 7: utility-based learning law.
+        # Benefit: throughput improvement vs recent baseline; Cost: memory pressure vs target.
+        throughput = 0.0
+        try:
+            throughput = float(self.current_batch_size) / max(1e-6, float(processing_time))
+        except Exception:
+            throughput = 0.0
+
+        recent = self.performance_history[-10:] if self.performance_history else []
+        baseline = 0.0
+        if recent:
+            try:
+                baseline = max(float(r.get("throughput", 0.0)) for r in recent)
+            except Exception:
+                baseline = 0.0
+        benefit = clamp01(throughput / baseline) if baseline > 0 else 0.5
+
+        target_mem = float(getattr(self.config, "target_memory_usage", 0.75) or 0.75)
+        mem_ratio = (float(memory_usage) / target_mem) if target_mem > 0 else 0.0
+        cost = clamp01(max(0.0, mem_ratio - 1.0))
+
+        u = utility_score(benefit=benefit, cost=cost)
+
+        # Optimize batch size: increase when utility is positive and memory is under target;
+        # decrease when memory pressure cost dominates.
+        if u > 0.15 and memory_usage < self.config.target_memory_usage and self.current_batch_size < self.config.max_batch_size:
+            self.current_batch_size = min(self.current_batch_size * 2, self.config.max_batch_size)
+        elif cost > 0.10:
+            self.current_batch_size = max(self.current_batch_size // 2, self.config.min_batch_size)
         
         return self.current_batch_size
     
@@ -116,7 +133,7 @@ class MemoryMonitor:
             try:
                 gpu_memory = torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()
                 stats['gpu_percent'] = gpu_memory
-            except:
+            except Exception:
                 stats['gpu_percent'] = 0.0
         else:
             stats['gpu_percent'] = 0.0
@@ -417,9 +434,6 @@ class PerformanceOptimizer:
         total_memory_usage = 0
         
         for batch_embeddings, batch_importance in batches:
-            # Monitor memory before processing
-            memory_before = self.memory_monitor.get_memory_usage()
-            
             # Forward pass - adapt to model type
             with torch.no_grad():
                 # Check if model is LSHN (has consolidate_memories method)

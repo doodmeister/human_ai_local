@@ -3,7 +3,7 @@
 from typing import Optional
 import logging
 
-from src.core.cognitive_agent import CognitiveAgent
+from src.orchestration.cognitive_agent import CognitiveAgent
 
 # Initialize logger
 logger = logging.getLogger(__name__)

@@ -14,13 +14,15 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from datetime import datetime
 
-from ...executive.executive_agent import ExecutiveAgent
-from ...executive.goal_manager import GoalPriority
-from ...executive.integration import ExecutiveSystem
-from ...executive.planning.world_state import WorldState
+from src.orchestration.executive_facade import (
+    ExecutiveAgent,
+    ExecutiveSystem,
+    GoalPriority,
+    WorldState,
+)
 
 router = APIRouter()
 
@@ -255,14 +257,19 @@ async def get_executive_status(request: Request):
 
 # Integrated Pipeline Endpoints (ExecutiveSystem)
 
-@router.post("/goals/{goal_id}/execute")
-async def execute_goal(goal_id: str, request: Request):
-    """Execute integrated pipeline for a goal: Decision → Plan → Schedule"""
+@router.post("/goals/{goal_id}/plan_schedule")
+@router.post("/goals/{goal_id}/execute")  # Backwards-compatible alias
+async def plan_schedule_goal(goal_id: str, request: Request):
+    """Run advisor pipeline for a goal: Decision → Plan → Schedule.
+
+    This endpoint does not execute actions or actuate tools.
+    Use `/plan_schedule` going forward; `/execute` is kept as an alias.
+    """
     try:
         system = get_executive_system(request)
         
-        # Execute goal through integrated pipeline
-        context = system.execute_goal(goal_id, initial_state=WorldState({}))
+        # Plan + schedule goal through integrated pipeline (advisor-only)
+        context = system.plan_goal(goal_id, initial_state=WorldState({}))
         
         return {
             "status": "success",
@@ -273,11 +280,12 @@ async def execute_goal(goal_id: str, request: Request):
                 "planning_time_ms": context.planning_time_ms,
                 "scheduling_time_ms": context.scheduling_time_ms,
                 "total_actions": context.total_actions,
-                "scheduled_tasks": context.scheduled_tasks,
-                "makespan": context.makespan,
+                "scheduled_tasks": context.schedule.tasks if context.schedule else [],
+                "makespan": context.schedule.makespan if context.schedule else None,
                 "has_plan": context.plan is not None,
                 "has_schedule": context.schedule is not None,
-                "failure_reason": context.failure_reason
+                "failure_reason": context.failure_reason,
+                "advisor_only": bool(context.metadata.get("advisor_only"))
             }
         }
     
@@ -298,7 +306,7 @@ async def get_goal_plan(goal_id: str, request: Request):
         if not context or not context.plan:
             return {
                 "status": "no_plan",
-                "message": "No plan generated yet. Execute the goal first."
+                "message": "No plan generated yet. Run the pipeline first."
             }
         
         plan = context.plan
@@ -340,7 +348,7 @@ async def get_goal_schedule(goal_id: str, request: Request):
         if not context or not context.schedule:
             return {
                 "status": "no_schedule",
-                "message": "No schedule generated yet. Execute the goal first."
+                "message": "No schedule generated yet. Run the pipeline first."
             }
         
         schedule = context.schedule
@@ -400,8 +408,8 @@ async def get_execution_status(goal_id: str, request: Request):
             "planning_time_ms": context.planning_time_ms,
             "scheduling_time_ms": context.scheduling_time_ms,
             "total_actions": context.total_actions,
-            "scheduled_tasks": context.scheduled_tasks,
-            "makespan": context.makespan,
+            "scheduled_tasks": context.schedule.tasks if context.schedule else [],
+            "makespan": context.schedule.makespan if context.schedule else None,
             "failure_reason": context.failure_reason,
             "actual_success": context.actual_success,
             "outcome_score": context.outcome_score,

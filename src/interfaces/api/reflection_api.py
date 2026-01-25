@@ -30,21 +30,37 @@ import threading
 import logging
 from contextlib import asynccontextmanager
 
-# Initialize logger
-logger = logging.getLogger(__name__)
-
-# Import the cognitive agent and reflection logic
-
-from src.core.agent_singleton import create_agent
-
-
-# Import routers instead of FastAPI app for unified API registration
+from src.orchestration.agent_singleton import create_agent
+from src.interfaces.api.agent_api import router as agent_router
+from src.interfaces.api.executive_api import router as executive_router
 from src.interfaces.api.memory_api import router as memory_router
 from src.interfaces.api.procedural_api import router as procedural_router
 from src.interfaces.api.prospective_api import router as prospective_router
 from src.interfaces.api.semantic_api import router as semantic_router
-from src.interfaces.api.agent_api import router as agent_router
-from src.interfaces.api.executive_api import router as executive_router
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+
+_agent_init_lock = threading.Lock()
+
+
+def _get_agent(request: Request):
+    """Get the agent from app state, lazily initializing when missing.
+
+    Starlette/FastAPI TestClient does not always execute lifespan events unless
+    used as a context manager, so tests may hit endpoints without app.state.agent.
+    """
+    agent = getattr(request.app.state, "agent", None)
+    if agent is not None:
+        return agent
+
+    with _agent_init_lock:
+        agent = getattr(request.app.state, "agent", None)
+        if agent is None:
+            request.app.state.agent = create_agent()
+            agent = request.app.state.agent
+    return agent
 
 
 @asynccontextmanager
@@ -89,7 +105,7 @@ class ReflectionStartRequest(BaseModel):
 def reflect(request: Request):
     """Trigger agent-level metacognitive reflection and return the report."""
     global last_reflection_report
-    agent = request.app.state.agent
+    agent = _get_agent(request)
     with reflection_lock:
         report = agent.reflect()
         last_reflection_report = report
@@ -97,7 +113,7 @@ def reflect(request: Request):
 
 @app.get("/reflection/status")
 def reflection_status(request: Request):
-    agent = request.app.state.agent
+    agent = _get_agent(request)
     status = agent.get_reflection_status()
     return {"status": status}
 
@@ -113,7 +129,7 @@ def reflection_report():
 
 @app.post("/reflection/start")
 def reflection_start(req: ReflectionStartRequest, request: Request):
-    agent = request.app.state.agent
+    agent = _get_agent(request)
     interval = req.interval
     if interval is not None:
         agent.start_reflection_scheduler(interval_minutes=interval)
@@ -123,7 +139,7 @@ def reflection_start(req: ReflectionStartRequest, request: Request):
 
 @app.post("/reflection/stop")
 def reflection_stop(request: Request):
-    agent = request.app.state.agent
+    agent = _get_agent(request)
     agent.stop_reflection_scheduler()
     return {"status": "stopped"}
 

@@ -3,13 +3,10 @@ from typing import List
 
 """Salience scoring for consolidation decisions.
 
-Combines novelty, relevance (to recent STM), length, and simple sentiment.
-Sentiment is approximated by presence of positive/negative tokens for now to
-avoid heavy deps. Deterministic, lightweight.
-"""
+Combines novelty, relevance (to recent STM), length, and sentiment.
 
-POSITIVE = {"great","good","excellent","success","happy","progress"}
-NEGATIVE = {"bad","error","fail","failure","sad","problem"}
+Phase 3: sentiment/valence signals are centralized in AttentionManager.
+"""
 
 class SalienceScorer:
     def __init__(self, w_novelty: float = 0.3, w_relevance: float = 0.3, w_length: float = 0.25, w_sentiment: float = 0.15):
@@ -31,11 +28,15 @@ class SalienceScorer:
         relevance = len(tokens & recent_tokens) / max(len(tokens), 1)
         # Length (normalized)
         length_term = min(len(text) / 800.0, 1.0)
-        # Sentiment: simple polarity signal
-        pos = len(tokens & POSITIVE)
-        neg = len(tokens & NEGATIVE)
-        sentiment = (pos - neg + 5) / 10.0  # shift and scale to ~0..1
-        sentiment = max(0.0, min(sentiment, 1.0))
+        # Sentiment/valence: centralized signal (map -1..1 -> 0..1)
+        sentiment = 0.5
+        try:
+            from src.cognition.attention.attention_manager import get_attention_manager
+
+            _sal, valence = get_attention_manager().estimate_salience_and_valence(text)
+            sentiment = max(0.0, min((valence + 1.0) / 2.0, 1.0))
+        except Exception:
+            sentiment = 0.5
         raw = (
             self.w_novelty * novelty +
             self.w_relevance * relevance +

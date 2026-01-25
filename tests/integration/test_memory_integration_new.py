@@ -7,7 +7,7 @@ import os
 import pytest
 sys.path.insert(0, os.path.abspath('.'))
 
-from src.core.cognitive_agent import CognitiveAgent
+from src.orchestration.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 
 @pytest.mark.asyncio

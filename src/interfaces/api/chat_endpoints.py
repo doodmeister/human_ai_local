@@ -6,80 +6,16 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, AsyncGenerator
 
-from src.chat import ChatService, SessionManager, ContextBuilder
-from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
-from src.core.config import get_chat_config
-from src.chat.metrics import metrics_registry
-from src.core.agent_singleton import create_agent
-from src.memory.consolidation.consolidator import MemoryConsolidator, ConsolidationPolicy
+from src.orchestration.chat.api_runtime import (
+    get_agent,
+    get_chat_service,
+    get_prospective,
+    metrics_registry,
+)
 
-# Singleton scaffolds (replace with DI if project uses container)
-_session_manager = None
-_context_builder = None
-_chat_service = None
-_agent_instance = None
-_prospective = get_inmemory_prospective_memory()
+_prospective = get_prospective()
 
 router = APIRouter(prefix="/agent", tags=["chat"])
-
-
-def get_chat_service() -> ChatService:
-    """Lazy initialization of ChatService with agent support."""
-    global _session_manager, _context_builder, _chat_service, _agent_instance
-
-    if _chat_service is not None:
-        return _chat_service
-
-    if _agent_instance is None:
-        _agent_instance = create_agent()
-
-    _session_manager = SessionManager()
-
-    chat_cfg = get_chat_config().to_dict()
-
-    stm = ltm = episodic = attention = executive = None
-    if _agent_instance is not None:
-        memory = getattr(_agent_instance, "memory", None)
-        if memory is not None:
-            try:
-                stm = memory.stm
-            except Exception:
-                stm = None
-            try:
-                ltm = memory.ltm
-            except Exception:
-                ltm = None
-            try:
-                episodic = memory.episodic
-            except Exception:
-                episodic = None
-        attention = getattr(_agent_instance, "attention", None)
-        executive = getattr(_agent_instance, "performance_optimizer", None)
-
-    _context_builder = ContextBuilder(
-        chat_config=chat_cfg,
-        stm=stm,
-        ltm=ltm,
-        episodic=episodic,
-        attention=attention,
-        executive=executive,
-    )
-
-    consolidator = None
-    if stm is not None or ltm is not None:
-        try:
-            consolidator = MemoryConsolidator(stm=stm, ltm=ltm, policy=ConsolidationPolicy())
-        except Exception:
-            consolidator = None
-
-    _chat_service = ChatService(
-        _session_manager,
-        _context_builder,
-        consolidator=consolidator,
-        agent=_agent_instance,
-    )
-
-    return _chat_service
 
 
 class ChatRequest(BaseModel):
@@ -255,12 +191,13 @@ async def start_dream_cycle(dream_req: DreamRequest):
     - Age >= 5 seconds
     - Importance >= 0.4
     """
-    if _agent_instance is None:
+    agent = get_agent()
+    if agent is None:
         return {"error": "agent_not_initialized", "dream_results": None}
     
     try:
         # Check if agent has dream processor
-        dream_proc = getattr(_agent_instance, "dream_processor", None)
+        dream_proc = getattr(agent, "dream_processor", None)
         if dream_proc is not None:
             results = await dream_proc.enter_dream_cycle(dream_req.cycle_type)
             return {"dream_results": results}
@@ -302,35 +239,31 @@ class LLMConfigUpdate(BaseModel):
 @router.post("/config/llm")
 async def update_llm_config(config: LLMConfigUpdate):
     """Update LLM provider configuration and reinitialize the agent's LLM provider."""
-    global _agent_instance
-    
     try:
-        if _agent_instance is None:
-            _agent_instance = create_agent()
-        
-        if _agent_instance is None:
+        agent = get_agent()
+        if agent is None:
             return {"status": "error", "message": "Agent not available"}
         
         # Update the config
-        _agent_instance.config.llm.provider = config.provider
+        agent.config.llm.provider = config.provider
         if config.openai_model:
-            _agent_instance.config.llm.openai_model = config.openai_model
+            agent.config.llm.openai_model = config.openai_model
         if config.ollama_base_url:
-            _agent_instance.config.llm.ollama_base_url = config.ollama_base_url
+            agent.config.llm.ollama_base_url = config.ollama_base_url
         if config.ollama_model:
-            _agent_instance.config.llm.ollama_model = config.ollama_model
+            agent.config.llm.ollama_model = config.ollama_model
         
         # Reinitialize the LLM provider
-        from src.model.llm_provider import LLMProviderFactory
+        from src.orchestration.llm_provider import LLMProviderFactory
         try:
-            new_provider = LLMProviderFactory.create_from_config(_agent_instance.config.llm)
+            new_provider = LLMProviderFactory.create_from_config(agent.config.llm)
             if not new_provider.is_available():
                 return {
                     "status": "warning",
                     "message": f"Provider '{config.provider}' configured but not available. Check configuration."
                 }
-            _agent_instance.llm_provider = new_provider
-            _agent_instance.openai_client = getattr(new_provider, 'client', None) if hasattr(new_provider, 'client') else None
+            agent.llm_provider = new_provider
+            agent.openai_client = getattr(new_provider, 'client', None) if hasattr(new_provider, 'client') else None
             
             model_name = config.openai_model if config.provider == "openai" else config.ollama_model
             return {
@@ -353,7 +286,7 @@ async def get_proactive_suggestions():
     Returns suggestions sorted by priority (highest first).
     """
     try:
-        from src.chat.proactive_agency import get_proactive_system
+        from src.orchestration.chat.proactive_agency import get_proactive_system
         
         proactive = get_proactive_system()
         suggestions = proactive.get_suggestions()
@@ -375,7 +308,7 @@ async def get_urgent_suggestions():
     Use this for notifications or alerts.
     """
     try:
-        from src.chat.proactive_agency import get_proactive_system
+        from src.orchestration.chat.proactive_agency import get_proactive_system
         
         proactive = get_proactive_system()
         suggestions = proactive.get_urgent_suggestions()

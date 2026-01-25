@@ -24,8 +24,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import logging
 
-from src.executive.planning.goap_planner import Plan, PlanStep
-from src.executive.scheduling.models import Schedule, Task
+from src.executive.planning.goap_planner import Plan
+from src.executive.scheduling.models import Schedule
 
 logger = logging.getLogger(__name__)
 
@@ -129,17 +129,6 @@ class PlanSummarizer:
                 detailed="The goal can be achieved with no additional actions.",
                 step_count=0
             )
-        
-        # Extract key actions (first 3 and last if >4 steps)
-        key_actions = []
-        steps_to_show = []
-        
-        if len(plan.steps) <= 4:
-            steps_to_show = plan.steps
-        else:
-            # Show first 3 and last
-            steps_to_show = plan.steps[:3] + [plan.steps[-1]]
-            key_actions = [self.humanize_action(s.action.name) for s in steps_to_show]
         
         # Build brief summary
         if len(plan.steps) == 1:

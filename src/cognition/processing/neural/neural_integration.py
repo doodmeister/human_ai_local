@@ -12,6 +12,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Any
 import torch
+import torch.nn.functional as F
 import numpy as np
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -21,8 +22,8 @@ from threading import Lock
 
 from .dpad_network import DPADNetwork, DPADTrainer, DPADConfig
 from .lshn_network import LSHNNetwork, LSHNTrainer, LSHNConfig
-from ...core.config import CognitiveConfig
-from ...optimization import PerformanceConfig, create_performance_optimizer
+from src.core.config import CognitiveConfig
+from src.optimization import PerformanceConfig, create_performance_optimizer
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +197,8 @@ class NeuralIntegrationManager:
         if not self.neural_config.enable_neural_replay:
             return {'status': 'disabled', 'replayed_memories': 0}
         
-        if len(memory_embeddings) < self.neural_config.replay_memory_threshold:            return {
+        if len(memory_embeddings) < self.neural_config.replay_memory_threshold:
+            return {
                 'status': 'insufficient_memories',
                 'replayed_memories': len(memory_embeddings),
                 'threshold': self.neural_config.replay_memory_threshold
@@ -204,8 +206,6 @@ class NeuralIntegrationManager:
         
         try:
             # Use performance optimizer for optimized neural replay
-            start_time = time.time()
-            
             # Perform optimized DPAD memory replay
             dpad_optimization = self.performance_optimizer.optimize_neural_forward_pass(
                 self.network,
@@ -608,7 +608,7 @@ class NeuralIntegrationManager:
             # Calculate cosine similarity between input and output
             cosine_sim = F.cosine_similarity(input_embeddings, output_embeddings, dim=-1)
             return cosine_sim.mean().item()
-        except:
+        except Exception:
             return 0.0
     
     async def _save_checkpoint(self):
@@ -710,6 +710,3 @@ class NeuralIntegrationManager:
             time.sleep(1.0)
         
         logger.info("Neural Integration Manager shutdown complete")
-
-# Import torch.nn.functional for cosine similarity
-import torch.nn.functional as F

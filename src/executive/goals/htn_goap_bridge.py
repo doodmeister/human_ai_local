@@ -34,7 +34,7 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 import logging
 
-from .goal_taxonomy import Goal, GoalType
+from .goal_taxonomy import Goal
 from ..planning.goap_planner import GOAPPlanner, Plan
 from ..planning.world_state import WorldState
 from ..planning.action_library import ActionLibrary, create_default_action_library

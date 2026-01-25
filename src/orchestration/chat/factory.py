@@ -5,7 +5,7 @@ from .conversation_session import SessionManager
 from .context_builder import ContextBuilder
 from src.core.config import get_chat_config
 from importlib import import_module
-import os
+ 
 
 def _lazy_import(path: str, attr: str):
     try:
@@ -25,38 +25,44 @@ def build_chat_service(
     Create a ChatService with injected subsystems if provided.
     Real memory / attention / executive instances can be passed here.
     """
-    if stm is None:
-        VectorShortTermMemory = _lazy_import("src.memory.stm.vector_stm", "VectorShortTermMemory")
-        if VectorShortTermMemory:
+    memory_system = None
+    if stm is None or ltm is None or episodic is None:
+        MemorySystem = _lazy_import("src.memory", "MemorySystem")
+        if MemorySystem:
             try:
-                stm = VectorShortTermMemory()
+                memory_system = MemorySystem()
             except Exception:
-                stm = None
-    if ltm is None:
-        VectorLongTermMemory = _lazy_import("src.memory.ltm.vector_ltm", "VectorLongTermMemory")
-        if VectorLongTermMemory:
-            try:
-                ltm = VectorLongTermMemory()
-            except Exception:
-                ltm = None
-    if episodic is None:
-        EpisodicMemorySystem = _lazy_import("src.memory.episodic.episodic_memory", "EpisodicMemorySystem")
-        if EpisodicMemorySystem:
-            try:
-                episodic = EpisodicMemorySystem()
-            except Exception:
-                episodic = None
-    # Skip semantic memory heavy dependency in lightweight test mode
-    if os.environ.get("DISABLE_SEMANTIC_MEMORY") == "1":
-        if hasattr(__import__('src.memory', fromlist=['semantic']), 'semantic'):
-            pass  # no-op
+                memory_system = None
+
+    if stm is None and memory_system is not None:
+        try:
+            stm = memory_system.stm
+        except Exception:
+            stm = None
+    if ltm is None and memory_system is not None:
+        try:
+            ltm = memory_system.ltm
+        except Exception:
+            ltm = None
+    if episodic is None and memory_system is not None:
+        try:
+            episodic = memory_system.episodic
+        except Exception:
+            episodic = None
     if attention is None:
-        AttentionMechanism = _lazy_import("src.attention.attention_mechanism", "AttentionMechanism")
-        if AttentionMechanism:
+        AttentionManager = _lazy_import("src.cognition.attention.attention_manager", "AttentionManager")
+        if AttentionManager:
             try:
-                attention = AttentionMechanism()
+                attention = AttentionManager()
             except Exception:
                 attention = None
+        if attention is None:
+            AttentionMechanism = _lazy_import("src.cognition.attention.attention_mechanism", "AttentionMechanism")
+            if AttentionMechanism:
+                try:
+                    attention = AttentionMechanism()
+                except Exception:
+                    attention = None
     if executive is None:
         ExecutiveAgent = _lazy_import("src.executive.executive_agent", "ExecutiveAgent")
         if ExecutiveAgent:
@@ -68,8 +74,11 @@ def build_chat_service(
     # Prospective memory for reminders
     prospective = None
     try:
-        from src.memory.prospective.prospective_memory import get_prospective_memory
-        prospective = get_prospective_memory()
+        if memory_system is not None:
+            prospective = memory_system.prospective
+        else:
+            from src.memory.prospective.prospective_memory import get_prospective_memory
+            prospective = get_prospective_memory()
     except Exception:
         prospective = None
     

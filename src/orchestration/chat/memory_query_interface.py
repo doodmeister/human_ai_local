@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import List, Optional, Any, Dict
 import logging
 
-from src.chat.memory_query_parser import MemoryQueryResult, QueryType, MemorySystem
+from .memory_query_parser import MemoryQueryResult, QueryType, MemorySystem
 
 logger = logging.getLogger(__name__)
 

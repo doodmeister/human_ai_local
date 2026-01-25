@@ -1,35 +1,27 @@
-"""
-Executive System Integration - Week 15
+"""Executive System Integration (Phase 2: Planning/Scheduling Advisor API)
 
-Unified orchestration layer connecting all executive components:
-- GoalManager: Hierarchical goal tracking
-- DecisionEngine: Multi-criteria decision making (AHP, Pareto)
-- GOAPPlanner: Goal-oriented action planning
-- DynamicScheduler: Constraint-based scheduling with adaptation
+This module provides an integrated *advisor* pipeline:
+    Goal → Decision → Plan → Schedule
 
-Architecture:
-    Goal → Decision → Plan → Schedule → Execution → Feedback
+Phase 2 constraint:
+    - No module except the executive core may commit actions.
 
-Integration flow:
-1. Goals define what to achieve (GoalManager)
-2. Decisions determine how to approach goals (DecisionEngine)
-3. Plans break down decisions into action sequences (GOAPPlanner)
-4. Schedules organize actions with resources and constraints (DynamicScheduler)
-5. Execution feedback updates progress and triggers replanning
+Accordingly, `ExecutiveSystem` does not actuate tools or execute actions.
+It may be used to produce plans/schedules, status, and learning analytics.
+Any side effects (e.g., auto-generating reminders) are opt-in.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
-from collections import defaultdict
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 import logging
 
 # Component imports
 from src.executive.goal_manager import GoalManager, Goal, GoalStatus, GoalPriority
 from src.executive.decision_engine import DecisionEngine, DecisionOption, DecisionResult
 from src.executive.planning.goap_planner import GOAPPlanner, Plan, WorldState, get_metrics_registry
-from src.executive.planning.action_library import ActionLibrary, create_default_action_library
+from src.executive.planning.action_library import create_default_action_library
 from src.executive.scheduling import (
     DynamicScheduler, SchedulingProblem, Schedule,
     Task, Resource, ResourceType, OptimizationObjective
@@ -125,6 +117,9 @@ class IntegrationConfig:
     # Execution settings
     auto_replan_on_failure: bool = True
     max_replan_attempts: int = 3
+
+    # Side effects (advisor-only defaults)
+    create_reminders_from_schedule: bool = False
     
     # Performance settings
     enable_telemetry: bool = True
@@ -133,10 +128,10 @@ class IntegrationConfig:
 
 class ExecutiveSystem:
     """
-    Unified executive control system integrating goals, decisions, planning, and scheduling.
-    
-    Provides end-to-end orchestration from high-level goals to executable schedules,
-    with monitoring, adaptation, and learning capabilities.
+    Integrated planning/scheduling advisor.
+
+    Produces decision recommendations, GOAP plans, and schedules for a goal.
+    Does not execute actions or actuate tools.
     
     Usage:
         system = ExecutiveSystem()
@@ -144,8 +139,8 @@ class ExecutiveSystem:
         # Create goal
         goal_id = system.goal_manager.create_goal("Complete project", priority=GoalPriority.HIGH)
         
-        # Execute goal (integrated pipeline)
-        context = system.execute_goal(goal_id)
+        # Plan + schedule goal (integrated pipeline)
+        context = system.plan_goal(goal_id)
         
         # Monitor progress
         status = system.get_execution_status(goal_id)
@@ -190,8 +185,23 @@ class ExecutiveSystem:
         self.metrics.inc("executive_system_init_total")
     
     def execute_goal(self, goal_id: str, initial_state: Optional[WorldState] = None) -> ExecutionContext:
+        """Backward-compatible alias for :meth:`plan_goal`.
+
+        This method name is legacy; it does not execute actions.
         """
-        Execute complete pipeline for a goal: Decision → Plan → Schedule.
+        return self.plan_goal(goal_id, initial_state=initial_state)
+
+    def plan_goal(
+        self,
+        goal_id: str,
+        initial_state: Optional[WorldState] = None,
+        *,
+        create_reminders: Optional[bool] = None,
+    ) -> ExecutionContext:
+        """
+        Plan and schedule a goal: Decision → Plan → Schedule.
+
+        Advisor-only: produces artifacts but does not commit actions.
         
         Args:
             goal_id: ID of goal to execute
@@ -210,7 +220,7 @@ class ExecutiveSystem:
         if not goal:
             raise ValueError(f"Goal {goal_id} not found")
         
-        logger.info(f"Executing goal: {goal.title} (priority={goal.priority.value})")
+        logger.info(f"Planning goal pipeline: {goal.title} (priority={goal.priority.value})")
         
         # Create execution context
         context = ExecutionContext(
@@ -258,17 +268,22 @@ class ExecutiveSystem:
             context.scheduling_time_ms = (datetime.now() - scheduling_start).total_seconds() * 1000
             self.active_schedules[goal_id] = schedule
             
-            # Stage 4: Auto-generate reminders from scheduled tasks
-            logger.info("Stage 4: Creating reminders from plan...")
-            reminder_count = self._create_reminders_from_schedule(goal_id, schedule, plan)
-            if reminder_count > 0:
-                logger.info(f"  - Created {reminder_count} reminders for plan steps")
+            # Stage 4 (optional side effect): Auto-generate reminders from scheduled tasks
+            do_reminders = self.config.create_reminders_from_schedule if create_reminders is None else bool(create_reminders)
+            if do_reminders:
+                logger.info("Stage 4: Creating reminders from plan (opt-in)...")
+                reminder_count = self._create_reminders_from_schedule(goal_id, schedule, plan)
+                if reminder_count > 0:
+                    logger.info(f"  - Created {reminder_count} reminders for plan steps")
             
-            # Mark as ready for execution
+            # Mark as ready (advisor-only: does not execute actions)
             context.status = ExecutionStatus.EXECUTING
             context.total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
+
+            context.metadata["advisor_only"] = True
+            context.metadata["ready_to_execute"] = True
             
-            logger.info(f"Goal {goal.title} ready for execution:")
+            logger.info(f"Goal {goal.title} planned + scheduled (ready to execute by executive core):")
             logger.info(f"  - Decision time: {context.decision_time_ms:.1f}ms")
             logger.info(f"  - Planning time: {context.planning_time_ms:.1f}ms")
             logger.info(f"  - Scheduling time: {context.scheduling_time_ms:.1f}ms")
@@ -664,7 +679,6 @@ class ExecutiveSystem:
         context.total_time_ms = (context.end_time - context.start_time).total_seconds() * 1000
         
         # Record outcome
-        from src.executive.learning.outcome_tracker import OutcomeRecord
         outcome = self.outcome_tracker.record_outcome(
             context,
             outcome_score=outcome_score,

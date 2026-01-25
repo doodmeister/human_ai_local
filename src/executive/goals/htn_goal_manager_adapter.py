@@ -31,12 +31,11 @@ Usage:
 """
 
 from typing import Dict, List, Optional, Any, Set
-from dataclasses import dataclass
 from datetime import datetime
 import uuid
 
 # HTN imports
-from .goal_taxonomy import Goal as HTNGoal, GoalType, GoalStatus as HTNGoalStatus, GoalPriority as HTNGoalPriority
+from .goal_taxonomy import Goal as HTNGoal, GoalType, GoalStatus as HTNGoalStatus
 from .htn_manager import HTNManager, DecompositionResult
 
 # Legacy imports

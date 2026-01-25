@@ -17,8 +17,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
-from ...executive.executive_agent import ExecutiveAgent
-from ...executive.goal_manager import GoalPriority
+from src.orchestration.executive_facade import ExecutiveAgent, GoalPriority
 
 router = APIRouter()
 

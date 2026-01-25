@@ -12,11 +12,11 @@ from datetime import datetime, timedelta
 import tempfile
 import shutil
 import time
-from src.memory.memory_system import MemorySystem
+from src.memory.memory_system import MemorySystem, MemorySystemConfig
 
 
-def test_episodic_memory_integration():
-    """Test the corrected episodic memory integration"""
+def run_episodic_memory_integration() -> bool:
+    """Run the corrected episodic memory integration flow (script-friendly)."""
     print("🧠 Testing Episodic Memory Integration (Fixed)")
     print("=" * 60)
     
@@ -26,19 +26,21 @@ def test_episodic_memory_integration():
     try:
         # Initialize integrated memory system
         print("\n1. Initializing Memory System with Episodic Memory...")
-        memory_system = MemorySystem(
+        config = MemorySystemConfig(
             chroma_persist_dir=os.path.join(test_dir, "chroma"),
             use_vector_stm=True,
-            use_vector_ltm=True
+            use_vector_ltm=True,
         )
+        memory_system = MemorySystem(config)
         
         # Verify episodic memory is initialized
         print(f"   Episodic Memory Available: {hasattr(memory_system, 'episodic') and memory_system.episodic is not None}")
-        
+
         if not hasattr(memory_system, 'episodic') or memory_system.episodic is None:
             print("   ❌ ERROR: Episodic memory not initialized!")
-            return
-          # Test 1: Create episodic memory
+            return False
+
+        # Test 1: Create episodic memory
         print("\n2. Creating Episodic Memory...")
         episode_id = memory_system.create_episodic_memory(
             summary="Python programming discussion",
@@ -52,6 +54,8 @@ def test_episodic_memory_integration():
         )
         print(f"   Created Episode ID: {episode_id}")
         print(f"   Episode Created: {episode_id is not None}")
+        if episode_id is None:
+            return False
         
         # Wait for ChromaDB initialization and indexing
         time.sleep(2)
@@ -200,7 +204,7 @@ def test_episodic_memory_integration():
         
         print("\n✅ Episodic Memory Integration Test Completed Successfully!")
         print("=" * 60)
-        
+
         return True
         
     except Exception as e:
@@ -219,7 +223,10 @@ def test_episodic_memory_integration():
 
 
 if __name__ == "__main__":
-    success = test_episodic_memory_integration()
+    success = run_episodic_memory_integration()
     sys.exit(0 if success else 1)
-    success = test_episodic_memory_integration()
-    sys.exit(0 if success else 1)
+
+
+def test_episodic_memory_integration():
+    assert run_episodic_memory_integration() is True
+

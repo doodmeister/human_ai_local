@@ -500,7 +500,7 @@ class GOAPTaskPlannerAdapter:
             self.feature_flags = get_feature_flags()
             self.goap_available = True
             
-        except ImportError as e:
+        except ImportError:
             # GOAP not available, will use legacy planning
             self.goap_available = False
     
@@ -554,7 +554,7 @@ class GOAPTaskPlannerAdapter:
             
             return task_ids
             
-        except Exception as e:
+        except Exception:
             # Error in GOAP planning, fallback if enabled
             if self.feature_flags and self.feature_flags.fallback_to_legacy:
                 return self.task_planner.decompose_goal(goal_id)
@@ -737,7 +737,7 @@ class GOAPTaskPlannerAdapter:
         # Add GOAP planner stats if available
         if self.goap_available and self.goap_planner:
             try:
-                from ..chat.metrics import metrics_registry
+                from ..memory.metrics import metrics_registry
                 
                 stats['goap_planning_attempts'] = metrics_registry.get_counter('goap_planning_attempts_total')
                 stats['goap_plans_found'] = metrics_registry.get_counter('goap_plans_found_total')

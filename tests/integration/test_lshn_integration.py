@@ -18,8 +18,8 @@ import numpy as np
 # Add project root to path
 sys.path.insert(0, os.path.abspath('.'))
 
-from src.processing.neural.lshn_network import LSHNNetwork, LSHNConfig
-from src.core.cognitive_agent import CognitiveAgent
+from src.cognition.processing.neural.lshn_network import LSHNNetwork, LSHNConfig
+from src.orchestration.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig
 
 @pytest.mark.asyncio

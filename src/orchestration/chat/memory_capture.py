@@ -37,7 +37,10 @@ class MemoryCaptureModule:
             m = pattern.search(norm)
             if not m:
                 continue
-            subject = None; predicate = None; obj = None; content = None
+            subject = None
+            predicate = None
+            obj = None
+            content = None
             if mtype == "identity_fact":
                 if "subject" in m.groupdict():
                     subject = m.group("subject").strip()
@@ -50,15 +53,30 @@ class MemoryCaptureModule:
                     obj = m.group("self").strip()
                     content = f"User identity: {obj}"
             elif mtype == "preference":
-                subject = "user"; predicate = "likes"; obj = m.group("obj").strip(); content = f"User likes {obj}"
+                subject = "user"
+                predicate = "likes"
+                obj = m.group("obj").strip()
+                content = f"User likes {obj}"
             elif mtype == "goal_intent":
-                subject = "user"; predicate = "intends"; obj = m.group("obj").strip(); content = f"User intends to {obj}"
+                subject = "user"
+                predicate = "intends"
+                obj = m.group("obj").strip()
+                content = f"User intends to {obj}"
             elif mtype == "task_directive":
-                subject = "user"; predicate = "remind"; obj = m.group("obj").strip(); content = f"Reminder: {obj}"
+                subject = "user"
+                predicate = "remind"
+                obj = m.group("obj").strip()
+                content = f"Reminder: {obj}"
             elif mtype == "feedback_evaluation":
-                subject = "user"; predicate = "feedback"; obj = m.group("obj").strip(); content = f"Feedback: {obj}"
+                subject = "user"
+                predicate = "feedback"
+                obj = m.group("obj").strip()
+                content = f"Feedback: {obj}"
             elif mtype == "emotional_state":
-                subject = "user"; predicate = "feels"; obj = m.group("obj").strip(); content = f"User feels {obj}"
+                subject = "user"
+                predicate = "feels"
+                obj = m.group("obj").strip()
+                content = f"User feels {obj}"
             if content:
                 out.append(CapturedMemory(mtype, content, subject, predicate, obj, raw_text=norm))
         return out

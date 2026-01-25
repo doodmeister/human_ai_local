@@ -1,15 +1,11 @@
-"""
-Executive Functioning Module
+"""Executive Functioning Module
 
-This module implements the executive control system that orchestrates all cognitive processes.
-It provides goal management, task planning, decision making, and cognitive control.
-
-Key Components:
-- GoalManager: Hierarchical goal tracking and prioritization
-- TaskPlanner: Goal decomposition and task sequencing  
-- DecisionEngine: Multi-criteria decision making
-- CognitiveController: Resource allocation and process coordination
-- ExecutiveAgent: Main orchestrator integrating all components
+Phase 2 (Executive Collapse):
+        - The single executive owner is `ExecutiveController` in `executive_core.py`.
+        - Legacy components in this package (decision engine, controller, planners) are
+            advisor-only and must not commit actions.
+        - `ExecutiveAgent` is kept as a backwards-compatible facade that delegates
+            turn execution to the executive core.
 """
 
 from .goal_manager import GoalManager

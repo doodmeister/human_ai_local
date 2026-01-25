@@ -3,7 +3,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Dict
 import time
 import uuid
-from src.chat.metrics import metrics_registry
+from src.memory.metrics import metrics_registry
+from src.learning.learning_law import clamp01, utility_score
 
 @dataclass
 class ConsolidationPolicy:
@@ -35,7 +36,24 @@ class MemoryConsolidator:
         now = time.time()
         stats = self._turn_stats.setdefault(turn_id, {"rehearsals": 0, "first_seen": now, "stm_id": None, "ltm_id": None, "importance": importance, "valence": valence})
         stored_in_stm = False
-        if stats["stm_id"] is None and self.stm and ((salience >= self.policy.salience_threshold) or (abs(valence) >= self.policy.valence_threshold) or importance >= self.policy.promotion_importance_floor):
+
+        # Phase 7: utility-based learning law.
+        # Benefit: content salience/valence/importance (normalized to 0..1).
+        # Cost: STM pressure (best-effort utilization estimate).
+        benefit = clamp01((0.45 * salience) + (0.20 * abs(valence)) + (0.35 * importance))
+        cost = self._estimate_stm_pressure()
+        u = utility_score(benefit=benefit, cost=cost)
+
+        # Preserve prior behavior by gating on original thresholds, but reduce to the single utility signal.
+        # If thresholds indicate likely usefulness, allow utility to dominate; under pressure, utility drops.
+        threshold_gate = (
+            (salience >= self.policy.salience_threshold)
+            or (abs(valence) >= self.policy.valence_threshold)
+            or (importance >= self.policy.promotion_importance_floor)
+        )
+        should_store = threshold_gate and (u >= -0.15)
+
+        if stats["stm_id"] is None and self.stm and should_store:
             mem_id = f"turn-{turn_id}"
             try:
                 self.stm.store(mem_id, content, importance=importance, attention_score=salience, emotional_valence=valence)  # type: ignore[attr-defined]
@@ -74,6 +92,19 @@ class MemoryConsolidator:
             return
         if age < self.policy.min_age_seconds:
             return
+
+        # Phase 7: utility-based learning law.
+        # Benefit: rehearsal evidence + importance; Cost: STM pressure (promotion relieves STM but costs LTM writes).
+        # We treat STM pressure as a *negative* cost to promotion (i.e., relief is beneficial), so use (1 - pressure).
+        rehearsals = float(stats.get("rehearsals", 0))
+        rehearsal_benefit = clamp01(rehearsals / max(1.0, float(self.policy.min_rehearsals_for_promotion) + 1.0))
+        importance = float(stats.get("importance", 0.5))
+        benefit = clamp01(0.55 * importance + 0.45 * rehearsal_benefit)
+        # If STM is pressured, promotion is more valuable (lower cost).
+        cost = clamp01(0.30 * (1.0 - self._estimate_stm_pressure()))
+        u = utility_score(benefit=benefit, cost=cost)
+        if u < 0.10:
+            return
         importance = stats.get("importance", 0.5)
         stm_id = stats["stm_id"]
         content = None
@@ -101,6 +132,24 @@ class MemoryConsolidator:
             metrics_registry.observe_hist("consolidation_promotion_age_seconds", age)
         except Exception:
             return
+
+    def _estimate_stm_pressure(self) -> float:
+        """Best-effort estimate of STM utilization pressure in [0,1]."""
+        stm_obj = self.stm
+        if stm_obj is None:
+            return 0.0
+        cap = getattr(stm_obj, "capacity", None)
+        size = None
+        try:
+            if hasattr(stm_obj, "__len__"):
+                size = len(stm_obj)  # type: ignore[arg-type]
+        except Exception:
+            size = None
+        if size is None:
+            size = getattr(stm_obj, "size", None)
+        if isinstance(size, int) and isinstance(cap, int) and cap > 0:
+            return clamp01(size / cap)
+        return 0.0
 
     def events_tail(self, n: int = 20):
         return [e.__dict__ for e in self._events[-n:]]

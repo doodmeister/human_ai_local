@@ -1,23 +1,20 @@
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
 router = APIRouter()
 
+
 @router.post("/prospective/process_due")
 def process_due_reminders(request: Request):
-    """
-    Process all due reminders: remove from prospective memory and convert to LTM.
-    Returns the number of reminders processed.
-    """
+    """Process due reminders and convert them to LTM."""
     agent = request.app.state.agent
     memsys = agent.memory.prospective
     ltm = agent.memory.ltm
     count = memsys.process_due_reminders(ltm_system=ltm)
     return {"processed": count}
-from fastapi import APIRouter, Request
-
-router = APIRouter()
 
 class ProspectiveRequest(BaseModel):
     description: str
@@ -45,11 +42,6 @@ def retrieve_prospective(event_id: str, request: Request):
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     return event
-
-
-# New endpoint: List all reminders (for CLI `/reminders` command)
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
 
 @router.get("/prospective/search")
 def list_prospective_reminders(request: Request, include_completed: bool = False, goal_id: Optional[str] = None):

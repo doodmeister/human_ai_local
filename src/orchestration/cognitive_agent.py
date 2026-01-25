@@ -11,14 +11,13 @@ import time
 import schedule
 import logging
 
-from .config import CognitiveConfig
-from ..memory.memory_system import MemorySystem, MemorySystemConfig
-from ..memory.stm.vector_stm import VectorShortTermMemory
-from ..memory.ltm.vector_ltm import VectorLongTermMemory
-from ..attention.attention_mechanism import AttentionMechanism
-from ..processing.sensory import SensoryInterface, SensoryProcessor
-from ..processing.dream import DreamProcessor
+from ..core.config import CognitiveConfig
+from ..memory import MemorySystem, MemorySystemConfig
+from ..cognition.attention.attention_mechanism import AttentionMechanism
+from ..cognition.processing.sensory import SensoryInterface, SensoryProcessor
+from ..cognition.processing.dream import DreamProcessor
 from ..optimization.performance_optimizer import PerformanceOptimizer
+from ..orchestration import CognitiveStep, CognitiveTick
 
 # Lazy import LLM provider to avoid circular dependencies
 def _lazy_import_llm():
@@ -128,7 +127,7 @@ class CognitiveAgent:
 
         # Neural integration manager (DPAD)
         try:
-            from ..processing.neural import NeuralIntegrationManager
+            from ..cognition.processing.neural import NeuralIntegrationManager
             self.neural_integration = NeuralIntegrationManager(
                 cognitive_config=self.config,
                 model_save_path="./data/models/dpad"
@@ -175,26 +174,58 @@ class CognitiveAgent:
         """
         try:
             logger.debug(f"Processing {input_type} input: {input_data[:100]}...")
-            
-            # Step 1: Sensory processing and filtering
+
+            tick = CognitiveTick(
+                owner="cognitive_agent",
+                kind="input_turn",
+            )
+            tick.state["session_id"] = self.session_id
+            tick.state["input_type"] = input_type
+            if context is not None:
+                tick.state["context"] = context
+
+            # Perceive
+            tick.assert_step(CognitiveStep.PERCEIVE)
             processed_input = await self._process_sensory_input(input_data, input_type)
-            
-            # Step 2: Memory retrieval and context building
+            tick.state["processed_input"] = processed_input
+            tick.advance(CognitiveStep.PERCEIVE)
+
+            # Update STM (turn-local working state; persistent storage occurs at Consolidate)
+            tick.assert_step(CognitiveStep.UPDATE_STM)
+            tick.state["raw_input"] = input_data
+            tick.advance(CognitiveStep.UPDATE_STM)
+
+            # Retrieve
+            tick.assert_step(CognitiveStep.RETRIEVE)
             memory_context = await self._retrieve_memory_context(processed_input)
-              # Step 3: Attention allocation
+            tick.state["memory_context"] = memory_context
+            tick.advance(CognitiveStep.RETRIEVE)
+
+            # Decide (single decision owner per tick)
+            tick.assert_step(CognitiveStep.DECIDE)
             attention_scores = await self._calculate_attention_allocation(processed_input, memory_context)
-            
-            # Step 4: Response generation (placeholder for LLM integration)
+            tick.mark_decided({"attention_scores": attention_scores})
+            tick.state["attention_scores"] = attention_scores
+            tick.advance(CognitiveStep.DECIDE)
+
+            # Act
+            tick.assert_step(CognitiveStep.ACT)
             response = await self._generate_response(processed_input, memory_context, attention_scores)
-            
-            # Step 5: Memory consolidation
-            await self._consolidate_memory(input_data, response, attention_scores)
-            
-            # Step 6: Update cognitive state
+            tick.state["response"] = response
+            tick.advance(CognitiveStep.ACT)
+
+            # Reflect
+            tick.assert_step(CognitiveStep.REFLECT)
             self._update_cognitive_state(attention_scores)
-            
+            tick.advance(CognitiveStep.REFLECT)
+
+            # Consolidate
+            tick.assert_step(CognitiveStep.CONSOLIDATE)
+            await self._consolidate_memory(input_data, response, attention_scores)
+            tick.finish()
+
             return response
-            
+
         except Exception as e:
             logger.error(f"Error in cognitive processing: {e}")
             return "I encountered an error while processing your request. Please try again."
@@ -296,6 +327,21 @@ class CognitiveAgent:
                         "relevance": relevance,
                         "timestamp": getattr(memory_obj, "encoding_time", None),
                     })
+
+            # Semantic memory is not part of MemorySystem.search_memories(), so include it here.
+            try:
+                semantic_results = self.memory.semantic.search(query=proactive_query)
+                for fact in list(semantic_results)[:5]:
+                    fact_text = fact.get("fact_text") or f"{fact.get('subject', '')} {fact.get('predicate', '')} {fact.get('object', '')}".strip()
+                    context_memories.append({
+                        "id": fact.get("fact_id"),
+                        "content": str(fact_text),
+                        "source": "Semantic",
+                        "relevance": 0.8,
+                        "timestamp": None,
+                    })
+            except Exception as e:
+                logger.debug(f"Semantic memory search unavailable: {e}")
             
             return context_memories
             
@@ -369,6 +415,40 @@ class CognitiveAgent:
     ) -> str:
         """Generate response using LLM with cognitive context"""
         if not self.llm_provider:
+            if memory_context:
+                # Deterministic fallback for testability and offline operation.
+                # Prefer relevance but keep source diversity so one system (e.g., Semantic)
+                # doesn't crowd out others (e.g., Episodic) during recall.
+                ranked = sorted(memory_context, key=lambda m: float(m.get("relevance", 0.0)), reverse=True)
+
+                selected: list[dict[str, Any]] = []
+                seen_ids: set[object] = set()
+
+                def _add(item: dict[str, Any]) -> None:
+                    key = item.get("id") if item.get("id") is not None else id(item)
+                    if key in seen_ids:
+                        return
+                    seen_ids.add(key)
+                    selected.append(item)
+
+                by_source: dict[str, list[dict[str, Any]]] = {}
+                for item in ranked:
+                    source = str(item.get("source", "Memory"))
+                    by_source.setdefault(source, []).append(item)
+
+                for source in ["Episodic", "STM", "LTM", "Semantic"]:
+                    if source in by_source and by_source[source]:
+                        _add(by_source[source][0])
+
+                for item in ranked:
+                    if len(selected) >= 5:
+                        break
+                    _add(item)
+
+                rendered = "\n".join(
+                    f"- ({m.get('source', 'Memory')}) {m.get('content', '')}" for m in selected
+                )
+                return f"I don't have an LLM configured, but I found these relevant memories:\n{rendered}"
             return "[LLM unavailable: No LLM provider configured.]"
         
         # Build LLM messages
@@ -677,19 +757,30 @@ class CognitiveAgent:
         stm_metacognitive_stats = None
         
         # Get LTM reflection data
-        if isinstance(ltm, VectorLongTermMemory):
-            ltm_health_report = ltm.get_memory_health_report()
+        if hasattr(ltm, "get_memory_health_report"):
+            try:
+                ltm_health_report = ltm.get_memory_health_report()  # type: ignore[attr-defined]
+            except Exception:
+                ltm_health_report = None
             
         # Get STM reflection data
-        if isinstance(stm, VectorShortTermMemory):
-            all_memories = stm.get_all_memories()
-            stm_metacognitive_stats = {
-                "capacity_utilization": len(all_memories) / stm.config.capacity,
-                "error_rate": stm._error_count / max(1, stm._operation_count),
-                "memory_count": len(all_memories),
-                "avg_importance": sum(m.importance for m in all_memories) / max(1, len(all_memories)),
-                "recent_activity": stm._operation_count
-            }
+        if hasattr(stm, "get_all_memories"):
+            try:
+                all_memories = stm.get_all_memories()  # type: ignore[attr-defined]
+                capacity = getattr(getattr(stm, "config", None), "capacity", None)
+                capacity_value = float(capacity) if capacity else 1.0
+                error_count = float(getattr(stm, "_error_count", 0.0))
+                operation_count = float(getattr(stm, "_operation_count", 0.0))
+                stm_metacognitive_stats = {
+                    "capacity_utilization": len(all_memories) / max(1.0, capacity_value),
+                    "error_rate": error_count / max(1.0, operation_count),
+                    "memory_count": len(all_memories),
+                    "avg_importance": sum(getattr(m, "importance", 0.0) for m in all_memories)
+                    / max(1, len(all_memories)),
+                    "recent_activity": operation_count,
+                }
+            except Exception:
+                stm_metacognitive_stats = None
         
         report = {
             "timestamp": timestamp,

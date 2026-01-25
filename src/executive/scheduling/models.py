@@ -238,9 +238,6 @@ class Schedule:
         if not scheduled:
             return []
         
-        # Build dependency graph
-        graph: Dict[str, Set[str]] = {task.id: set(task.dependencies) for task in scheduled}
-        
         # Calculate earliest start/finish times (forward pass)
         earliest_start: Dict[str, datetime] = {}
         earliest_finish: Dict[str, datetime] = {}
@@ -354,7 +351,7 @@ class Schedule:
         if self.cognitive_timeline:
             loads = [load for _, load in self.cognitive_timeline]
             mean_load = sum(loads) / len(loads)
-            load_variance = sum((l - mean_load) ** 2 for l in loads) / len(loads)
+            load_variance = sum((load - mean_load) ** 2 for load in loads) / len(loads)
             cognitive_score = 1.0 - min(1.0, load_variance * 2)
         else:
             cognitive_score = 1.0

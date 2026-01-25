@@ -18,11 +18,11 @@ Algorithm:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional
 import uuid
 import logging
 
-from .goal_taxonomy import Goal, GoalType, GoalStatus
+from .goal_taxonomy import Goal, GoalStatus
 from .decomposition import Method, create_default_methods
 
 logger = logging.getLogger(__name__)

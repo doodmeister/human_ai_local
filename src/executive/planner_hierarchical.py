@@ -3,10 +3,14 @@ from dataclasses import dataclass, field
 from typing import List
 from .executive_core import Goal, Task, Planner
 
-"""Hierarchical / heuristic planner stub.
+"""Hierarchical / heuristic planner stub (Phase 2: Advisor-Only).
 
-Produces a small task graph from a Goal description. This is a deterministic
-placeholder; can be upgraded to LLM-backed decomposition.
+Produces a small task graph from a Goal description.
+
+Phase 2 constraint:
+    - No module except the executive core may commit actions.
+
+This planner only *suggests* tasks; it does not execute or actuate anything.
 """
 
 @dataclass(frozen=True)
