@@ -8,7 +8,7 @@ Completed in repo:
 - [x] Debug tests: no `tests/debug/` in the active test tree.
 - [x] Entrypoints: only `main.py` is present as a canonical entrypoint (no `start_server.py` / `start_george.py`).
 - [x] Orchestration layer exists: `src/orchestration/` is present and hosts chat runtime components.
-- [x] Chat shims: removed deprecated `src/chat/intent_classifier*.py` and `src/chat/emotion_salience.py`; use `src/orchestration/chat/*`.
+- [x] Chat shims: removed deprecated `src/chat/intent_classifier*.py` and `src/chat/emotion_salience.py`; use `src/orchestration/chat/*` (note: the `src.chat` package still exists as a deprecated compatibility layer for other chat modules).
 - [x] Attention centralization: removed deprecated `src/attention/*` shims; canonical implementation is `src/cognition/attention/*` and executive/chat code delegates via `AttentionManager`.
 - [x] Memory facade is in place: `src/memory/__init__.py` exports `MemorySystem`, and there are no direct imports of `src.memory.semantic.*` / `src.memory.episodic.*` from other `src/` modules.
 
@@ -113,7 +113,7 @@ Remaining work here is mostly cleanup/consistency (imports + eventual shim remov
 Status update:
 - COMPLETED (structure): the active implementations live under `src/orchestration/chat/`.
 - COMPLETED: `src/orchestration/chat/intent_classifier.py` is now a deprecated shim that re-exports v2.
-- PARTIALLY RESOLVED: `src/chat/intent_classifier.py` and `src/chat/intent_classifier_v2.py` remain as deprecated shims for backwards compatibility.
+- COMPLETED: legacy `src/chat/intent_classifier*.py` shims have been removed.
 3. Refactors to Reduce Complexity (No Capability Loss)
 ✅ Introduce Explicit Layering
 Current issue: Cross-imports between chat, executive, memory, attention.
@@ -173,6 +173,8 @@ Cognitive/dream tests = scenarios
 Debug tests ≠ CI tests
 
 Status: PARTIALLY COMPLETED — `tests/unit/` exists, and integration-style tests are grouped under `tests/integration/`, but many tests still live at the top level (and there is also `tests/cognitive/`). If you still want the proposed taxonomy, the next step is a safe mechanical move + updating any path-based fixtures.
+
+Status: COMPLETED — scenario/cognitive tests have been moved under `tests/scenarios/`, and `tests/cognitive/` is no longer present.
 4. Proposed New Directory & Ownership Structure
 ✅ Target Structure
 human_ai_local/
@@ -217,24 +219,26 @@ Status of the plan items:
 - COMPLETED: introduce orchestration layer.
 - COMPLETED: reduce entrypoints to 1–2 (currently effectively 1).
 - SUPERSEDED: flatten executive subfolders (current structure is intentional and working).
-- PENDING: normalize test taxonomy.
+- COMPLETED: normalize test taxonomy.
 
 Concrete execution checklist (next)
 
 1) Resolve intent classifier duplication (or formalize it)
-- [ ] Decide canonical: keep `src/orchestration/chat/intent_classifier_v2.py` as the only implementation OR make both first-class strategies.
-- [ ] If v2 is canonical: turn `src/orchestration/chat/intent_classifier.py` into a deprecated shim (matching the `src/chat/*` shim pattern) and update any orchestration callers to use v2 explicitly.
-- [ ] Add/adjust one test that asserts the canonical classifier is wired by default (factory/service wiring).
+- [x] Decide canonical: keep `src/orchestration/chat/intent_classifier_v2.py` as the only implementation OR make both first-class strategies.
+- [x] If v2 is canonical: turn `src/orchestration/chat/intent_classifier.py` into a deprecated shim (matching the `src/chat/*` shim pattern) and update any orchestration callers to use v2 explicitly.
+- [x] Add/adjust one test that asserts the canonical classifier is wired by default (factory/service wiring).
 
 2) Normalize test taxonomy (safe mechanical move)
-- [ ] Create `tests/scenarios/` (if you want to preserve the “cognitive/dream tests = scenarios” rule).
-- [ ] Move `tests/cognitive/*` → `tests/scenarios/*`.
-- [ ] Move top-level scenario-like tests (e.g., dream/pipeline/integration demos) into `tests/scenarios/` or `tests/integration/` as appropriate.
-- [ ] Keep `tests/unit/` minimal and fast; keep `tests/integration/` for multi-module wiring.
-- [ ] Run `ruff` + `pytest` to confirm no path-based fixtures broke.
+- [x] Create `tests/scenarios/` (if you want to preserve the “cognitive/dream tests = scenarios” rule).
+- [x] Move `tests/cognitive/*` → `tests/scenarios/*`.
+- [x] Move top-level scenario-like tests (e.g., dream/pipeline/integration demos) into `tests/scenarios/` or `tests/integration/` as appropriate.
+- [x] Keep `tests/unit/` minimal and fast; keep `tests/integration/` for multi-module wiring.
+- [x] Run `ruff` + `pytest` to confirm no path-based fixtures broke.
 
 3) Import normalization + shim removal path
-- [ ] Standardize imports to facades:
+
+- [x] Standardize imports to facades:
 	- Prefer `from src.memory import MemorySystem, MemorySystemConfig`.
 	- Prefer `from src.cognition.attention.attention_manager import get_attention_manager` for allocation/scoring.
-- [ ] Keep deprecated shims (`src/chat/*`, `src/attention/*`, `src/memory/stm/vector_stm.py`) until a chosen cutoff, then delete and fix imports in one sweep.
+
+- [ ] Decide a cutoff for remaining deprecated compatibility packages (notably `src.chat` and `src.processing`) and remove them in one sweep after confirming there are no in-repo imports.
