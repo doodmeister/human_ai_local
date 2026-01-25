@@ -44,11 +44,8 @@ This directory contains world-class Streamlit interfaces for interacting with Ge
 ```bash
 # From the main project directory
 
-# Git Bash / Linux / Mac
-../start_george.sh
-
-# Any terminal
-python ../start_george.py
+# Single entrypoint
+python main.py ui
 ```
 
 ### Option 2: Direct Launch
@@ -68,7 +65,7 @@ streamlit run george_streamlit_enhanced.py --server.port 8502
 1. **George API Server** must be running:
    ```bash
    # From the main project directory
-   python start_server.py
+   python main.py api
    ```
    API will be available at: http://localhost:8000
 

@@ -1,54 +1,17 @@
-"""
-Neural Processing Module
+# ruff: noqa
+"""Deprecated shim package for ``src.processing.neural``.
 
-This module implements neural networks for biologically-inspired cognitive processing:
-- DPAD (Dual-Path Attention Dynamics) neural network architecture
-- LSHN (Latent Structured Hopfield Networks) for episodic memory
-
-Key Components:
-- DPADNetwork: Core neural network with dual-path processing
-- LSHNNetwork: Hopfield-based episodic memory network
-- NeuralIntegrationManager: Integration with cognitive architecture
+Use ``src.cognition.processing.neural``.
 """
 
-from .dpad_network import (
-    DPADNetwork,
-    DPADTrainer,
-    DPADConfig,
-    NonlinearityType,
-    FlexibleNonlinearity,
-    AttentionGate,
-    BehaviorPredictionPath,
-    ResidualPredictionPath
+from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "`src.processing.neural` is deprecated; use `src.cognition.processing.neural`.",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
-from .lshn_network import (
-    LSHNNetwork,
-    LSHNTrainer,
-    LSHNConfig,
-    EpisodicMemoryEncoder,
-    HopfieldAssociativeMemory
-)
-
-from .neural_integration import (
-    NeuralIntegrationManager,
-    NeuralIntegrationConfig
-)
-
-__all__ = [
-    'DPADNetwork',
-    'DPADTrainer', 
-    'DPADConfig',
-    'NonlinearityType',
-    'FlexibleNonlinearity',
-    'AttentionGate',
-    'BehaviorPredictionPath',
-    'ResidualPredictionPath',
-    'LSHNNetwork',
-    'LSHNTrainer',
-    'LSHNConfig', 
-    'EpisodicMemoryEncoder',
-    'HopfieldAssociativeMemory',
-    'NeuralIntegrationManager',
-    'NeuralIntegrationConfig'
-]
+from src.cognition.processing.neural import *  # type: ignore

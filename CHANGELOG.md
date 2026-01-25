@@ -4,6 +4,14 @@ All notable changes to the Human-AI Cognition Framework.
 
 ---
 
+## [January 2026] - API Compatibility & Deprecation Policy
+
+### API surface stabilization ✅
+- **Canonical endpoints**: Prefer unprefixed routes like `/agent/chat`, `/agent/reminders*`, `/memory/*`, `/procedure/*`, `/executive/*`.
+- **Legacy aliases**: `/api/*` routes remain available temporarily but return deprecation headers.
+- **Deprecation signaling**: Deprecated endpoints return `Deprecation: true` and `Link: <successor>; rel="successor-version"`.
+- **Removal milestone**: Deprecated aliases planned for removal on **2026-04-01** (or first release after).
+
 ## [November 2025] - Learning Infrastructure (Week 16)
 
 ### Phase 4: A/B Testing ✅
@@ -11,25 +19,25 @@ All notable changes to the Human-AI Cognition Framework.
 - **Statistical Analysis**: Chi-square, t-test, Mann-Whitney, Cohen's d
 - **DecisionEngine Integration**: Automatic strategy assignment and outcome tracking
 - **Recommendation System**: Confidence-based strategy selection
-- Tests: 23/23 passing | Docs: `docs/WEEK_16_PHASE_4_AB_TESTING.md`
+- Tests: 23/23 passing | Docs: `docs/archive/WEEK_16_PHASE_4_AB_TESTING.md`
 
 ### Phase 3: ML Training Pipeline ✅
 - **Model Trainer**: 4 ML models (strategy classifier, success predictor, time/outcome regressors)
 - **Model Predictor**: Batch predictions with caching
 - **DecisionEngine ML Boost**: +5% to +15% confidence adjustments
-- Tests: 40/41 passing | Docs: `docs/WEEK_16_PHASE_3_TRAINING_PIPELINE.md`
+- Tests: 40/41 passing | Docs: `docs/archive/WEEK_16_PHASE_3_TRAINING_PIPELINE.md`
 
 ### Phase 2: Feature Extraction ✅
 - **FeatureVector**: 23-field structured features for ML training
 - **Multi-format Export**: CSV, JSON, Parquet
 - **Normalization**: StandardScaler, MinMaxScaler
-- Tests: 21/21 passing | Docs: `docs/WEEK_16_PHASE_2_FEATURE_EXTRACTION.md`
+- Tests: 21/21 passing | Docs: `docs/archive/WEEK_16_PHASE_2_FEATURE_EXTRACTION.md`
 
 ### Phase 1: Outcome Tracking ✅
 - **OutcomeTracker**: Records execution results with accuracy analysis
 - **AccuracyMetrics**: Time, plan adherence, goal achievement tracking
 - **Persistent Storage**: JSON files in `data/outcomes/`
-- Tests: 20/20 passing | Docs: `docs/WEEK_16_PHASE_1_OUTCOME_TRACKING.md`
+- Tests: 20/20 passing | Docs: `docs/archive/WEEK_16_PHASE_1_OUTCOME_TRACKING.md`
 
 ---
 
@@ -40,7 +48,7 @@ All notable changes to the Human-AI Cognition Framework.
 - **ExecutionContext**: Full state tracking with timing metrics
 - **System Health**: Monitoring and execution history
 - **Pipeline Latency**: 12-15s end-to-end
-- Tests: 17/24 passing (core 100% functional) | Docs: `docs/WEEK_15_COMPLETION_SUMMARY.md`
+- Tests: 17/24 passing (core 100% functional) | Docs: `docs/archive/WEEK_15_COMPLETION_SUMMARY.md`
 
 ---
 
@@ -51,7 +59,7 @@ All notable changes to the Human-AI Cognition Framework.
 - **ScheduleMonitor**: Real-time disruption detection
 - **ScheduleAnalyzer**: Proactive warnings (resource contention, deadline risks)
 - **ScheduleVisualizer**: 7 export formats (Gantt, timeline, resource utilization, etc.)
-- Tests: 36/36 passing | Docs: `docs/WEEK_14_COMPLETION_SUMMARY.md`
+- Tests: 36/36 passing | Docs: `docs/archive/WEEK_14_COMPLETION_SUMMARY.md`
 
 ---
 
@@ -62,7 +70,7 @@ All notable changes to the Human-AI Cognition Framework.
 - **Constraint Types**: Precedence, resource capacity, deadlines, time windows, cognitive load
 - **Optimization**: Minimize makespan, maximize priority, weighted objectives
 - **30s Solver Timeout**: 4 workers for parallel search
-- Tests: 17/17 passing | Docs: `docs/WEEK_12_COMPLETION_SUMMARY.md`
+- Tests: 17/17 passing | Docs: `docs/archive/WEEK_12_COMPLETION_SUMMARY.md`
 
 ---
 
@@ -75,7 +83,7 @@ All notable changes to the Human-AI Cognition Framework.
 - **Constraints**: 5 types (resource, temporal, dependency, state, custom)
 - **ReplanningEngine**: Failure detection and plan repair
 - **Telemetry**: 10 metrics tracked via metrics_registry
-- Tests: 96 total (71 unit + 16 adapter + 9 integration) | Docs: `docs/PHASE_2_FINAL_COMPLETE.md`
+- Tests: 96 total (71 unit + 16 adapter + 9 integration) | Docs: `docs/archive/PHASE_2_FINAL_COMPLETE.md`
 
 ---
 
@@ -87,7 +95,7 @@ All notable changes to the Human-AI Cognition Framework.
 - **Context Analyzer**: Dynamic weight adjustment (cognitive load, time pressure, risk)
 - **ML Decision Model**: Learn from outcomes with decision trees
 - **Feature Flags**: Gradual rollout with legacy fallback
-- Tests: Comprehensive coverage | Docs: `docs/PHASE_1_COMPLETION_SUMMARY.md`
+- Tests: Comprehensive coverage | Docs: `docs/archive/PHASE_1_COMPLETION_SUMMARY.md`
 
 ---
 
@@ -149,77 +157,37 @@ All notable changes to the Human-AI Cognition Framework.
 ## [June 2025] - Prospective Memory (Week 11)
 
 ### Time-Based Reminders ✅
-- **InMemoryProspectiveMemory**: Lightweight implementation
-- **VectorProspectiveMemory**: Semantic search with ChromaDB
-- **Unified Interface**: 10 methods (add, get, list, search, complete, delete, etc.)
-- **Factory Pattern**: Graceful fallback to in-memory
-- **Backward Compatibility**: Legacy API preserved
-- **Chat Integration**: Rank-0 context items from prospective memory
-- Tests: Comprehensive | Docs: `docs/WEEK_11_COMPLETION_SUMMARY.md`
+- [Week 12 Completion Summary](docs/archive/WEEK_12_COMPLETION_SUMMARY.md)
+- Tests: Comprehensive | Docs: `docs/archive/WEEK_11_COMPLETION_SUMMARY.md`
 
 ---
 
-## [May 2025] - Foundation Systems
-
-### Executive Functions (Phase 0)
-- **GoalManager**: Hierarchical goals with dependencies, priorities, deadlines
-- **TaskPlanner**: Template-based task decomposition
-- **DecisionEngine**: Weighted multi-criteria scoring
+ [Week 15 Completion Summary](docs/archive/WEEK_15_COMPLETION_SUMMARY.md)
 
 ### Memory Foundation
 - **BaseMemorySystem**: Abstract interface for all memory types
 - **Memory Consolidation**: Initial STM→LTM transfer logic
-- **ChromaDB Integration**: Vector storage for semantic search
-
-### Chat System
-- **ChatService**: Conversation orchestration
-- **ContextBuilder**: Multi-stage memory retrieval
-- **FastAPI Endpoints**: REST API for chat interactions
+ [Week 14 Completion Summary](docs/archive/WEEK_14_COMPLETION_SUMMARY.md)
 - **Streamlit UI**: Interactive chat interface
 
 ---
 
-## Configuration Highlights
-
-### Memory Settings
-- `STM_CAPACITY=7` - Working memory limit
-- `SALIENCE_DECAY_RATE=0.1` - Memory decay rate
-- `CHROMA_PERSIST_DIR` - Vector database storage
+ [Week 16 Phase 4 A/B Testing](docs/archive/WEEK_16_PHASE_4_AB_TESTING.md)
 
 ### Executive Settings
-- `GOAP_ENABLED=1` - Enable GOAP planning
-- `USE_VECTOR_PROSPECTIVE=0` - In-memory vs semantic reminders
-- Feature flags for AHP, Pareto, ML predictions
-
-### Performance Settings
+ [Week 16 Phase 3 Training Pipeline](docs/archive/WEEK_16_PHASE_3_TRAINING_PIPELINE.md)
 - `MAX_ATTENTION_CAPACITY=100` - Attention limit
 - `COGNITIVE_LOAD_THRESHOLD=0.75` - Overload detection
-- `FATIGUE_THRESHOLD=80` - Attention fatigue limit
-
----
-
-## Breaking Changes
+ [Week 16 Phase 2 Feature Extraction](docs/archive/WEEK_16_PHASE_2_FEATURE_EXTRACTION.md)
 
 ### November 2025
-- `ExecutiveSystem.execute_goal()` now requires `initial_state` as `WorldState` dict (not kwargs)
-- Success criteria format: `"var=value"` with type auto-conversion
-
-### October 2025
-- `Schedule.quality_metrics` now auto-populated (call `update_quality_metrics()` for latest)
+ [Week 16 Phase 1 Outcome Tracking](docs/archive/WEEK_16_PHASE_1_OUTCOME_TRACKING.md)
 - `CPScheduler` requires `SchedulerConfig` for initialization
 
 ### September 2025
 - GOAP `WorldState` is now immutable (frozen dataclass) - use `.set()` for updates
-- `ActionLibrary` replaces direct action creation
-
----
-
-## Migration Guides
-
-- **GOAP Planning**: See `docs/PHASE_2_FINAL_COMPLETE.md` for migration from legacy TaskPlanner
-- **Dynamic Scheduling**: See `docs/WEEK_14_COMPLETION_SUMMARY.md` for quality metrics integration
-- **Learning System**: See `docs/WEEK_16_PHASE_4_AB_TESTING.md` for experiment setup
-
+ [Phase 2 Final Complete](docs/archive/PHASE_2_FINAL_COMPLETE.md)
+- **Learning System**: See `docs/archive/WEEK_16_PHASE_4_AB_TESTING.md` for experiment setup
 ---
 
 For detailed documentation on each feature, see the `docs/` directory.

@@ -2,30 +2,22 @@
 
 ## 🚀 Quick Start Options
 
-### Option 1: Full-Featured Startup (Recommended)
+### Option 1: Single Entrypoint (Recommended)
 ```bash
-./start_george.sh
+# Starts API + Streamlit UI
+python main.py ui
 ```
-Features:
-- Automatic environment detection
-- Health checks and progress feedback
-- Browser auto-opening
-- Proper cleanup on exit
 
-### Option 2: Simple Startup
+### Option 2: API Only
 ```bash
-# Use the Python script instead
-python start_george.py
+python main.py api
 ```
-Features:
-- Clean output
-- Automatic environment detection
-- Error handling
+API will be available at: http://localhost:8000
 
 ### Option 3: Manual Startup (if scripts don't work)
 ```bash
 # Terminal 1 (or background): Start API server
-venv/Scripts/python.exe start_server.py &
+python main.py api
 
 # Wait a few seconds, then start frontend
 venv/Scripts/python.exe -m streamlit run scripts/george_streamlit_chat.py --server.port 8501
@@ -35,15 +27,14 @@ venv/Scripts/python.exe -m streamlit run scripts/george_streamlit_chat.py --serv
 
 ### If you get "permission denied" errors:
 ```bash
-chmod +x start_george.sh
+# (No longer applicable; startup scripts were consolidated into main.py)
 ```
 
 ### If Python commands don't work:
 ```bash
 # Try these alternatives:
-python start_server.py
-python.exe start_server.py
-py start_server.py
+python main.py api
+python -m streamlit run scripts/george_streamlit_chat.py --server.port 8501
 ```
 
 ### If virtual environment isn't found:
@@ -57,21 +48,28 @@ venv/Scripts/activate.bat     # Command Prompt
 ### If ports are busy:
 ```bash
 # Kill existing processes:
-pkill -f "start_server.py"
+pkill -f "uvicorn"
 pkill -f "streamlit"
 
 # Or use different ports:
-python -c "import uvicorn; from george_api_simple import app; uvicorn.run(app, port=8001)"
+python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvicorn.run(app, port=8001)"
 ```
 
 ## 📋 What Should Happen
 
 1. **API Server starts** on http://localhost:8000
    - Health check: http://localhost:8000/health
+   - (Compat) Health check: http://localhost:8000/api/health
    - Documentation: http://localhost:8000/docs
 
 2. **Streamlit Interface starts** on http://localhost:8501
    - Minimal chat interface with memory context visibility
+
+## 🔌 API base URL tip
+
+When running Streamlit, set the API base to the server root (no `/api` prefix), e.g. `http://localhost:8000`.
+
+The simple dev server (`scripts/legacy/george_api_simple.py`) also supports both unprefixed endpoints (like `/agent/chat`) and `/api/*` aliases.
 
 3. **Initialization takes 10-60 seconds**
    - First time: Downloads models, creates databases

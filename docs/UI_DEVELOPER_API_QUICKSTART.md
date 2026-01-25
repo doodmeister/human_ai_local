@@ -2,7 +2,14 @@
 
 **Audience**: Streamlit UI developers building visualization components  
 **Backend**: All endpoints operational, fully tested  
-**Base URL**: `http://localhost:8000/executive`
+**Base URL**: `http://localhost:8000` (then use `/executive/...` paths)
+
+This doc works with both backends:
+
+- Main server: `python main.py api`
+- Simple server: `python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvicorn.run(app, port=8001)"`
+
+Both expose unprefixed endpoints like `/executive/*` (no `/api` needed).
 
 ---
 

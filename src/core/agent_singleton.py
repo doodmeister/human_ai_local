@@ -1,34 +1,17 @@
-"""Agent singleton helpers for API integration."""
+# ruff: noqa
+"""Deprecated shim for ``src.core.agent_singleton``.
 
-from typing import Optional
-import logging
+Use ``src.orchestration.agent_singleton``.
+"""
 
-from src.core.cognitive_agent import CognitiveAgent
+from __future__ import annotations
 
-# Initialize logger
-logger = logging.getLogger(__name__)
+import warnings
 
-_agent_instance: Optional[CognitiveAgent] = None
+warnings.warn(
+    "`src.core.agent_singleton` is deprecated; use `src.orchestration.agent_singleton`.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-
-def create_agent() -> CognitiveAgent:
-    """Create or return the global CognitiveAgent instance."""
-    global _agent_instance
-
-    if _agent_instance is None:
-        logger.info("Creating CognitiveAgent instance...")
-        _agent_instance = CognitiveAgent()
-        logger.info("CognitiveAgent initialized")
-
-    return _agent_instance
-
-
-def get_agent_instance() -> Optional[CognitiveAgent]:
-    """Return the existing CognitiveAgent instance if available."""
-    return _agent_instance
-
-
-def reset_agent() -> None:
-    """Reset the singleton (useful for testing)."""
-    global _agent_instance
-    _agent_instance = None
+from src.orchestration.agent_singleton import *  # type: ignore

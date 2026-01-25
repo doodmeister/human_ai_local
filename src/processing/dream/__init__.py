@@ -1,10 +1,17 @@
+# ruff: noqa
+"""Deprecated shim package for ``src.processing.dream``.
+
+Use ``src.cognition.processing.dream``.
 """
-Dream Processing Package - Memory Consolidation Pipeline
 
-This package implements sophisticated dream-state processing for memory consolidation,
-neural replay, and cognitive maintenance, mimicking human sleep cycles.
-"""
+from __future__ import annotations
 
-from .dream_processor import DreamProcessor, DreamCycle, ConsolidationCandidate
+import warnings
 
-__all__ = ['DreamProcessor', 'DreamCycle', 'ConsolidationCandidate']
+warnings.warn(
+    "`src.processing.dream` is deprecated; use `src.cognition.processing.dream`.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+from src.cognition.processing.dream import *  # type: ignore

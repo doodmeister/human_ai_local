@@ -1,40 +1,17 @@
-"""
-Sensory Processing Module
+# ruff: noqa
+"""Deprecated shim package for ``src.processing.sensory``.
 
-This module provides biologically-inspired sensory input processing for the
-Human-AI Cognition Framework. It implements:
-
-- Multimodal input preprocessing and filtering
-- Embedding generation and vector conversion
-- Information entropy scoring and salience detection
-- Adaptive filtering and attention-based preprocessing
-
-Key Components:
-- SensoryProcessor: Core processing engine
-- SensoryInput: Input data structure
-- ProcessedSensoryData: Output data structure
-- SensoryInterface: High-level interface utilities
+Use ``src.cognition.processing.sensory``.
 """
 
-from .sensory_processor import (
-    SensoryProcessor,
-    SensoryInput,
-    ProcessedSensoryData
+from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "`src.processing.sensory` is deprecated; use `src.cognition.processing.sensory`.",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
-from .sensory_interface import (
-    SensoryInterface,
-    SensoryInputBuilder,
-    quick_text_input,
-    quick_process_text
-)
-
-__all__ = [
-    "SensoryProcessor",
-    "SensoryInput", 
-    "ProcessedSensoryData",
-    "SensoryInterface",
-    "SensoryInputBuilder",
-    "quick_text_input",
-    "quick_process_text"
-]
+from src.cognition.processing.sensory import *  # type: ignore

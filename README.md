@@ -56,15 +56,60 @@ pip install -r requirements.txt
 
 **Option 1: Streamlit UI**
 ```bash
-python start_george.py
+python main.py ui
 ```
 Access at http://localhost:8501
 
 **Option 2: API Server**
 ```bash
-python start_server.py
+python main.py api
 ```
 Access at http://localhost:8000 (docs at /docs)
+
+### API compatibility (main vs simple server)
+
+There are two API servers in this repo:
+
+- **Main server** (`python main.py api`): canonical API surface (preferred).
+- **Simple server** (`python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvicorn.run(app, port=8001)"`): lightweight dev server.
+
+Both servers support the same *unprefixed* endpoint paths (e.g. `/agent/chat`, `/agent/reminders`, `/executive/goals`, `/memory/stm/search`).
+
+Notes:
+
+- Prefer unprefixed routes (e.g. `/agent/chat`) as the canonical API surface.
+- Routes under `/api/*` are **legacy aliases** kept temporarily for backward compatibility.
+
+- If you're pointing the Streamlit UI at a backend, set `GEORGE_API_BASE_URL` to the server root (e.g. `http://localhost:8000` or `http://localhost:8001`).
+- Prefer `/agent/reminders*` for reminders and `/procedure/*` for procedural memory. Some older `/api/agent/memory/*` routes are still present for compatibility and return `Deprecation` headers.
+
+For a quick endpoint smoke check, run:
+```bash
+python scripts/smoke_api_compat.py --base http://localhost:8000
+```
+
+## Deprecation policy & timeline
+
+This repo keeps backward-compatible API aliases for a limited time while clients migrate to canonical endpoints.
+
+- Deprecation signal: deprecated endpoints return `Deprecation: true` and a `Link: <successor>; rel="successor-version"` header.
+- Support window: deprecated aliases are supported for ~90 days after first being marked deprecated.
+- Removal milestone (next): remove deprecated aliases on **2026-04-01** (or the first release after that date).
+
+If you maintain a client:
+
+- Prefer canonical routes like `/agent/chat`, `/agent/reminders*`, `/procedure/*`, `/memory/*`.
+- Treat `Deprecation: true` responses as a migration warning and follow the successor link.
+
+Common migrations:
+
+- `/api/agent/chat` → `/agent/chat`
+- `/api/agent/status` → `/agent/status`
+- `/api/agent/init-status` → `/agent/init-status`
+- `/api/agent/reminders*` → `/agent/reminders*`
+- `/api/executive/status` → `/executive/status`
+- `/api/neural/status` → `/neural/status`
+- `/api/analytics/performance` → `/analytics/performance`
 
 ---
 
@@ -219,17 +264,17 @@ pytest --cov=src --cov-report=html
 ## 📖 Documentation
 
 ### Key Documentation
-- **System Integration**: `docs/WEEK_15_COMPLETION_SUMMARY.md`
-- **GOAP Planning**: `docs/PHASE_2_FINAL_COMPLETE.md`
-- **Scheduling**: `docs/WEEK_12_COMPLETION_SUMMARY.md`, `docs/WEEK_14_COMPLETION_SUMMARY.md`
-- **Learning & A/B Testing**: `docs/WEEK_16_PHASE_4_AB_TESTING.md`
-- **Memory Systems**: `docs/enhanced_ltm_summary.md`, `docs/vector_stm_integration_complete.md`
-- **Executive API**: `docs/BACKEND_API_COMPLETION_SUMMARY.md`
+- **System Integration**: `docs/archive/WEEK_15_COMPLETION_SUMMARY.md`
+- **GOAP Planning**: `docs/archive/PHASE_2_FINAL_COMPLETE.md`
+- **Scheduling**: `docs/archive/WEEK_12_COMPLETION_SUMMARY.md`, `docs/archive/WEEK_14_COMPLETION_SUMMARY.md`
+- **Learning & A/B Testing**: `docs/archive/WEEK_16_PHASE_4_AB_TESTING.md`
+- **Memory Systems**: `docs/archive/enhanced_ltm_summary.md`, `docs/archive/vector_stm_integration_complete.md`
+- **Executive API**: `docs/archive/BACKEND_API_COMPLETION_SUMMARY.md`
 - **UI Development**: `docs/UI_DEVELOPER_API_QUICKSTART.md`
 
 ### Quick References
 - **AI Instructions**: `.github/copilot-instructions.md` - Development patterns
-- **Roadmap**: `docs/roadmap.md` - Future development plans
+- **Roadmap**: `docs/archive/planning/roadmap.md` - Future development plans
 
 ---
 
@@ -280,7 +325,7 @@ human_ai_local/
 - Continuous model retraining
 - Enhanced sentiment analysis
 
-See `docs/roadmap.md` for details.
+See `docs/archive/planning/roadmap.md` for details.
 
 ---
 

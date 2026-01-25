@@ -1,13 +1,19 @@
-from .chat_service import ChatService
-from .conversation_session import SessionManager
-from .context_builder import ContextBuilder
-from .emotion_salience import estimate_salience_and_valence
-from .metrics import metrics_registry
+# ruff: noqa
+"""Deprecated compatibility package.
 
-__all__ = [
-    "ChatService",
-    "SessionManager",
-    "ContextBuilder",
-    "estimate_salience_and_valence",
-    "metrics_registry",
-]
+Legacy import path: ``src.chat``
+
+The canonical location is now ``src.orchestration.chat``.
+"""
+
+from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "`src.chat` is deprecated; use `src.orchestration.chat` instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+from src.orchestration.chat import *  # type: ignore

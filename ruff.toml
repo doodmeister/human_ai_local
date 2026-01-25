@@ -1,0 +1,32 @@
+# Ruff configuration
+# Keep this intentionally minimal: defaults are conservative (E4/E7/E9/F).
+
+target-version = "py312"
+line-length = 88
+
+# Avoid linting archived docs/data and local envs.
+extend-exclude = [
+  ".venv",
+  "docs/archive",
+  "data",
+]
+
+[lint]
+# Defaults are conservative (E4/E7/E9/F). Add TID251 to enforce memory ownership rules.
+select = ["E4", "E7", "E9", "F", "TID251"]
+
+[lint.per-file-ignores]
+# Memory internals may import each other; ownership enforcement targets callers outside src/memory/.
+"src/memory/**" = ["TID251"]
+
+[lint.flake8-tidy-imports.banned-api]
+"src.memory.semantic" = { msg = "Import semantic memory via src.memory.memory_system only." }
+"src.memory.semantic.semantic_memory" = { msg = "Import semantic memory via src.memory.memory_system only." }
+"src.memory.episodic" = { msg = "Import episodic memory via src.memory.memory_system only." }
+"src.memory.episodic.episodic_memory" = { msg = "Import episodic memory via src.memory.memory_system only." }
+"src.memory.procedural" = { msg = "Import procedural memory via src.memory.memory_system only." }
+"src.memory.procedural.procedural_memory" = { msg = "Import procedural memory via src.memory.memory_system only." }
+"src.memory.stm" = { msg = "Import STM via src.memory.memory_system only." }
+"src.memory.stm.vector_stm" = { msg = "Import STM via src.memory.memory_system only." }
+"src.memory.ltm" = { msg = "Import LTM via src.memory.memory_system only." }
+"src.memory.ltm.vector_ltm" = { msg = "Import LTM via src.memory.memory_system only." }
