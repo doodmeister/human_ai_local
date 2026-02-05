@@ -250,10 +250,7 @@ def render_session_context_panel() -> None:
 
 def _render_reminder_row(reminder: Dict[str, Any], base_url: str, source: str) -> None:
     reminder_id = reminder.get("id")
-    snooze_minutes = (
-        st.session_state.get("reminder_form", {}).get("snooze_minutes")
-        or 15
-    )
+    snooze_minutes = st.session_state.get("snooze_minutes_setting", 15)
     cols = st.columns([0.5, 0.2, 0.2, 0.1])
     with cols[0]:
         st.markdown(f"**{reminder.get('content', 'Reminder')}**")
@@ -297,10 +294,7 @@ def render_sidebar_reminders(base_url: str) -> None:
         return dt.timestamp()
 
     sorted_items = sorted(combined, key=_sort_key)
-    snooze_minutes = (
-        st.session_state.get("reminder_form", {}).get("snooze_minutes")
-        or 15
-    )
+    snooze_minutes = st.session_state.get("snooze_minutes_setting", 15)
     for reminder in sorted_items:
         reminder_id = reminder.get("id")
         st.markdown(f"**{reminder.get('content', 'Reminder')}**")
@@ -341,12 +335,24 @@ def _update_proactive_state_from_response(response: Dict[str, Any]) -> None:
 
 
 def check_backend(base_url: str) -> bool:
-    """Return True when the backend health check responds successfully."""
+    """Return True when the backend health check responds successfully.
+    
+    Caches the result for 10 seconds to avoid hitting the backend on every rerun.
+    """
+    import time as _time
+    cache_key = "_backend_health_cache"
+    ts_key = "_backend_health_ts"
+    now = _time.time()
+    if (now - st.session_state.get(ts_key, 0.0)) < 10:
+        return st.session_state.get(cache_key, False)
     try:
         resp = requests.get(f"{base_url}/health", timeout=5)
-        return resp.status_code == 200
+        ok = resp.status_code == 200
     except requests.RequestException:
-        return False
+        ok = False
+    st.session_state[cache_key] = ok
+    st.session_state[ts_key] = now
+    return ok
 
 
 def post_chat(
@@ -366,7 +372,10 @@ def post_chat(
         payload["consolidation_salience_threshold"] = salience_threshold
     resp = requests.post(f"{base_url}/agent/chat", json=payload, timeout=90)
     resp.raise_for_status()
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise ValueError(f"Backend returned non-JSON response: {resp.text[:200]}") from exc
 
 
 def trigger_dream_cycle(base_url: str, cycle_type: str = "light") -> Dict[str, Any]:
@@ -802,10 +811,12 @@ def ensure_state() -> None:
     # Executive function settings
     if "active_goals" not in st.session_state:
         st.session_state.active_goals = []
-    if "active_goals_refresh" not in st.session_state:
-        st.session_state.active_goals_refresh = False
+    if "_goals_fetched_at" not in st.session_state:
+        st.session_state._goals_fetched_at = 0.0
     if "selected_goal_id" not in st.session_state:
         st.session_state.selected_goal_id = None
+    if "snooze_minutes_setting" not in st.session_state:
+        st.session_state.snooze_minutes_setting = 15
     # Memory browser settings
     if "memory_browser_system" not in st.session_state:
         st.session_state.memory_browser_system = "stm"
@@ -875,7 +886,7 @@ def render_goal_creator(base_url: str) -> None:
         result = create_goal_remote(base_url, goal_title.strip(), priority=0.5)
         if result and result.get("status") == "success":
             st.success("✓ Created")
-            st.session_state.active_goals_refresh = True
+            st.session_state._goals_fetched_at = 0.0  # Force refresh
             st.rerun()
     
     # Advanced options in expander
@@ -915,7 +926,7 @@ def render_goal_creator(base_url: str) -> None:
                 )
                 if result and result.get("status") == "success":
                     st.success("✓ Goal created")
-                    st.session_state.active_goals_refresh = True
+                    st.session_state._goals_fetched_at = 0.0  # Force refresh
                     st.rerun()
 
 
@@ -963,16 +974,24 @@ def get_goal_execution_status_remote(base_url: str, goal_id: str) -> Optional[Di
         return None
 
 
+def _should_refresh_goals() -> bool:
+    """Return True when cached goals are stale (>30s) or explicitly refreshed."""
+    last = st.session_state.get("_goals_fetched_at", 0.0)
+    import time as _time
+    return (_time.time() - last) > 30
+
+
 def render_active_goals(base_url: str) -> None:
     """Render compact active goals panel in sidebar."""
     st.subheader("🎯 Goals")
     
-    # Refresh trigger
-    if st.session_state.get("active_goals_refresh"):
-        st.session_state.active_goals_refresh = False
-    
-    goals = get_goals_remote(base_url, active_only=True)
-    st.session_state.active_goals = goals
+    import time as _time
+    if _should_refresh_goals():
+        goals = get_goals_remote(base_url, active_only=True)
+        st.session_state.active_goals = goals
+        st.session_state._goals_fetched_at = _time.time()
+    else:
+        goals = st.session_state.get("active_goals", [])
     
     if not goals:
         st.caption("No active goals. Add one below!")
@@ -1041,47 +1060,36 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
         
         # LLM Provider Configuration
         st.subheader("🤖 LLM Provider")
-        provider_changed = False
         
+        _provider_options = ["openai", "ollama"]
+        _provider_idx = _provider_options.index(st.session_state.llm_provider) if st.session_state.llm_provider in _provider_options else 0
         new_provider = st.selectbox(
             "Provider",
-            options=["openai", "ollama"],
-            index=0 if st.session_state.llm_provider == "openai" else 1,
+            options=_provider_options,
+            index=_provider_idx,
             help="Select between OpenAI API or locally-hosted Ollama"
         )
-        
-        if new_provider != st.session_state.llm_provider:
-            st.session_state.llm_provider = new_provider
-            provider_changed = True
+        st.session_state.llm_provider = new_provider
         
         if st.session_state.llm_provider == "openai":
-            new_openai_model = st.text_input(
+            st.session_state.openai_model = st.text_input(
                 "OpenAI Model",
                 value=st.session_state.openai_model,
                 help="e.g., gpt-4.1-nano, gpt-4o, gpt-3.5-turbo"
             )
-            if new_openai_model != st.session_state.openai_model:
-                st.session_state.openai_model = new_openai_model
-                provider_changed = True
         else:  # ollama
-            new_ollama_url = st.text_input(
+            st.session_state.ollama_base_url = st.text_input(
                 "Ollama Base URL",
                 value=st.session_state.ollama_base_url,
                 help="URL of your local Ollama server"
             )
-            new_ollama_model = st.text_input(
+            st.session_state.ollama_model = st.text_input(
                 "Ollama Model",
                 value=st.session_state.ollama_model,
                 help="e.g., llama3.2, mistral, codellama"
             )
-            if new_ollama_url != st.session_state.ollama_base_url:
-                st.session_state.ollama_base_url = new_ollama_url
-                provider_changed = True
-            if new_ollama_model != st.session_state.ollama_model:
-                st.session_state.ollama_model = new_ollama_model
-                provider_changed = True
         
-        if provider_changed or st.button("🔄 Apply LLM Config"):
+        if st.button("🔄 Apply LLM Config", help="Send current provider settings to the backend"):
             result = update_llm_config(
                 st.session_state.api_base_url,
                 st.session_state.llm_provider or "openai",
@@ -1105,106 +1113,52 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
             step=0.05,
             help="Lower = capture more in STM (e.g., 0.35 for casual chat). Higher = only capture emphatic messages (default 0.55)."
         )
-        st.caption(f"Current threshold: {st.session_state.salience_threshold:.2f}")
         
-        if st.button("🌙 Trigger Dream Cycle", help="Consolidate STM → LTM (promotes memories based on rehearsal)"):
-            try:
-                with st.spinner("Running dream consolidation..."):
-                    result = trigger_dream_cycle(st.session_state.api_base_url, cycle_type="light")
-                st.success("Dream cycle complete!")
-                
-                # Parse and display results nicely
-                dream_results = result.get("dream_results", {})
-                if dream_results:
-                    # Summary metrics
-                    memories_consolidated = dream_results.get("memories_consolidated", 0)
-                    candidates = dream_results.get("candidates_identified", 0)
-                    associations = dream_results.get("associations_created", 0)
-                    duration = dream_results.get("actual_duration", 0)
-                    
-                    st.metric("Memories Consolidated", memories_consolidated)
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Candidates", candidates)
-                    with col2:
-                        st.metric("Associations", associations)
-                    with col3:
-                        st.metric("Duration", f"{duration:.2f}s")
-                    
-                    # Cleanup info
-                    cleanup = dream_results.get("cleanup", {})
-                    if cleanup:
-                        with st.expander("Cleanup details"):
-                            st.write(f"Weak memories removed: {cleanup.get('weak_memories_removed', 0)}")
-                            st.write(f"Duplicates cleaned: {cleanup.get('duplicate_associations_cleaned', 0)}")
-                            st.write(f"Decay applied: {cleanup.get('decay_applied', False)}")
-                            st.write(f"Items decayed: {cleanup.get('items_decayed', 0)}")
-                
-                with st.expander("Full dream cycle results"):
-                    st.json(result)
-            except Exception as e:
-                st.error(f"Dream cycle failed: {e}")
-        
-        if st.button("🧠 Trigger Reflection", help="Run metacognitive self-analysis on memory health & performance"):
-            try:
-                with st.spinner("Running reflection analysis..."):
-                    result = trigger_reflection(st.session_state.api_base_url)
-                st.success("Reflection complete!")
-                
-                # Display the reflection report
-                report = result.get("report", {})
-                if report:
-                    # STM Stats
-                    stm_stats = report.get("stm_metacognitive_stats")
-                    if stm_stats:
-                        st.subheader("📊 Short-Term Memory Health")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            capacity_util = stm_stats.get("capacity_utilization", 0)
-                            st.metric("Capacity Utilization", f"{capacity_util*100:.1f}%")
-                            st.metric("Memory Count", stm_stats.get("memory_count", 0))
-                        with col2:
-                            error_rate = stm_stats.get("error_rate", 0)
-                            st.metric("Error Rate", f"{error_rate*100:.2f}%")
-                            avg_importance = stm_stats.get("avg_importance", 0)
-                            st.metric("Avg Importance", f"{avg_importance:.2f}")
-                    
-                    # LTM Health Report
-                    ltm_health = report.get("ltm_health_report")
-                    if ltm_health:
-                        st.subheader("🧠 Long-Term Memory Health")
-                        
-                        # Core metrics
+        with st.expander("🌙 Dream & Reflection", expanded=False):
+            if st.button("🌙 Dream Cycle", help="Consolidate STM to LTM", use_container_width=True):
+                try:
+                    with st.spinner("Running dream consolidation..."):
+                        result = trigger_dream_cycle(st.session_state.api_base_url, cycle_type="light")
+                    st.success("Dream cycle complete!")
+                    dream_results = result.get("dream_results", {})
+                    if dream_results:
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.metric("Total Memories", ltm_health.get("total_memories", 0))
+                            st.metric("Consolidated", dream_results.get("memories_consolidated", 0))
                         with col2:
-                            avg_conf = ltm_health.get("average_confidence", 0)
-                            st.metric("Avg Confidence", f"{avg_conf:.2f}")
+                            st.metric("Candidates", dream_results.get("candidates_identified", 0))
                         with col3:
-                            success_rate = ltm_health.get("search_success_rate", 0)
-                            st.metric("Search Success Rate", f"{success_rate*100:.1f}%")
-                        
-                        # Recommendations
-                        recommendations = ltm_health.get("recommendations", [])
-                        if recommendations:
-                            with st.expander("💡 Recommendations", expanded=True):
-                                for rec in recommendations:
-                                    st.info(rec)
-                        
-                        # Health status
-                        health_status = ltm_health.get("health_status", "unknown")
-                        status_color = {"good": "🟢", "warning": "🟡", "poor": "🔴"}.get(health_status, "⚪")
-                        st.write(f"**Overall Health:** {status_color} {health_status.upper()}")
-                    
-                    # Full report details
-                    with st.expander("Full reflection report"):
+                            st.metric("Duration", f"{dream_results.get('actual_duration', 0):.2f}s")
+                    st.json(result)
+                except Exception as e:
+                    st.error(f"Dream cycle failed: {e}")
+            
+            if st.button("🧠 Reflection", help="Run metacognitive self-analysis", use_container_width=True):
+                try:
+                    with st.spinner("Running reflection analysis..."):
+                        result = trigger_reflection(st.session_state.api_base_url)
+                    st.success("Reflection complete!")
+                    report = result.get("report", {})
+                    if report:
+                        stm_stats = report.get("stm_metacognitive_stats")
+                        if stm_stats:
+                            st.markdown("**STM Health**")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Utilization", f"{stm_stats.get('capacity_utilization', 0)*100:.0f}%")
+                            with col2:
+                                st.metric("Count", stm_stats.get("memory_count", 0))
+                        ltm_health = report.get("ltm_health_report")
+                        if ltm_health:
+                            st.markdown("**LTM Health**")
+                            health_status = ltm_health.get("health_status", "unknown")
+                            status_icon = {"good": "🟢", "warning": "🟡", "poor": "🔴"}.get(health_status, "⚪")
+                            st.caption(f"{status_icon} {health_status.upper()} | {ltm_health.get('total_memories', 0)} memories")
                         st.json(report)
-                else:
-                    st.warning("No reflection data available")
-                    
-            except Exception as e:
-                st.error(f"Reflection failed: {e}")
+                    else:
+                        st.warning("No reflection data available")
+                except Exception as e:
+                    st.error(f"Reflection failed: {e}")
         
         st.subheader("Chat Options")
         include_memory = st.checkbox("Include memory retrieval", value=True, key="include_memory")
@@ -1234,6 +1188,11 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
         
         st.markdown("---")
         st.subheader("⏰ Reminders")
+        st.session_state.snooze_minutes_setting = st.slider(
+            "Snooze duration (min)",
+            min_value=5, max_value=120, value=st.session_state.get("snooze_minutes_setting", 15),
+            step=5, key="snooze_slider", help="Default snooze duration for reminders"
+        )
         render_sidebar_reminders(st.session_state.api_base_url)
         
         # Compact reminder creation
@@ -1247,16 +1206,17 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
             )
         with col2:
             reminder_minutes = st.number_input(
-                "min",
+                "Minutes until due",
                 min_value=1,
                 max_value=480,
                 value=15,
                 step=5,
                 key="quick_reminder_minutes",
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                help="Minutes until the reminder is due"
             )
         
-        if st.button("➕ Add", key="quick_add_reminder", use_container_width=True):
+        if st.button("➕ Add", key="quick_add_reminder", use_container_width=True, help="Create a new reminder"):
             trimmed = reminder_content.strip()
             if trimmed:
                 # Auto-link to selected goal if viewing one
@@ -1291,15 +1251,16 @@ def render_sidebar(connection_ok: bool) -> Dict[str, Any]:
                 st.caption("Reminder telemetry")
                 st.json(metrics["counts"])
 
-        return {
-            "flags": {
-                "include_memory": include_memory,
-                "include_attention": include_attention,
-                "include_trace": include_trace,
-                "reflection": include_reflection,
-            },
-            "salience_threshold": st.session_state.salience_threshold,
-        }
+    # Return outside the sidebar context
+    return {
+        "flags": {
+            "include_memory": include_memory,
+            "include_attention": include_attention,
+            "include_trace": include_trace,
+            "reflection": include_reflection,
+        },
+        "salience_threshold": st.session_state.salience_threshold,
+    }
 
 
 def render_message(message: Dict[str, Any]) -> None:
@@ -1396,10 +1357,10 @@ def render_message(message: Dict[str, Any]) -> None:
 
 
 def render_goal_details_page(base_url: str, goal_id: str) -> None:
-    """Render detailed goal execution view."""
+    """Render detailed goal execution view (inside a tab)."""
     st.subheader("📋 Goal Execution Details")
     
-    if st.button("⬅️ Back to Chat"):
+    if st.button("✕ Close goal view", key="close_goal_details"):
         st.session_state.selected_goal_id = None
         st.rerun()
     
@@ -1553,8 +1514,8 @@ def render_memory_item(memory: Dict[str, Any], system: str, base_url: str, index
                 elif isinstance(tags, str):
                     st.caption(f"**Tags:** {tags}")
         
-        # Additional metadata
-        with st.expander("📊 Full Metadata", expanded=False):
+        # Full metadata (use caption + json to avoid nested expander)
+        if st.button("Show metadata", key=f"meta_{system}_{memory_id}_{index}"):
             st.json(memory)
         
         # Delete button
@@ -1615,7 +1576,12 @@ def render_memory_browser(base_url: str) -> None:
     memories = []
     cache_key = f"{system}_{search_query}"
     
-    if refresh or cache_key not in st.session_state.memory_browser_cache:
+    # Check cache staleness (120s TTL)
+    import time as _time
+    cache_ts = st.session_state.get("_memory_cache_ts", {})
+    cache_stale = (_time.time() - cache_ts.get(cache_key, 0)) > 120
+    
+    if refresh or cache_stale or cache_key not in st.session_state.memory_browser_cache:
         with st.spinner(f"Loading {system} memories..."):
             if system in ["stm", "ltm", "episodic"]:
                 if search_query:
@@ -1630,6 +1596,9 @@ def render_memory_browser(base_url: str) -> None:
                 memories = fetch_procedural_memories(base_url)
             
             st.session_state.memory_browser_cache[cache_key] = memories
+            if "_memory_cache_ts" not in st.session_state:
+                st.session_state._memory_cache_ts = {}
+            st.session_state._memory_cache_ts[cache_key] = _time.time()
     else:
         memories = st.session_state.memory_browser_cache.get(cache_key, [])
     
@@ -1656,15 +1625,17 @@ def main() -> None:
     flags = config["flags"]
     salience_threshold = config["salience_threshold"]
     
-    # Check if viewing goal details
-    if st.session_state.get("selected_goal_id"):
-        render_goal_details_page(base_url, st.session_state.selected_goal_id)
-        return
-
     st.title("George Chat Interface")
     
-    # Create tabs for Chat, Memory Browser, and Learning Dashboard
-    tab_chat, tab_memory, tab_learning = st.tabs(["💬 Chat", "🧠 Memory Browser", "📊 Learning"])
+    # Create tabs - add Goal Details tab when a goal is selected
+    viewing_goal = st.session_state.get("selected_goal_id")
+    if viewing_goal:
+        tab_chat, tab_goal, tab_memory, tab_learning = st.tabs(
+            ["💬 Chat", "📋 Goal Details", "🧠 Memory Browser", "📊 Learning"]
+        )
+    else:
+        tab_chat, tab_memory, tab_learning = st.tabs(["💬 Chat", "🧠 Memory Browser", "📊 Learning"])
+        tab_goal = None
     
     with tab_chat:
         st.write("Chat with the cognitive backend. Each turn retrieves short-term memories first, then falls back to long-term memories when needed.")
@@ -1684,13 +1655,16 @@ def main() -> None:
         render_proactive_banner(base_url)
         render_session_context_panel()
 
+        # Render message history FIRST so chat_input pins to bottom
+        for msg in st.session_state.messages:
+            render_message(msg)
+
         prompt: Optional[str] = None
         if backend_ok:
             prompt = st.chat_input("Send a message")
         else:
             st.info("Start the backend with `python main.py api` to enable chatting.")
 
-        assistant_record: Optional[Dict[str, Any]] = None
         if prompt:
             user_record = {
                 "role": "user",
@@ -1723,24 +1697,20 @@ def main() -> None:
                     "intent": response.get("intent"),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
-                
-                # Auto-refresh goals sidebar if a goal was detected
-                if response.get("detected_goal"):
-                    st.session_state.active_goals_refresh = True
+                st.session_state.messages.append(assistant_record)
+                st.rerun()  # Re-render so the new message appears in the history above
             except requests.HTTPError as exc:
                 st.error(f"Chat request failed: {exc}")
                 st.session_state.last_error = str(exc)
                 st.session_state.last_raw_response = None
-            except requests.RequestException as exc:
+            except (requests.RequestException, ValueError) as exc:
                 st.error(f"Network error: {exc}")
                 st.session_state.last_error = str(exc)
                 st.session_state.last_raw_response = None
-
-            if assistant_record:
-                st.session_state.messages.append(assistant_record)
-
-        for msg in st.session_state.messages:
-            render_message(msg)
+    
+    if tab_goal is not None:
+        with tab_goal:
+            render_goal_details_page(base_url, st.session_state.selected_goal_id)
     
     with tab_memory:
         if backend_ok:
