@@ -310,6 +310,38 @@ class ExecutiveController:
         self._state_path = os.environ.get("EXEC_ADAPTIVE_STATE", "executive_state.json")
         self._load_adaptive_state()
 
+    # --------- Goal Selection ---------
+
+    def _default_goal(self, user_input: str) -> Goal:
+        desc = user_input.strip() or "Respond to user"
+        return Goal(
+            id=f"goal::turn::{int(self.clock.now() * 1000)}",
+            description=desc,
+            priority=0.5,
+        )
+
+    def select_goal(self, user_input: str, goals: Optional[List[Goal]] = None) -> Goal:
+        """Select a single goal to pursue this turn.
+
+        Other modules may propose candidate goals, but only the executive selects.
+        """
+        candidates = goals or []
+        if not candidates:
+            return self._default_goal(user_input)
+
+        # Simple lexical match + priority bias.
+        tokens = {t for t in user_input.lower().split() if t}
+        best = candidates[0]
+        best_score = -1e9
+        for g in candidates:
+            g_tokens = {t for t in g.description.lower().split() if t}
+            overlap = len(tokens & g_tokens)
+            score = float(g.priority) + (0.05 * overlap)
+            if score > best_score:
+                best_score = score
+                best = g
+        return best
+
     # --------- Mode State Machine ---------
 
     def _transition(self, signal: str, fatigue: float = 0.0, load: float = 0.0) -> None:
@@ -350,10 +382,16 @@ class ExecutiveController:
 
     # --------- One Cognitive Turn ---------
 
-    async def run_turn(self, user_input: str, high_level_goal: Goal) -> ActionResult:
+    async def run_turn(
+        self,
+        user_input: str,
+        high_level_goal: Goal | None = None,
+        candidate_goals: Optional[List[Goal]] = None,
+    ) -> ActionResult:
         t0 = self.clock.now()
+        goal = high_level_goal or self.select_goal(user_input, candidate_goals)
         self.events.publish("executive.turn_started", {
-            "mode": self.mode.name, "goal": high_level_goal.description, "input": user_input
+            "mode": self.mode.name, "goal": goal.description, "input": user_input
         })
 
         # 1) Perceive & update STM
@@ -366,7 +404,7 @@ class ExecutiveController:
         attended = await self.attention.allocate(query=user_input, candidates=candidates, capacity=self.attention_capacity)
 
         # 3) Expand goal → tasks → options
-        tasks = self.planner.expand(high_level_goal)
+        tasks = self.planner.expand(goal)
         options: List[Option] = []
         for i, task in enumerate(tasks):
             # prompt and metadata

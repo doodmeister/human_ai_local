@@ -1,34 +1,29 @@
-"""Agent singleton helpers for API integration."""
+# ruff: noqa
+"""Deprecated shim for ``src.core.agent_singleton``.
 
-from typing import Optional
-import logging
+Use ``src.orchestration.agent_singleton``.
+"""
 
-from src.core.cognitive_agent import CognitiveAgent
+from __future__ import annotations
 
-# Initialize logger
-logger = logging.getLogger(__name__)
+import importlib
+import warnings
+from typing import Any
 
-_agent_instance: Optional[CognitiveAgent] = None
-
-
-def create_agent() -> CognitiveAgent:
-    """Create or return the global CognitiveAgent instance."""
-    global _agent_instance
-
-    if _agent_instance is None:
-        logger.info("Creating CognitiveAgent instance...")
-        _agent_instance = CognitiveAgent()
-        logger.info("CognitiveAgent initialized")
-
-    return _agent_instance
+warnings.warn(
+    "`src.core.agent_singleton` is deprecated; use `src.orchestration.agent_singleton`.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
-def get_agent_instance() -> Optional[CognitiveAgent]:
-    """Return the existing CognitiveAgent instance if available."""
-    return _agent_instance
+def __getattr__(name: str) -> Any:  # pragma: no cover
+    """Lazy attribute access to keep `core` free of static layer imports."""
+
+    mod = importlib.import_module("src.orchestration.agent_singleton")
+    return getattr(mod, name)
 
 
-def reset_agent() -> None:
-    """Reset the singleton (useful for testing)."""
-    global _agent_instance
-    _agent_instance = None
+def __dir__() -> list[str]:  # pragma: no cover
+    mod = importlib.import_module("src.orchestration.agent_singleton")
+    return sorted(set(globals().keys()) | set(dir(mod)))

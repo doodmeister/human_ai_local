@@ -2,7 +2,7 @@
 import unittest
 import os
 import shutil
-from src.core.cognitive_agent import CognitiveAgent
+from src.orchestration.cognitive_agent import CognitiveAgent
 from src.core.config import CognitiveConfig, MemoryConfig
 
 class TestSemanticMemoryIntegration(unittest.TestCase):

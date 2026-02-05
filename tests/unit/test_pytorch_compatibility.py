@@ -20,7 +20,7 @@ sys.modules['hflayers'] = FakeHflayers()
 
 try:
     # Import the dummy classes
-    from src.processing.neural.lshn_network import _DummyHopfieldLayer, LSHNConfig
+    from src.cognition.processing.neural.lshn_network import _DummyHopfieldLayer, LSHNConfig
     
     print("Testing PyTorch compatibility of dummy classes...")
     

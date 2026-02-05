@@ -16,10 +16,10 @@ Key responsibilities:
 import json
 import logging
 import random
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Literal
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import uuid
 
@@ -27,7 +27,6 @@ import numpy as np
 
 from .experiment_analyzer import (
     StrategyPerformance,
-    ComparisonResult,
     calculate_proportion_confidence_interval,
     recommend_strategy
 )

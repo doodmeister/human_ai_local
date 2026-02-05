@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 from enum import Enum
 
-from .goal_taxonomy import Goal, GoalType, GoalPriority
+from .goal_taxonomy import Goal, GoalType
 
 
 class OrderingConstraint(Enum):

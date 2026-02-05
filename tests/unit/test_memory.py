@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 def test_memory_components():
     """Test memory components independently"""
     print("Testing Vector STM import...")
-    from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration
+    from src.memory.stm import VectorShortTermMemory, STMConfiguration
     import uuid
     import atexit
     import shutil

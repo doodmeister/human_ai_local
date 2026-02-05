@@ -22,6 +22,7 @@ Version: 2.0.0
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -34,12 +35,14 @@ from typing import (
 from .stm import VectorShortTermMemory, STMConfiguration
 from .ltm import VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
-from .semantic.semantic_memory import SemanticMemorySystem
 from .prospective.prospective_memory import ProspectiveMemorySystem
 from .procedural.procedural_memory import ProceduralMemory
 
 if TYPE_CHECKING:
     from .episodic.episodic_memory import EpisodicSearchResult
+    from .semantic.semantic_memory import SemanticMemorySystem
+else:
+    SemanticMemorySystem = Any  # type: ignore
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -255,10 +258,19 @@ class MemorySystem:
             )
             
             # Initialize Semantic Memory (using ChromaDB)
-            self._semantic = SemanticMemorySystem(
-                chroma_persist_dir=self._config.chroma_persist_dir or "data/memory_stores/chroma_semantic",
-                embedding_model=self._config.embedding_model
-            )
+            if os.environ.get("DISABLE_SEMANTIC_MEMORY") == "1":
+                self._semantic = None
+                logger.info("Semantic memory disabled via DISABLE_SEMANTIC_MEMORY")
+            else:
+                try:
+                    from .semantic.semantic_memory import SemanticMemorySystem as _SemanticMemorySystem
+                    self._semantic = _SemanticMemorySystem(
+                        chroma_persist_dir=self._config.chroma_persist_dir or "data/memory_stores/chroma_semantic",
+                        embedding_model=self._config.embedding_model
+                    )
+                except Exception as e:
+                    self._semantic = None
+                    logger.warning(f"Semantic memory unavailable; continuing without it: {e}")
             
             # Initialize Prospective Memory
             try:
@@ -449,10 +461,9 @@ class MemorySystem:
                 }
                 
                 # Create episodic memory for significant events
-                episodic_id = None
                 if importance > 0.6:
                     try:
-                        episodic_id = self._create_episodic_memory_for_storage(
+                        self._create_episodic_memory_for_storage(
                             memory_id=memory_id,
                             content=content,
                             importance=importance,
@@ -815,13 +826,30 @@ class MemorySystem:
                     importance = getattr(memory_item, 'importance', 0.0)
                     emotional_valence = getattr(memory_item, 'emotional_valence', 0.0)
                     age_minutes = (datetime.now() - memory_item.encoding_time).total_seconds() / 60
-                    
-                    # Consolidation criteria
-                    should_consolidate = (
-                        importance >= 0.6 or
-                        abs(emotional_valence) >= 0.5 or
-                        age_minutes >= 30  # 30 minutes
-                    )
+
+                    # Phase 7: utility-based learning law.
+                    # Benefit: importance, emotional salience, and time-in-STM (age) as proxies for retrieval utility.
+                    # Cost: small fixed write cost.
+                    try:
+                        from src.learning.learning_law import clamp01, utility_score
+                    except Exception:  # pragma: no cover
+                        def clamp01(x: Any) -> float:  # type: ignore[no-redef]
+                            try:
+                                return float(x)
+                            except (TypeError, ValueError):
+                                return 0.0
+
+                        def utility_score(*, benefit: Any, cost: Any, benefit_weight: float = 1.0, cost_weight: float = 1.0) -> float:  # type: ignore[no-redef]
+                            return (benefit_weight * clamp01(benefit)) - (cost_weight * clamp01(cost))
+
+                    benefit = clamp01(max(
+                        float(importance or 0.0),
+                        float(abs(emotional_valence) or 0.0),
+                        min(1.0, float(age_minutes) / 30.0),
+                    ))
+                    u = utility_score(benefit=benefit, cost=0.10)
+                    # Threshold chosen to preserve prior behavior (importance>=0.6 etc.).
+                    should_consolidate = u >= 0.50
                     
                     if should_consolidate:
                         # Move to LTM

@@ -26,9 +26,16 @@ class SemanticMemorySystem(BaseMemorySystem):
 
     def shutdown(self):
         """Shutdown ChromaDB client to release file handles (for test cleanup)."""
-        # ChromaDB does not have an explicit close, but dereferencing helps
-        self.collection = None
-        self.chroma_client = None
+        try:
+            if getattr(self, "chroma_client", None) is not None:
+                # Chroma shares a process-wide "System" instance per identifier.
+                # Clearing the system cache is the supported teardown mechanism used by Chroma's
+                # own tests to allow re-initialization against fresh temp directories.
+                if hasattr(self.chroma_client, "clear_system_cache"):
+                    self.chroma_client.clear_system_cache()
+        finally:
+            self.collection = None
+            self.chroma_client = None
     """
     Semantic memory system using ChromaDB vector store.
     Stores and retrieves factual knowledge as triples (subject, predicate, object).

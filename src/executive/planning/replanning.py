@@ -9,7 +9,7 @@ Handles plan failures and dynamic replanning during execution:
 """
 
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional
 from enum import Enum
 import logging
 

@@ -5,7 +5,7 @@ Comprehensive test for attention mechanism integration with cognitive agent
 import asyncio
 import pytest
 from datetime import datetime
-from src.core.cognitive_agent import CognitiveAgent
+from src.orchestration.cognitive_agent import CognitiveAgent
 
 @pytest.mark.asyncio
 async def test_attention_integration():

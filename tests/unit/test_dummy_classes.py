@@ -20,7 +20,7 @@ sys.modules['hflayers'] = FakeHflayers()
 
 try:
     # Now import our module - it should use dummy classes
-    from src.processing.neural.lshn_network import LSHNNetwork, LSHNConfig, HOPFIELD_AVAILABLE
+    from src.cognition.processing.neural.lshn_network import LSHNNetwork, LSHNConfig, HOPFIELD_AVAILABLE
     
     print(f"HOPFIELD_AVAILABLE: {HOPFIELD_AVAILABLE}")
     

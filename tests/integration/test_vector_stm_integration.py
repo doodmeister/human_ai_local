@@ -5,11 +5,13 @@ Test script for Vector STM integration with MemorySystem
 import sys
 import os
 import logging
+import shutil
+import tempfile
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from src.memory.memory_system import MemorySystem
+from src.memory.memory_system import MemorySystem, MemorySystemConfig
 from src.memory.stm import VectorShortTermMemory
 
 # Configure logging
@@ -18,21 +20,29 @@ logger = logging.getLogger(__name__)
 
 def test_vector_stm_integration():
     """Test Vector STM integration with MemorySystem"""
+    assert _vector_stm_integration_impl() is True
+
+
+def _vector_stm_integration_impl() -> bool:
     print("=== Vector STM Integration Test ===")
-    
+
+    test_dir = tempfile.mkdtemp(prefix="vector_stm_integration_")
+    memory_system = None
     try:
         # Initialize memory system with vector STM enabled
         print("\n1. Initializing MemorySystem with Vector STM...")
-        memory_system = MemorySystem(
+        config = MemorySystemConfig(
             stm_capacity=50,
             use_vector_stm=True,
             use_vector_ltm=True,
-            chroma_persist_dir="data/memory_stores/test_chroma"
+            chroma_persist_dir=os.path.join(test_dir, "chroma"),
         )
+        memory_system = MemorySystem(config)
         
         # Check if Vector STM is properly initialized
         print(f"   STM Type: {type(memory_system.stm).__name__}")
-        print(f"   Vector STM Enabled: {memory_system.use_vector_stm}")
+        status = memory_system.get_status()
+        print(f"   Vector STM Enabled: {status.get('use_vector_stm', 'N/A')}")
         print(f"   LTM Type: {type(memory_system.ltm).__name__}")
         
         # Test basic storage
@@ -107,22 +117,39 @@ def test_vector_stm_integration():
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        if memory_system is not None:
+            try:
+                memory_system.shutdown()
+            except Exception:
+                pass
+        shutil.rmtree(test_dir, ignore_errors=True)
+
 
 def test_non_vector_fallback():
     """Test fallback to regular STM when vector support is disabled"""
+    assert _non_vector_fallback_impl() is True
+
+
+def _non_vector_fallback_impl() -> bool:
     print("\n=== Non-Vector Fallback Test ===")
-    
+
+    test_dir = tempfile.mkdtemp(prefix="non_vector_fallback_")
+    memory_system = None
     try:
         # Initialize memory system with vector STM disabled
         print("\n1. Initializing MemorySystem without Vector STM...")
-        memory_system = MemorySystem(
+        config = MemorySystemConfig(
             stm_capacity=20,
             use_vector_stm=False,
-            use_vector_ltm=False
+            use_vector_ltm=True,
+            chroma_persist_dir=os.path.join(test_dir, "chroma"),
         )
+        memory_system = MemorySystem(config)
         
         print(f"   STM Type: {type(memory_system.stm).__name__}")
-        print(f"   Vector STM Enabled: {memory_system.use_vector_stm}")
+        status = memory_system.get_status()
+        print(f"   Vector STM Enabled: {status.get('use_vector_stm', 'N/A')}")
         
         # Test basic storage
         print("\n2. Testing memory storage with regular STM...")
@@ -155,13 +182,20 @@ def test_non_vector_fallback():
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        if memory_system is not None:
+            try:
+                memory_system.shutdown()
+            except Exception:
+                pass
+        shutil.rmtree(test_dir, ignore_errors=True)
 
 if __name__ == "__main__":
     print("Starting Vector STM Integration Tests...")
     
     # Run tests
-    test1_success = test_vector_stm_integration()
-    test2_success = test_non_vector_fallback()
+    test1_success = _vector_stm_integration_impl()
+    test2_success = _non_vector_fallback_impl()
     
     # Summary
     print(f"\n{'='*50}")

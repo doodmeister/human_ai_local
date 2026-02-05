@@ -1,7 +1,7 @@
 """
 Short-Term Memory (STM) system components
 """
-from .vector_stm import (
+from .vector_stm_refactored import (
     VectorShortTermMemory, 
     VectorMemoryResult,
     MemoryItem,

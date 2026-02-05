@@ -47,6 +47,17 @@ class ContextualDecisionEngine(DecisionEngine):
         w_urg = weights.get("urgency", 0.2)
         w_cost = weights.get("cost", 0.2)
         w_lat = weights.get("latency", 0.1)
+        # Phase 3: attention is a resource; only query centralized attention results.
+        attention_remaining_ratio = 1.0
+        try:
+            from src.cognition.attention.attention_manager import get_attention_manager
+
+            budget = get_attention_manager().get_budget()
+            if budget.max_items > 0:
+                attention_remaining_ratio = budget.remaining_items / budget.max_items
+        except Exception:
+            attention_remaining_ratio = 1.0
+
         best: tuple[Option, float] = (options[0], -1e9)
         rationales: Dict[str, str] = {}
         for opt in options:
@@ -59,12 +70,14 @@ class ContextualDecisionEngine(DecisionEngine):
             score = (w_rel * rel + w_urg * urg + w_cost * cost_term + w_lat * lat_term)
             # Exploration randomness boost
             if mode == ExecutiveMode.EXPLORATION and self.exploration_scale > 0:
-                score += self.rng.random() * self.exploration_scale  # adaptive stochasticity
+                # Less spare attention => less exploration.
+                score += self.rng.random() * (self.exploration_scale * attention_remaining_ratio)
             # Recovery encourages low latency & low cost more strongly (already weighted), add tiny penalty for high urgency
             if mode == ExecutiveMode.RECOVERY:
                 score -= urg * 0.05
             rationales[opt.id] = (
-                f"mode={mode.name} rel={rel:.2f} urg={urg:.2f} cost_term={cost_term:.2f} lat_term={lat_term:.2f}"
+                f"mode={mode.name} rel={rel:.2f} urg={urg:.2f} cost_term={cost_term:.2f} "
+                f"lat_term={lat_term:.2f} attn_rem={attention_remaining_ratio:.2f}"
             )
             if score > best[1]:
                 best = (opt, score)

@@ -29,9 +29,9 @@ from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from ...executive.executive_agent import ExecutiveAgent
+from src.orchestration.executive_facade import ExecutiveAgent
 from ..executive.goals import GoalPriority
-from ...executive.tasks import TaskStatus
+from src.orchestration.executive_facade import TaskStatus
 
 router = APIRouter()
 

@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 # Import the vector-only classes
 from src.memory.ltm.vector_ltm import VectorLongTermMemory
-from src.memory.stm.vector_stm import VectorShortTermMemory, MemoryItem, STMConfiguration
+from src.memory.stm import VectorShortTermMemory, MemoryItem, STMConfiguration
 from datetime import datetime
 
 class TestVectorOnlyMemory:

@@ -93,16 +93,14 @@ def calculate_attention_score(
     Returns:
         Attention score (0.0 to 1.0)
     """
-    # Base attention from relevance and novelty
-    base_attention = (relevance * 0.7) + (novelty * 0.3)
-    
-    # Emotional enhancement
-    emotional_boost = abs(emotional_salience) * 0.2
-    
-    # Fatigue penalty
-    fatigue_penalty = current_fatigue * 0.3
-    
-    return max(0.0, min(1.0, base_attention + emotional_boost - fatigue_penalty))
+    from src.cognition.attention.attention_manager import get_attention_manager
+
+    return get_attention_manager().calculate_attention_score(
+        relevance=relevance,
+        novelty=novelty,
+        emotional_salience=emotional_salience,
+        current_fatigue=current_fatigue,
+    )
 
 def safe_json_serialize(obj: Any) -> str:
     """

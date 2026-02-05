@@ -10,7 +10,7 @@ print("Testing individual memory component imports...")
 
 try:
     print("1. Testing Vector STM import...")
-    from src.memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration
+    from src.memory.stm import VectorShortTermMemory, STMConfiguration
     print("✅ Vector STM components imported")
     
     print("2. Testing LTM import...")

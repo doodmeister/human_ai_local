@@ -445,19 +445,27 @@ def fetch_semantic_facts(base_url: str, query: Optional[str] = None) -> List[Dic
 def fetch_prospective_memories(base_url: str) -> List[Dict[str, Any]]:
     """Fetch prospective memories (reminders)."""
     try:
-        resp = requests.get(f"{base_url}/prospective/search", timeout=10)
+        # Prefer the canonical reminders API.
+        resp = requests.get(f"{base_url}/agent/reminders", timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("events", data.get("reminders", []))
+        return data.get("reminders", [])
     except requests.RequestException as exc:
-        st.error(f"Failed to fetch prospective memories: {exc}")
-        return []
+        # Fallback for older servers that only expose /prospective/*.
+        try:
+            resp = requests.get(f"{base_url}/prospective/search", timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("events", data.get("reminders", []))
+        except requests.RequestException:
+            st.error(f"Failed to fetch prospective memories: {exc}")
+            return []
 
 
 def fetch_procedural_memories(base_url: str) -> List[Dict[str, Any]]:
     """Fetch procedural memories (skills/procedures)."""
     try:
-        resp = requests.get(f"{base_url}/procedural/list", timeout=10)
+        resp = requests.get(f"{base_url}/procedure/list", timeout=10)
         resp.raise_for_status()
         data = resp.json()
         return data.get("procedures", data.get("items", []))
@@ -1550,9 +1558,9 @@ def render_memory_item(memory: Dict[str, Any], system: str, base_url: str, index
             st.json(memory)
         
         # Delete button
-        if st.button(f"🗑️ Delete", key=f"delete_{system}_{memory_id}_{index}"):
+        if st.button("🗑️ Delete", key=f"delete_{system}_{memory_id}_{index}"):
             if delete_memory(base_url, system, memory_id):
-                st.success(f"Memory deleted successfully")
+                st.success("Memory deleted successfully")
                 # Clear cache to force refresh
                 if system in st.session_state.memory_browser_cache:
                     del st.session_state.memory_browser_cache[system]
@@ -1680,7 +1688,7 @@ def main() -> None:
         if backend_ok:
             prompt = st.chat_input("Send a message")
         else:
-            st.info("Start the backend with `python start_server.py` to enable chatting.")
+            st.info("Start the backend with `python main.py api` to enable chatting.")
 
         assistant_record: Optional[Dict[str, Any]] = None
         if prompt:
@@ -1738,13 +1746,13 @@ def main() -> None:
         if backend_ok:
             render_memory_browser(base_url)
         else:
-            st.warning("Start the backend with `python start_server.py` to browse memories.")
+            st.warning("Start the backend with `python main.py api` to browse memories.")
     
     with tab_learning:
         if backend_ok:
             render_learning_dashboard(base_url)
         else:
-            st.warning("Start the backend with `python start_server.py` to view learning metrics.")
+            st.warning("Start the backend with `python main.py api` to view learning metrics.")
 
 
 if __name__ == "__main__":

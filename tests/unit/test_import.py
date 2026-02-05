@@ -17,7 +17,7 @@ try:
     print("✅ Config created")
     
     print("3. Importing CognitiveAgent...")
-    from src.core.cognitive_agent import CognitiveAgent
+    from src.orchestration.cognitive_agent import CognitiveAgent
     print("✅ CognitiveAgent imported")
     
     print("4. Creating agent...")

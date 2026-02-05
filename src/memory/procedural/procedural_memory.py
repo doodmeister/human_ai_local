@@ -68,25 +68,53 @@ class ProceduralMemory:
         """Get all records from LTM using available interface."""
         if self.ltm is None:
             return []
-        # Try get_all_memories method (VectorLongTermMemory doesn't have this)
-        if hasattr(self.ltm, 'get_all_memories'):
+        # Try get_all_memories method (non-standard; may exist)
+        if hasattr(self.ltm, "get_all_memories"):
             return self.ltm.get_all_memories()
-        # Try search_semantic with procedural type filter (VectorLongTermMemory)
-        if hasattr(self.ltm, 'search_semantic'):
-            # Search for procedural memories with a broad query
+
+        # Prefer direct collection enumeration when available (vector LTM).
+        collection = getattr(self.ltm, "collection", None)
+        if collection is not None and hasattr(collection, "get"):
+            try:
+                result = collection.get(
+                    where={"memory_type": "procedural"},
+                    include=["documents", "metadatas"],
+                )
+                ids = result.get("ids") or []
+                documents = result.get("documents") or []
+                metadatas = result.get("metadatas") or []
+
+                records: List[Dict[str, Any]] = []
+                for i, doc in enumerate(documents):
+                    meta = metadatas[i] if i < len(metadatas) else {}
+                    memory_id = ids[i] if i < len(ids) else None
+                    records.append(
+                        {
+                            "id": meta.get("memory_id", memory_id),
+                            "content": doc,
+                            "memory_type": meta.get("memory_type", "procedural"),
+                            "tags": (meta.get("tags", "").split(",") if meta.get("tags") else []),
+                        }
+                    )
+                return records
+            except Exception:
+                pass
+
+        # Fallback: semantic search with procedural type filter.
+        if hasattr(self.ltm, "search_semantic"):
             try:
                 return self.ltm.search_semantic(
-                    query="procedural memory procedure steps",
-                    max_results=100,
+                    query="procedural",
+                    max_results=250,
                     min_similarity=0.0,
-                    memory_types=["procedural"]
+                    memory_types=["procedural"],
                 )
             except Exception:
                 pass
+
         # Fallback to dict access (legacy in-memory)
         if hasattr(self.ltm, 'memories'):
             return list(self.ltm.memories.values())
-        return []
         return []
 
     def _remove_stm_item(self, proc_id: str) -> bool:
@@ -206,32 +234,96 @@ class ProceduralMemory:
                     return content
         return None
 
-    def search(self, query: str) -> List[Dict[str, Any]]:
-        """Search for procedural memories matching a query."""
-        results = []
-        q = query.lower()
-        # Search STM
-        for item in self._get_all_stm_items():
-            raw_content = self._extract_content(item)
-            content = self._parse_content(raw_content)
-            if (
-                content
-                and content.get("memory_type") == "procedural"
-                and (q in content.get("description", "").lower() or any(q in step.lower() for step in content.get("steps", [])))
-            ):
+    def search(
+        self,
+        query: str,
+        *,
+        memory_type: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        max_results: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Search for procedural memories matching a query.
+
+        Args:
+            query: Search query string.
+            memory_type: Optional store selector: "stm", "ltm", or None for both.
+            tags: Optional tag filter; all tags must be present.
+            max_results: Maximum number of returned procedures.
+        """
+
+        def _has_tags(proc: Dict[str, Any]) -> bool:
+            if not tags:
+                return True
+            proc_tags = set(proc.get("tags", []) or [])
+            return all(t in proc_tags for t in tags)
+
+        def _matches_query(proc: Dict[str, Any], q: str) -> bool:
+            if not q:
+                return True
+            desc = (proc.get("description", "") or "").lower()
+            steps = proc.get("steps", []) or []
+            return q in desc or any(q in str(step).lower() for step in steps)
+
+        normalized = (memory_type or "").strip().lower() if memory_type else None
+        search_stm = normalized in (None, "", "stm", "both", "all")
+        search_ltm = normalized in (None, "", "ltm", "both", "all")
+
+        results: List[Dict[str, Any]] = []
+        q = (query or "").lower()
+
+        # Search STM (local substring filter)
+        if search_stm:
+            for item in self._get_all_stm_items():
+                raw_content = self._extract_content(item)
+                content = self._parse_content(raw_content)
+                if not content or content.get("memory_type") != "procedural":
+                    continue
+                if not _has_tags(content):
+                    continue
+                if not _matches_query(content, q):
+                    continue
                 results.append(content)
+
         # Search LTM
-        for record in self._get_all_ltm_records():
-            raw_content = self._extract_content(record)
-            content = self._parse_content(raw_content)
-            if (
-                content
-                and content.get("memory_type") == "procedural"
-                and (q in content.get("description", "").lower() or any(q in step.lower() for step in content.get("steps", [])))
-            ):
-                results.append(content)
+        if search_ltm and self.ltm is not None:
+            # Prefer semantic search using the *actual query* to avoid sampling issues.
+            if hasattr(self.ltm, "search_semantic"):
+                try:
+                    semantic_results = self.ltm.search_semantic(
+                        query=query or "procedural",
+                        max_results=max(max_results * 5, 25),
+                        min_similarity=0.0,
+                        memory_types=["procedural"],
+                    )
+                    for record in semantic_results:
+                        raw_content = self._extract_content(record)
+                        content = self._parse_content(raw_content)
+                        if not content or content.get("memory_type") != "procedural":
+                            continue
+                        if not _has_tags(content):
+                            continue
+                        # Keep substring match to satisfy deterministic test expectations.
+                        if not _matches_query(content, q):
+                            continue
+                        results.append(content)
+                except Exception:
+                    # Fall back to broad-scan below.
+                    pass
+
+            if not results:
+                for record in self._get_all_ltm_records():
+                    raw_content = self._extract_content(record)
+                    content = self._parse_content(raw_content)
+                    if not content or content.get("memory_type") != "procedural":
+                        continue
+                    if not _has_tags(content):
+                        continue
+                    if not _matches_query(content, q):
+                        continue
+                    results.append(content)
+
         results.sort(key=lambda p: -p.get("strength", 0))
-        return results
+        return results[: max_results if max_results > 0 else 10]
 
     def use(self, proc_id: str) -> bool:
         """Mark a procedure as used, incrementing its usage count and strength.
@@ -293,20 +385,31 @@ class ProceduralMemory:
             deleted = True
         return deleted
 
-    def clear(self):
-        """Remove all procedural memories from STM and LTM."""
+    def clear(self, *, memory_type: Optional[str] = None):
+        """Remove procedural memories from STM and/or LTM.
+
+        Args:
+            memory_type: "stm", "ltm", or None for both.
+        """
         # Get all procedure IDs first
         procs_to_delete = []
-        for item in self._get_all_stm_items():
-            raw_content = self._extract_content(item)
-            content = self._parse_content(raw_content)
-            if content and content.get("memory_type") == "procedural":
-                procs_to_delete.append(("stm", content.get("id")))
-        for record in self._get_all_ltm_records():
-            raw_content = self._extract_content(record)
-            content = self._parse_content(raw_content)
-            if content and content.get("memory_type") == "procedural":
-                procs_to_delete.append(("ltm", content.get("id")))
+        normalized = (memory_type or "").strip().lower() if memory_type else None
+        clear_stm = normalized in (None, "", "stm", "both", "all")
+        clear_ltm = normalized in (None, "", "ltm", "both", "all")
+
+        if clear_stm:
+            for item in self._get_all_stm_items():
+                raw_content = self._extract_content(item)
+                content = self._parse_content(raw_content)
+                if content and content.get("memory_type") == "procedural":
+                    procs_to_delete.append(("stm", content.get("id")))
+
+        if clear_ltm:
+            for record in self._get_all_ltm_records():
+                raw_content = self._extract_content(record)
+                content = self._parse_content(raw_content)
+                if content and content.get("memory_type") == "procedural":
+                    procs_to_delete.append(("ltm", content.get("id")))
         
         # Delete each procedure
         for store_type, proc_id in procs_to_delete:

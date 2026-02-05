@@ -8,7 +8,7 @@ Test cases for STM and LTM memory API endpoints (FastAPI)
 import pytest
 from fastapi.testclient import TestClient
 from src.interfaces.api.memory_api import app
-from src.core.agent_singleton import create_agent
+from src.orchestration.agent_singleton import create_agent
 
 # Initialize the agent in app state for testing
 _agent = None

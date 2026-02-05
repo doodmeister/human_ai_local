@@ -1,8 +1,16 @@
 """
 Core cognitive architecture components
 """
-from .config import CognitiveConfig, MemoryConfig, AttentionConfig, ProcessingConfig, AWSConfig, LLMConfig
-from .cognitive_agent import CognitiveAgent
+from __future__ import annotations
+
+from .config import (
+    AWSConfig,
+    AttentionConfig,
+    CognitiveConfig,
+    LLMConfig,
+    MemoryConfig,
+    ProcessingConfig,
+)
 
 __all__ = [
     "CognitiveConfig",
@@ -11,5 +19,13 @@ __all__ = [
     "ProcessingConfig",
     "AWSConfig",
     "LLMConfig",
-    "CognitiveAgent"
+    "CognitiveAgent",
 ]
+
+
+def __getattr__(name: str):  # pragma: no cover
+    if name == "CognitiveAgent":
+        import importlib
+
+        return importlib.import_module("src.orchestration.cognitive_agent").CognitiveAgent
+    raise AttributeError(name)

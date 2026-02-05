@@ -11,7 +11,7 @@ The system gracefully degrades if optional dependencies are not available.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any, Protocol, Union
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 import uuid
@@ -307,7 +307,7 @@ class ProspectiveMemorySystem(ABC):
             value: Amount to increment
         """
         try:
-            from src.chat.metrics import metrics_registry
+            from src.memory.metrics import metrics_registry
             metrics_registry.inc(metric_name, value)
         except Exception:
             pass  # Metrics are optional

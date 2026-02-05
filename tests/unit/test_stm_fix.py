@@ -8,11 +8,12 @@ import os
 import tempfile
 import shutil
 import atexit
+import pytest
 
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from memory.stm.vector_stm import VectorShortTermMemory, STMConfiguration
+from src.memory.stm import VectorShortTermMemory, STMConfiguration
 
 # Module-level temp dir to avoid Windows file locking issues with ChromaDB
 _test_temp_dir = tempfile.mkdtemp()
@@ -61,7 +62,7 @@ def test_stm_remove_item():
         # Test remove_item method
         print("Testing remove_item method...")
         result = stm.remove_item("mem2")
-        assert result == True, "Should return True for successful removal"
+        assert result, "Should return True for successful removal"
         
         # Verify item is removed
         removed_item = stm.retrieve("mem2")
@@ -75,27 +76,19 @@ def test_stm_remove_item():
         
         # Test removing non-existent item
         result = stm.remove_item("nonexistent")
-        assert result == False, "Should return False for non-existent item"
+        assert not result, "Should return False for non-existent item"
         
         print("All Vector STM tests passed!")
-        return True
     finally:
         # Properly shutdown STM to release file locks
         stm.shutdown()
+
+
 def test_dream_consolidation_basic():
     """Test basic consolidation functionality with Vector STM"""
     print("🌙 Testing basic dream consolidation with Vector STM...")
-    
-    try:
-        # Skip this test as it requires CognitiveAgent integration
-        # which is beyond the scope of STM testing
-        print("   Skipping integration test - focusing on STM unit tests")
-        print("✅ Basic consolidation test skipped (no longer needed)!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Dream consolidation test failed: {e}")
-        return False
+
+    pytest.skip("Requires CognitiveAgent integration; out of STM unit scope")
 
 if __name__ == "__main__":
     print("🚀 TESTING STM FIXES")

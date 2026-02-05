@@ -11,12 +11,12 @@ Features:
 - Metrics tracking for comparison
 """
 
-from typing import List, Dict, Optional, Set
+from typing import List, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
 
-from ..task_planner import Task as PlannerTask, TaskStatus as PlannerStatus, TaskPlanner
+from ..task_planner import Task as PlannerTask, TaskPlanner
 from .models import (
     Task as SchedulerTask,
     Resource,

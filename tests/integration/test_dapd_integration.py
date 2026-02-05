@@ -11,7 +11,7 @@ import torch
 import pytest
 sys.path.insert(0, os.path.abspath('.'))
 
-from src.core.cognitive_agent import CognitiveAgent
+from src.orchestration.cognitive_agent import CognitiveAgent
 
 @pytest.mark.asyncio
 async def test_dpad_network_standalone():
@@ -21,7 +21,7 @@ async def test_dpad_network_standalone():
     
     try:
         # Initialize DPAD network with config
-        from src.processing.neural import DPADNetwork, DPADConfig
+        from src.cognition.processing.neural import DPADNetwork, DPADConfig
         
         config = DPADConfig(
             latent_dim=64,
@@ -77,7 +77,7 @@ async def test_neural_integration_manager():
     
     try:
         from src.core.config import CognitiveConfig
-        from src.processing.neural import NeuralIntegrationManager
+        from src.cognition.processing.neural import NeuralIntegrationManager
         
         # Initialize integration manager
         config = CognitiveConfig()

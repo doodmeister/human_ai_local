@@ -11,8 +11,8 @@ import torch
 import pytest
 sys.path.insert(0, os.path.abspath('.'))
 
-from src.core.cognitive_agent import CognitiveAgent
-from src.processing.neural import DPADNetwork, DPADConfig, NeuralIntegrationManager
+from src.orchestration.cognitive_agent import CognitiveAgent
+from src.cognition.processing.neural import DPADNetwork, DPADConfig, NeuralIntegrationManager
 
 @pytest.mark.asyncio
 async def test_dpad_network_standalone():

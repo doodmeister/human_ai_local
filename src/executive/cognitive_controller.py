@@ -1,11 +1,17 @@
-"""
-Cognitive Controller - Resource allocation and process coordination
+"""Cognitive Controller (Phase 2: Advisor-Only)
 
-This module manages cognitive resources, coordinates between different
-cognitive processes, and ensures optimal performance of the overall system.
+This module provides resource and mode *recommendations* to the executive.
+
+Phase 2 constraint:
+    - No module except the executive core may commit actions.
+
+Accordingly, this controller:
+    - Does not autonomously run background control loops by default.
+    - Does not mutate external subsystems (e.g., attention capacity).
+    - Produces advisory recommendations and status for the executive to consume.
 """
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Deque, Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,14 +20,15 @@ import time
 import logging
 from collections import deque
 
-# Initialize logger
-logger = logging.getLogger(__name__)
-
-from ..attention.attention_mechanism import AttentionMechanism
-from ..memory.memory_system import MemorySystem
+from ..cognition.attention.attention_mechanism import AttentionMechanism
+from ..memory import MemorySystem
 from .goal_manager import GoalManager
 from .task_planner import TaskPlanner
 from .decision_engine import DecisionEngine
+from ..core.cognitive_tick import CognitiveStep, CognitiveTick
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 class CognitiveMode(Enum):
     """Different modes of cognitive operation"""
@@ -162,7 +169,9 @@ class CognitiveController:
         memory_system: MemorySystem,
         goal_manager: GoalManager,
         task_planner: TaskPlanner,
-        decision_engine: DecisionEngine
+        decision_engine: DecisionEngine,
+        *,
+        enable_autonomous_monitoring: bool = False,
     ):
         """
         Initialize cognitive controller
@@ -179,6 +188,11 @@ class CognitiveController:
         self.goals = goal_manager
         self.tasks = task_planner
         self.decisions = decision_engine
+
+        # Advisor-only configuration
+        self._enable_autonomous_monitoring = enable_autonomous_monitoring
+        self.recommended_mode: Optional[CognitiveMode] = None
+        self.advisor_notes: Deque[str] = deque(maxlen=200)
         
         # Cognitive state
         self.state = CognitiveState()
@@ -199,6 +213,11 @@ class CognitiveController:
     
     def start_monitoring(self) -> None:
         """Start background monitoring of cognitive state"""
+        if not self._enable_autonomous_monitoring:
+            logger.warning(
+                "CognitiveController.start_monitoring() ignored (advisor-only; enable_autonomous_monitoring=False)"
+            )
+            return
         if self._monitoring_active:
             return
         
@@ -219,9 +238,41 @@ class CognitiveController:
         """Background monitoring loop"""
         while self._monitoring_active:
             try:
+                tick = CognitiveTick(owner="cognitive_controller_advisor", kind="monitoring_tick")
+
+                # Perceive
+                tick.assert_step(CognitiveStep.PERCEIVE)
+                tick.state["timestamp"] = datetime.now().isoformat()
+                tick.advance(CognitiveStep.PERCEIVE)
+
+                # Update STM (update internal state / resources)
+                tick.assert_step(CognitiveStep.UPDATE_STM)
                 self._update_cognitive_state()
+                tick.state["mode"] = self.state.mode.value
+                tick.advance(CognitiveStep.UPDATE_STM)
+
+                # Retrieve (resource checks)
+                tick.assert_step(CognitiveStep.RETRIEVE)
                 self._check_resource_levels()
-                self._optimize_resource_allocation()
+                tick.advance(CognitiveStep.RETRIEVE)
+
+                # Decide
+                tick.assert_step(CognitiveStep.DECIDE)
+                tick.mark_decided({"recommended_mode": (self.recommended_mode.value if self.recommended_mode else None)})
+                tick.advance(CognitiveStep.DECIDE)
+
+                # Act (advisor-only: update recommendations, do not commit changes)
+                tick.assert_step(CognitiveStep.ACT)
+                self._update_resource_recommendations()
+                tick.advance(CognitiveStep.ACT)
+
+                # Reflect
+                tick.assert_step(CognitiveStep.REFLECT)
+                tick.advance(CognitiveStep.REFLECT)
+
+                # Consolidate
+                tick.assert_step(CognitiveStep.CONSOLIDATE)
+                tick.finish()
                 time.sleep(1.0)  # Update every second
             except Exception as e:
                 logger.error(f"Error in monitoring loop: {e}")
@@ -254,7 +305,11 @@ class CognitiveController:
         new_mode = self._determine_optimal_mode()
         
         if new_mode != current_mode:
-            self._transition_mode(new_mode)
+            # Advisor-only: recommend a transition rather than committing it.
+            self.recommended_mode = new_mode
+            self.advisor_notes.append(
+                f"Recommend mode transition: {current_mode.value} -> {new_mode.value}"
+            )
     
     def _determine_optimal_mode(self) -> CognitiveMode:
         """Determine the optimal cognitive mode based on current state"""
@@ -351,26 +406,27 @@ class CognitiveController:
         critical_resources = self.state.get_critical_resources()
         
         if critical_resources:
-            # Force recovery mode if multiple critical resources
+            # Advisor-only: recommend recovery mode if multiple critical resources
             if len(critical_resources) > 1:
-                self._transition_mode(CognitiveMode.RECOVERY)
-            
-            # Reduce resource consumption
+                self.recommended_mode = CognitiveMode.RECOVERY
+                self.advisor_notes.append("Recommend RECOVERY mode due to multiple critical resources")
+
+            # Advisor-only: record recommendations instead of mutating subsystems
             self._reduce_resource_consumption()
     
     def _reduce_resource_consumption(self) -> None:
         """Reduce resource consumption to preserve critical resources"""
-        # Reduce attention capacity
+        # Advisor-only: do not mutate attention capacity here.
         if ResourceType.ATTENTION in self.state.get_critical_resources():
-            self.attention.attention_capacity *= 0.8
+            self.advisor_notes.append("Recommend reducing attention load (critical ATTENTION)")
         
         # Trigger memory consolidation
         if ResourceType.MEMORY in self.state.get_critical_resources():
             # Could trigger dream state or memory cleanup
             pass
     
-    def _optimize_resource_allocation(self) -> None:
-        """Optimize resource allocation based on current needs"""
+    def _update_resource_recommendations(self) -> None:
+        """Update resource allocation recommendations based on current needs."""
         # Get current tasks and their resource requirements
         active_tasks = [
             task for task in self.tasks.tasks.values()
@@ -462,7 +518,10 @@ class CognitiveController:
         resource_requirements: Dict[ResourceType, float]
     ) -> bool:
         """
-        Allocate resources to a process
+        Allocate resources to a process.
+
+        Phase 2 advisor-only semantics: this records a recommendation rather than
+        consuming resources or mutating external subsystems.
         
         Args:
             process_id: ID of the process requesting resources
@@ -478,18 +537,8 @@ class CognitiveController:
                     return False
                 if not self.state.resources[resource_type].is_available(amount):
                     return False
-            
-            # Allocate resources
-            for resource_type, amount in resource_requirements.items():
-                if not self.state.resources[resource_type].consume(amount):
-                    # Rollback previous allocations
-                    for prev_type, prev_amount in resource_requirements.items():
-                        if prev_type == resource_type:
-                            break
-                        self.state.resources[prev_type].recover(prev_amount)
-                    return False
-            
-            # Record allocation
+
+            # Record recommendation (do not consume)
             self.resource_allocations[process_id] = resource_requirements
             return True
     
@@ -546,8 +595,9 @@ class CognitiveController:
         return suggestions
     
     def force_mode_transition(self, mode: CognitiveMode) -> None:
-        """Force a transition to a specific cognitive mode"""
-        self._transition_mode(mode)
+        """Advisor-only: recommend a transition to a specific cognitive mode."""
+        self.recommended_mode = mode
+        self.advisor_notes.append(f"Recommend mode transition to: {mode.value}")
     
     def get_performance_history(self, hours: int = 1) -> List[Dict[str, Any]]:
         """Get performance history for the last N hours"""

@@ -1,9 +1,13 @@
-"""
-Decision Engine - Multi-criteria decision making
+"""Decision Engine (Phase 2: Advisor-Only)
 
-This module provides sophisticated decision-making capabilities using
-multiple criteria, weighted scoring, and uncertainty handling. It supports
-both analytical and heuristic decision-making approaches.
+This module provides decision *recommendations* (scores/rankings), but must not
+commit actions.
+
+Single executive owner:
+    - src/executive/executive_core.py (ExecutiveController)
+
+Phase 2 constraint:
+    - No module except the executive core may commit actions.
 
 ENHANCED FEATURES (Phase 1):
 - Analytic Hierarchy Process (AHP) with eigenvector method

@@ -15,4 +15,6 @@ class AttentionPredictor(Protocol):
 
 class NoOpAttentionPredictor:
     async def score(self, query: str, candidates: List[str]) -> List[float]:  # pragma: no cover
-        return [0.5] * len(candidates)
+        from src.cognition.attention.attention_manager import get_attention_manager
+
+        return get_attention_manager().score_relevance(query, candidates)

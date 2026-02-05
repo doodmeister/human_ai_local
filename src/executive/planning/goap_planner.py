@@ -34,7 +34,7 @@ def get_metrics_registry():
     returns a dummy registry that silently ignores metrics.
     """
     try:
-        from ...chat.metrics import metrics_registry
+        from ...memory.metrics import metrics_registry
         return metrics_registry
     except ImportError:
         # Dummy registry for when chat system not available

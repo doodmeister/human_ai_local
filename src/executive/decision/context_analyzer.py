@@ -26,7 +26,7 @@ def get_metrics_registry():
     global _metrics_registry
     if _metrics_registry is None:
         try:
-            from src.chat.metrics import metrics_registry
+            from src.memory.metrics import metrics_registry
             _metrics_registry = metrics_registry
         except ImportError:
             # Fallback to dummy metrics if chat system unavailable

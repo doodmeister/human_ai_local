@@ -226,11 +226,11 @@ class CognitiveConfig:
             warnings.append(f"Salience threshold {self.attention.salience_threshold} must be 0.0-1.0")
         
         if self.attention.max_attention_items < 1:
-            warnings.append(f"Max attention items must be >= 1")
+            warnings.append("Max attention items must be >= 1")
         
         # Agent config validation
         if self.agent.max_active_goals < 1:
-            warnings.append(f"Max active goals must be >= 1")
+            warnings.append("Max active goals must be >= 1")
         
         # LLM config validation
         if self.llm.provider not in ("openai", "ollama"):
@@ -244,7 +244,7 @@ class CognitiveConfig:
         
         # Chat config validation
         if self.chat.max_context_items < 1:
-            warnings.append(f"Max context items must be >= 1")
+            warnings.append("Max context items must be >= 1")
         
         if not 0.0 <= self.chat.salience_threshold <= 1.0:
             warnings.append(f"Chat salience threshold {self.chat.salience_threshold} must be 0.0-1.0")

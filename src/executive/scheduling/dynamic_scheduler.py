@@ -345,7 +345,11 @@ class ScheduleAnalyzer:
                 ],
                 risk_probability=0.7,
                 impact_score=0.8,
-                metadata={"peak_load": peak_load, "high_load_periods": len(high_load_times)}
+                metadata={
+                    "peak_load": peak_load,
+                    "avg_load": avg_load,
+                    "high_load_periods": len(high_load_times),
+                }
             ))
         
         # High variance (spiky load)
@@ -524,7 +528,7 @@ class DynamicScheduler:
         elif disruption.type == DisruptionType.RESOURCE_UNAVAILABLE:
             # Note: Resource capacity is immutable, so we'd need to create new Resource
             # For now, just log the issue - in production would need resource replacement
-            logger.warning(f"Resource capacity reduced - consider creating new Resource objects")
+            logger.warning("Resource capacity reduced - consider creating new Resource objects")
         
         # Reschedule
         self.current_schedule = self.base_scheduler.schedule(self.current_problem)

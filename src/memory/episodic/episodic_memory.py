@@ -23,6 +23,9 @@ import sys
 import re
 from collections import Counter
 from ..base import BaseMemorySystem  # Add import for base class
+import importlib.util
+
+from src.learning.learning_law import clamp01, utility_score
 
 chromadb = None
 CHROMADB_AVAILABLE = False
@@ -42,12 +45,11 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Import advanced search strategies (after logger initialization)
-try:
-    from .search_strategies import TieredSearchStrategy, SearchResult as StrategySearchResult
-    ADVANCED_SEARCH_AVAILABLE = True
-except ImportError as e:
-    ADVANCED_SEARCH_AVAILABLE = False
-    logger.warning(f"Advanced search strategies not available: {e}")
+ADVANCED_SEARCH_AVAILABLE = (
+    importlib.util.find_spec(f"{__package__}.search_strategies") is not None
+)
+if not ADVANCED_SEARCH_AVAILABLE:
+    logger.warning("Advanced search strategies not available")
 
 def _safe_first_list(val):
     if isinstance(val, list) and len(val) > 0 and isinstance(val[0], list):
@@ -203,14 +205,21 @@ class EpisodicMemory:
         self.access_count += 1
         self.last_access = datetime.now()
         self.updated_at = self.last_access
-        # Retrieval reduces entropy (increases certainty)
-        self.entropy = max(0.0, self.entropy - 0.01)
+        # Phase 7: utility-based learning law.
+        # Retrieval reduces entropy proportional to utility of keeping this memory precise.
+        benefit = clamp01(getattr(self, "importance", 0.5))
+        u = utility_score(benefit=benefit, cost=0.05)
+        self.entropy = max(0.0, self.entropy - (0.01 * clamp01(u)))
     
     def rehearse(self, strength_increment: float = 0.1):
         """Rehearse the memory, strengthening consolidation and reducing entropy"""
         self.rehearsal_count += 1
-        self.consolidation_strength = min(1.0, self.consolidation_strength + strength_increment)
-        self.entropy = max(0.0, self.entropy - 0.02)
+        # Phase 7: utility-based learning law.
+        # Rehearsal updates are scaled by utility (benefit from reinforcement minus update cost).
+        u = utility_score(benefit=clamp01(strength_increment), cost=0.05)
+        scaled = float(strength_increment) * clamp01(u)
+        self.consolidation_strength = min(1.0, self.consolidation_strength + scaled)
+        self.entropy = max(0.0, self.entropy - (0.02 * clamp01(u)))
         self.update_access()
     
     def decay_entropy(self, amount: float = 0.01, nonlinear: bool = True, context: Optional[dict] = None):
@@ -456,11 +465,16 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 from .episodic_memory import EpisodicContext
                 memory.context = EpisodicContext()
             memory.update_access()
-            # Boost rehearsal/consolidation strength on retrieval
-            memory.rehearsal_count += 1  # Increment rehearsal count
-            memory.consolidation_strength = min(1.0, memory.consolidation_strength + 0.05)  # Boost consolidation
-            # Optionally, increase confidence (reduce uncertainty/entropy)
-            memory.confidence = min(1.0, memory.confidence + 0.01)
+            # Phase 7: utility-based learning law.
+            # Retrieval reinforcement uses a single utility signal.
+            # Benefit: memory importance and existing consolidation strength (proxy for usefulness).
+            # Cost: small fixed update cost.
+            benefit = clamp01(0.6 * float(getattr(memory, "importance", 0.5)) + 0.4 * float(getattr(memory, "consolidation_strength", 0.5)))
+            u = utility_score(benefit=benefit, cost=0.05)
+
+            memory.rehearsal_count += 1
+            memory.consolidation_strength = min(1.0, memory.consolidation_strength + (0.05 * clamp01(u)))
+            memory.confidence = min(1.0, memory.confidence + (0.01 * clamp01(u)))
             self._save_to_json_backup(memory)  # Update backup with access info
             return memory.to_dict()
         return None
@@ -703,7 +717,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     ))
                 # Track metrics
                 try:
-                    from src.chat.metrics import metrics_registry
+                    from src.memory.metrics import metrics_registry
                     metrics_registry.inc("episodic_search_tier_semantic")
                 except Exception:
                     pass
@@ -750,7 +764,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     logger.debug(f"Advanced search ({results[0].match_type}) returned {len(results)} results")
                     # Track metrics if available
                     try:
-                        from src.chat.metrics import metrics_registry
+                        from src.memory.metrics import metrics_registry
                         metrics_registry.inc(f"episodic_search_tier_{results[0].match_type}")
                     except Exception:
                         pass
@@ -779,7 +793,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         # Track basic fallback metrics
         if results:
             try:
-                from src.chat.metrics import metrics_registry
+                from src.memory.metrics import metrics_registry
                 metrics_registry.inc("episodic_search_tier_text_match_basic")
             except Exception:
                 pass
@@ -1046,8 +1060,6 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     merged_content = "\n---\n".join([m.detailed_content for m in group])
                     avg_importance = sum(m.importance for m in group) / len(group)
                     avg_valence = sum(m.emotional_valence for m in group) / len(group)
-                    earliest = min(m.timestamp for m in group)
-                    merged_summary = key + f" (merged {len(group)})"
                     merged_id = self.store_memory(
                         detailed_content=merged_content,
                         importance=avg_importance,
