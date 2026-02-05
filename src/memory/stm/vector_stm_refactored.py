@@ -124,7 +124,7 @@ class STMConfiguration:
     decay_rate: float = 0.1
     # New decay / activation customization
     decay_mode: str = "linear"  # one of: linear, exponential, power, sigmoid
-    decay_lambda: float = 0.35   # exponential lambda
+    decay_lambda: float = 0.1   # exponential lambda
     decay_power_alpha: float = 0.8  # power-law exponent
     decay_sigmoid_k: float = 0.9    # sigmoid steepness
     decay_sigmoid_midpoint_hours: float = 0.5  # midpoint in hours
@@ -510,6 +510,10 @@ class VectorShortTermMemory:
         except Exception as e:
             logger.error(f"Failed to calculate activation: {e}")
             return 0.0
+
+    def compute_activation_for_metadata(self, metadata: Dict[str, Any]) -> float:
+        """Public wrapper for activation scoring (compatibility with legacy tests)."""
+        return self._calculate_activation(metadata)
 
     # --- New helper methods for configurable decay ---
     def _compute_recency(self, age_hours: float, item_decay_rate: float) -> float:

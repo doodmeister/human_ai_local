@@ -10,6 +10,7 @@ Implements a sophisticated task scheduler that:
 
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any, cast
+import math
 from dataclasses import dataclass
 import logging
 
@@ -302,8 +303,14 @@ class CPScheduler:
         for task in problem.tasks:
             if task.time_window and task.id in task_vars:
                 # Convert time window to steps
-                earliest_step = int((task.time_window.earliest_start - start_time).total_seconds() / step_size.total_seconds())
-                latest_step = int((task.time_window.latest_end - start_time).total_seconds() / step_size.total_seconds())
+                earliest_step = math.ceil(
+                    (task.time_window.earliest_start - start_time).total_seconds()
+                    / step_size.total_seconds()
+                )
+                latest_step = int(
+                    (task.time_window.latest_end - start_time).total_seconds()
+                    / step_size.total_seconds()
+                )
                 
                 model.Add(task_vars[task.id]["start"] >= earliest_step)
                 model.Add(task_vars[task.id]["end"] <= latest_step)

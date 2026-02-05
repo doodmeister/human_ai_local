@@ -103,7 +103,14 @@ class MemoryConsolidator:
         # If STM is pressured, promotion is more valuable (lower cost).
         cost = clamp01(0.30 * (1.0 - self._estimate_stm_pressure()))
         u = utility_score(benefit=benefit, cost=cost)
-        if u < 0.10:
+        allow_low_utility = (
+            self.policy.min_rehearsals_for_promotion <= 1
+            and self.policy.min_age_seconds <= 0
+            and self.policy.salience_threshold <= 0
+            and self.policy.valence_threshold <= 0
+            and self.policy.promotion_importance_floor <= 0
+        )
+        if u < 0.10 and not allow_low_utility:
             return
         importance = stats.get("importance", 0.5)
         stm_id = stats["stm_id"]
