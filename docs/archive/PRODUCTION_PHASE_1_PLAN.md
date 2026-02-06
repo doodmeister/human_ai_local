@@ -886,7 +886,7 @@ def render_admin_panel():
 
 #### New Endpoints Needed
 ```python
-# Add to src/interfaces/api/chat_endpoints.py
+# Add to src.interfaces.api.chat_endpoints
 
 @router.post("/chat/goals/detect")
 async def detect_goal_in_message(request: GoalDetectionRequest):

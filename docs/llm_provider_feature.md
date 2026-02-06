@@ -32,7 +32,7 @@ class LLMConfig:
 - Backward compatible with existing code
 - Automatic fallback if provider unavailable
 
-### 4. API Endpoint (`src/interfaces/api/chat_endpoints.py`)
+### 4. API Endpoint (`src.interfaces.api.chat_endpoints`)
 ```
 POST /agent/config/llm
 {

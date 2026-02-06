@@ -1,0 +1,27 @@
+[project]
+name = "George Cognitive Chat"
+enable_telemetry = false
+
+[features]
+prompt_playground = false
+unsafe_allow_html = false
+spontaneous_file_upload.enabled = false
+edit_message = false
+
+[features.audio]
+enabled = false
+
+[UI]
+name = "George"
+description = "Cognitive AI assistant with memory, attention, and executive function."
+default_theme = "dark"
+hide_cot = false
+cot_label = "George thinking"
+
+[UI.theme]
+primary = "#3b82f6"
+background = "#0f172a"
+paper = "#1e293b"
+
+[meta]
+generated_by = "human_ai_local scaffold"

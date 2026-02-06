@@ -18,6 +18,7 @@ def build_chat_service(
     stm: Optional[Any] = None,
     ltm: Optional[Any] = None,
     episodic: Optional[Any] = None,
+    semantic: Optional[Any] = None,
     attention: Optional[Any] = None,
     executive: Optional[Any] = None,
 ) -> ChatService:
@@ -49,6 +50,11 @@ def build_chat_service(
             episodic = memory_system.episodic
         except Exception:
             episodic = None
+    if semantic is None and memory_system is not None:
+        try:
+            semantic = memory_system.semantic
+        except Exception:
+            semantic = None
     if attention is None:
         AttentionManager = _lazy_import("src.cognition.attention.attention_manager", "AttentionManager")
         if AttentionManager:
@@ -86,7 +92,7 @@ def build_chat_service(
     cfg = cfg_obj.to_dict()
     cfg.setdefault("retrieval_timeout_ms", cfg_obj.retrieval_timeout_ms)
     builder = ContextBuilder(chat_config=cfg, stm=stm, ltm=ltm, episodic=episodic,
-                             attention=attention, executive=executive, prospective=prospective)
+                             semantic=semantic, attention=attention, executive=executive, prospective=prospective)
     # Lazy create consolidator (won't fail if memory systems absent)
     consolidator = None
     try:

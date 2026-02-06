@@ -219,7 +219,7 @@ pm = memsys.prospective
 - `get_inmemory_prospective_memory()` → get_prospective_memory()
 - Configuration via `MemorySystemConfig.use_vector_prospective`
 
-### Chat Endpoints (src/interfaces/api/chat_endpoints.py)
+### Chat Endpoints (src.interfaces.api.chat_endpoints)
 - Uses backward compat methods (no changes needed)
 - `add_reminder(content, seconds)` - float seconds parameter
 - `list_reminders(include_triggered=True)` - legacy parameter

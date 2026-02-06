@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 router = APIRouter()
 
 
-# Add /api/reflect endpoint for manual reflection trigger
+# Add /reflect endpoint for manual reflection trigger
 @router.post("/reflect")
 async def reflect(request: Request):
     """

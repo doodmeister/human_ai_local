@@ -6,7 +6,7 @@
 
 **Date**: January 2025  
 **Status**: ✅ COMPLETE - All ExecutiveSystem functionality exposed via REST API  
-**Location**: `src/interfaces/api/executive_api.py`
+**Location**: `src.interfaces.api.executive_api`
 
 ---
 

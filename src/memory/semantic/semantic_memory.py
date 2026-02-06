@@ -3,14 +3,22 @@ from typing import Dict, Any, Optional, List, Sequence
 import uuid
 from ..base import BaseMemorySystem
 
-# Import ChromaDB and embedding model
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError as e:
-    raise ImportError(
-        "sentence-transformers is required for vector semantic memory. "
-        "Install it with: pip install sentence-transformers"
-    ) from e
+# sentence_transformers lazy-loaded to avoid 10-30s startup (torch/sklearn/pandas)
+SentenceTransformer = None
+
+
+def _ensure_sentence_transformers():
+    global SentenceTransformer
+    if SentenceTransformer is not None:
+        return
+    try:
+        from sentence_transformers import SentenceTransformer as _ST
+        SentenceTransformer = _ST
+    except ImportError as e:
+        raise ImportError(
+            "sentence-transformers is required for vector semantic memory. "
+            "Install it with: pip install sentence-transformers"
+        ) from e
 
 try:
     import chromadb
@@ -57,6 +65,7 @@ class SemanticMemorySystem(BaseMemorySystem):
         # Initialize embedding model with GPU support if available
         try:
             import torch
+            _ensure_sentence_transformers()
             self.embedding_model = SentenceTransformer(embedding_model)
             if torch.cuda.is_available():
                 self.embedding_model = self.embedding_model.to("cuda")

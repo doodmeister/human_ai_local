@@ -31,15 +31,28 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Type imports
 
-# Third-party imports with proper error handling
-try:
-    import torch
-    from sentence_transformers import SentenceTransformer
-    HAS_SENTENCE_TRANSFORMERS = True
-except ImportError:
-    HAS_SENTENCE_TRANSFORMERS = False
-    torch = None
-    SentenceTransformer = None
+# Third-party imports — lazy to avoid slow startup
+# torch + sentence_transformers pull in transformers/sklearn/pandas/sympy;
+# importing eagerly adds 10-30s to every process that touches src.memory.
+torch = None
+SentenceTransformer = None
+HAS_SENTENCE_TRANSFORMERS: bool | None = None  # None = not yet checked
+
+
+def _ensure_sentence_transformers():
+    """Lazy-import torch + sentence_transformers on first use."""
+    global torch, SentenceTransformer, HAS_SENTENCE_TRANSFORMERS
+    if HAS_SENTENCE_TRANSFORMERS is not None:
+        return HAS_SENTENCE_TRANSFORMERS
+    try:
+        import torch as _torch
+        from sentence_transformers import SentenceTransformer as _ST
+        torch = _torch
+        SentenceTransformer = _ST
+        HAS_SENTENCE_TRANSFORMERS = True
+    except ImportError:
+        HAS_SENTENCE_TRANSFORMERS = False
+    return HAS_SENTENCE_TRANSFORMERS
 
 try:
     import chromadb
@@ -181,7 +194,7 @@ class EmbeddingManager:
     
     def _initialize_model(self):
         """Initialize the embedding model with error handling"""
-        if not HAS_SENTENCE_TRANSFORMERS:
+        if not _ensure_sentence_transformers():
             raise VectorSTMConfigError(
                 "sentence-transformers is required for vector memory systems. "
                 "Install it with: pip install sentence-transformers"
@@ -414,6 +427,7 @@ class VectorShortTermMemory:
     
     def _validate_dependencies(self):
         """Validate that required dependencies are available"""
+        _ensure_sentence_transformers()
         if not HAS_SENTENCE_TRANSFORMERS:
             raise VectorSTMConfigError(
                 "sentence-transformers is required. Install with: pip install sentence-transformers"
@@ -799,9 +813,11 @@ class VectorShortTermMemory:
                 
                 for i, memory_id in enumerate(results['ids'][0]):
                     try:
-                        # Calculate similarity from distance
+                        # Calculate similarity from L2 distance.
+                        # ChromaDB default is L2 (Euclidean): distance in [0, inf).
+                        # Map to similarity in (0, 1] using inverse formula.
                         distance = float(results['distances'][0][i])
-                        similarity = max(0.0, 1.0 - distance)
+                        similarity = 1.0 / (1.0 + distance)
                         
                         if similarity >= min_similarity:
                             # Get metadata and content

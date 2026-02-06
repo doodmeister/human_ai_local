@@ -13,12 +13,23 @@ import types
 from ..base import BaseMemorySystem
 
 # Import ChromaDB and SentenceTransformers with fallback
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    SentenceTransformer = None
+# sentence_transformers is lazy-loaded to avoid 10-30s startup delay
+SentenceTransformer = None
+SENTENCE_TRANSFORMERS_AVAILABLE: bool | None = None  # None = not yet checked
+
+
+def _ensure_sentence_transformers():
+    """Lazy-import sentence_transformers on first use."""
+    global SentenceTransformer, SENTENCE_TRANSFORMERS_AVAILABLE
+    if SENTENCE_TRANSFORMERS_AVAILABLE is not None:
+        return SENTENCE_TRANSFORMERS_AVAILABLE
+    try:
+        from sentence_transformers import SentenceTransformer as _ST
+        SentenceTransformer = _ST
+        SENTENCE_TRANSFORMERS_AVAILABLE = True
+    except ImportError:
+        SENTENCE_TRANSFORMERS_AVAILABLE = False
+    return SENTENCE_TRANSFORMERS_AVAILABLE
 
 try:
     import chromadb
@@ -427,7 +438,7 @@ class VectorLongTermMemory(BaseMemorySystem):
         self.chroma_persist_dir = Path(chroma_persist_dir or "data/memory_stores/chroma_ltm")
         self.collection_name = collection_name
         self.embedding_model = None
-        if SENTENCE_TRANSFORMERS_AVAILABLE and SentenceTransformer:
+        if _ensure_sentence_transformers() and SentenceTransformer:
             try:
                 import torch
                 self.embedding_model = SentenceTransformer(embedding_model)
@@ -674,7 +685,7 @@ class VectorLongTermMemory(BaseMemorySystem):
             if results['ids'][0]:
                 for i, memory_id in enumerate(results['ids'][0]):
                     distance = results['distances'][0][i]
-                    similarity = max(0.0, 1.0 - distance)
+                    similarity = 1.0 / (1.0 + distance)
                     if similarity >= min_similarity:
                         meta = results['metadatas'][0][i]
                         doc = results['documents'][0][i]

@@ -8,7 +8,8 @@ all user-facing entrypoints are consolidated here.
 Usage:
   - `python main.py chat` (default): interactive CLI
   - `python main.py api`: start FastAPI server on `http://127.0.0.1:8000`
-  - `python main.py ui`: start Streamlit UI (optionally also starts backend)
+  - `python main.py ui`: start Streamlit UI (legacy, optionally starts backend)
+  - `python main.py chainlit`: start Chainlit chat UI (optionally starts backend)
 """
 
 from __future__ import annotations
@@ -169,6 +170,56 @@ def _run_ui(*, port: int, with_backend: bool, api_host: str, api_port: int) -> i
                 backend_proc.kill()
 
 
+def _run_chainlit(*, port: int, with_backend: bool, api_host: str, api_port: int) -> int:
+    project_root = Path(__file__).parent
+    chainlit_app = project_root / "scripts" / "chainlit_app" / "app.py"
+    if not chainlit_app.exists():
+        raise SystemExit(f"Missing Chainlit app: {chainlit_app}")
+
+    backend_proc: Optional[subprocess.Popen[str]] = None
+    try:
+        if with_backend:
+            backend_proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(project_root / "main.py"),
+                    "api",
+                    "--host",
+                    api_host,
+                    "--port",
+                    str(api_port),
+                ]
+            )
+            health_url = f"http://{api_host}:{api_port}/health"
+            for _ in range(30):
+                if _http_ok(health_url, timeout=0.5):
+                    break
+                time.sleep(0.5)
+
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "chainlit",
+                "run",
+                str(chainlit_app),
+                "--port",
+                str(port),
+                "--host",
+                "localhost",
+            ],
+            check=False,
+        )
+        return 0
+    finally:
+        if backend_proc is not None:
+            backend_proc.terminate()
+            try:
+                backend_proc.wait(timeout=5)
+            except Exception:
+                backend_proc.kill()
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="human-ai")
     subparsers = parser.add_subparsers(dest="cmd")
@@ -180,11 +231,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_api.add_argument("--port", type=int, default=8000)
     p_api.add_argument("--reload", action="store_true")
 
-    p_ui = subparsers.add_parser("ui", help="Run Streamlit UI")
+    p_ui = subparsers.add_parser("ui", help="Run Streamlit UI (legacy Streamlit)")
     p_ui.add_argument("--port", type=int, default=8501)
     p_ui.add_argument("--with-backend", action="store_true")
     p_ui.add_argument("--api-host", default="127.0.0.1")
     p_ui.add_argument("--api-port", type=int, default=8000)
+
+    p_cl = subparsers.add_parser("chainlit", help="Run Chainlit chat UI")
+    p_cl.add_argument("--port", type=int, default=8501)
+    p_cl.add_argument("--with-backend", action="store_true")
+    p_cl.add_argument("--api-host", default="127.0.0.1")
+    p_cl.add_argument("--api-port", type=int, default=8000)
 
     args = parser.parse_args(argv)
     cmd = args.cmd or "chat"
@@ -195,6 +252,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _run_api(host=args.host, port=args.port, reload=args.reload)
     if cmd == "ui":
         return _run_ui(port=args.port, with_backend=args.with_backend, api_host=args.api_host, api_port=args.api_port)
+    if cmd == "chainlit":
+        return _run_chainlit(port=args.port, with_backend=args.with_backend, api_host=args.api_host, api_port=args.api_port)
 
     parser.print_help()
     return 2

@@ -54,17 +54,32 @@ pip install -r requirements.txt
 
 ### Start the System
 
-**Option 1: Streamlit UI**
+**Option 1: Chainlit Chat UI** (recommended)
 ```bash
-python main.py ui
+# Start the backend API first
+python main.py api
+
+# In a second terminal, start the Chainlit UI
+python main.py chainlit
 ```
 Access at http://localhost:8501
 
-**Option 2: API Server**
+Or start both together:
+```bash
+python main.py chainlit --with-backend
+```
+
+**Option 2: API Server only**
 ```bash
 python main.py api
 ```
 Access at http://localhost:8000 (docs at /docs)
+
+**Option 3: Streamlit UI** (legacy)
+```bash
+python main.py ui
+```
+Access at http://localhost:8501
 
 ### API compatibility (main vs simple server)
 
@@ -78,10 +93,10 @@ Both servers support the same *unprefixed* endpoint paths (e.g. `/agent/chat`, `
 Notes:
 
 - Prefer unprefixed routes (e.g. `/agent/chat`) as the canonical API surface.
-- Routes under `/api/*` are **legacy aliases** kept temporarily for backward compatibility.
+- Legacy `/api/*` aliases were removed on 2026-02-06.
 
 - If you're pointing the Streamlit UI at a backend, set `GEORGE_API_BASE_URL` to the server root (e.g. `http://localhost:8000` or `http://localhost:8001`).
-- Prefer `/agent/reminders*` for reminders and `/procedure/*` for procedural memory. Some older `/api/agent/memory/*` routes are still present for compatibility and return `Deprecation` headers.
+- Prefer `/agent/reminders*` for reminders and `/procedure/*` for procedural memory.
 
 For a quick endpoint smoke check, run:
 ```bash
@@ -90,26 +105,7 @@ python scripts/smoke_api_compat.py --base http://localhost:8000
 
 ## Deprecation policy & timeline
 
-This repo keeps backward-compatible API aliases for a limited time while clients migrate to canonical endpoints.
-
-- Deprecation signal: deprecated endpoints return `Deprecation: true` and a `Link: <successor>; rel="successor-version"` header.
-- Support window: deprecated aliases are supported for ~90 days after first being marked deprecated.
-- Removal milestone (next): remove deprecated aliases on **2026-04-01** (or the first release after that date).
-
-If you maintain a client:
-
-- Prefer canonical routes like `/agent/chat`, `/agent/reminders*`, `/procedure/*`, `/memory/*`.
-- Treat `Deprecation: true` responses as a migration warning and follow the successor link.
-
-Common migrations:
-
-- `/api/agent/chat` → `/agent/chat`
-- `/api/agent/status` → `/agent/status`
-- `/api/agent/init-status` → `/agent/init-status`
-- `/api/agent/reminders*` → `/agent/reminders*`
-- `/api/executive/status` → `/executive/status`
-- `/api/neural/status` → `/neural/status`
-- `/api/analytics/performance` → `/analytics/performance`
+Legacy `/api/*` aliases have been removed. Use canonical routes such as `/agent/chat`, `/agent/reminders*`, `/procedure/*`, `/memory/*`, `/executive/*`.
 
 ---
 
@@ -290,7 +286,9 @@ human_ai_local/
 │   ├── interfaces/        # API endpoints
 │   └── core/              # Configuration
 ├── tests/                 # 200+ tests
-├── scripts/               # Streamlit UI, tools
+├── scripts/
+│   ├── chainlit_app/      # Chainlit chat UI (recommended)
+│   └── george_streamlit_chat.py  # Legacy Streamlit UI
 ├── docs/                  # Documentation
 └── data/                  # Persistent storage
 ```
@@ -341,7 +339,8 @@ MIT License - See [LICENSE](LICENSE)
 - **sentence-transformers** - Embeddings
 - **Google OR-Tools** - Constraint solving
 - **FastAPI** - REST API
-- **Streamlit** - UI framework
+- **Chainlit** - Chat UI framework
+- **Streamlit** - Legacy UI
 - **scikit-learn** - ML pipeline
 - **scipy** - Statistical analysis
 

@@ -59,7 +59,6 @@ python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvi
 
 1. **API Server starts** on http://localhost:8000
    - Health check: http://localhost:8000/health
-   - (Compat) Health check: http://localhost:8000/api/health
    - Documentation: http://localhost:8000/docs
 
 2. **Streamlit Interface starts** on http://localhost:8501
@@ -69,7 +68,7 @@ python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvi
 
 When running Streamlit, set the API base to the server root (no `/api` prefix), e.g. `http://localhost:8000`.
 
-The simple dev server (`scripts/legacy/george_api_simple.py`) also supports both unprefixed endpoints (like `/agent/chat`) and `/api/*` aliases.
+The simple dev server (`scripts/legacy/george_api_simple.py`) supports unprefixed endpoints (like `/agent/chat`).
 
 3. **Initialization takes 10-60 seconds**
    - First time: Downloads models, creates databases

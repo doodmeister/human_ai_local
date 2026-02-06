@@ -203,9 +203,9 @@ class MemoryQueryInterface:
                         if not doc:
                             continue
                         
-                        # Convert distance to relevance (lower distance = higher relevance)
+                        # Convert L2 distance to relevance (lower distance = higher relevance)
                         distance = distances[i] if i < len(distances) else 1.0
-                        relevance = max(0.0, 1.0 - distance)
+                        relevance = 1.0 / (1.0 + distance)
                         
                         if relevance < query.min_relevance:
                             continue
@@ -271,7 +271,7 @@ class MemoryQueryInterface:
                             continue
                         
                         distance = distances[i] if i < len(distances) else 1.0
-                        relevance = max(0.0, 1.0 - distance)
+                        relevance = 1.0 / (1.0 + distance)
                         
                         if relevance < query.min_relevance:
                             continue
@@ -363,7 +363,7 @@ class MemoryQueryInterface:
                             continue
                         
                         distance = distances[i] if i < len(distances) else 1.0
-                        relevance = max(0.0, 1.0 - distance)
+                        relevance = 1.0 / (1.0 + distance)
                         
                         if relevance < query.min_relevance:
                             continue

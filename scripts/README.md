@@ -159,11 +159,13 @@ streamlit run george_streamlit_enhanced.py --server.port 8502
 ## 🔧 Development Notes
 
 ### API Integration
-Both interfaces integrate with the complete George API:
-- **Agent API**: `/api/agent/*` - Core cognitive processing
-- **Executive API**: `/api/executive/*` - Goal/task/decision management  
-- **Memory APIs**: `/api/memory/*` - Multi-modal memory operations
+Both interfaces integrate with the complete George API (canonical routes):
+- **Agent API**: `/agent/*` - Core cognitive processing
+- **Executive API**: `/executive/*` - Goal/task/decision management  
+- **Memory APIs**: `/memory/*` - Multi-modal memory operations
 - **Specialized APIs**: Semantic, procedural, prospective memory systems
+
+Legacy `/api/*` aliases were removed on 2026-02-06.
 
 ### Customization
 The interfaces are designed to be easily customizable:

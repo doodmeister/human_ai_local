@@ -32,6 +32,7 @@ class ContextBuilder:
         stm: Any = None,
         ltm: Any = None,
         episodic: Any = None,
+        semantic: Any = None,
         attention: Any = None,
         executive: Any = None,
         prospective: Any = None,
@@ -42,11 +43,12 @@ class ContextBuilder:
         if chat_config:
             self.cfg.update(chat_config)
         # Backward compatibility: ensure timeouts structure
-        if "timeouts" not in self.cfg:
+        if not self.cfg.get("timeouts"):
             self.cfg["timeouts"] = {"retrieval_ms": self.cfg.get("retrieval_timeout_ms", 400)}
         self.stm = stm
         self.ltm = ltm
         self.episodic = episodic
+        self.semantic = semantic
         self.attention = attention
         self.executive = executive
         self.prospective = prospective

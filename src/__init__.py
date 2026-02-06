@@ -14,13 +14,16 @@ This package implements:
 __version__ = "0.1.0"
 __author__ = "Human-AI Cognition Team"
 
-# Core cognitive components (lazy import pattern to avoid heavy deps during lightweight tests)
-try:  # pragma: no cover - defensive import guard
-    from .core import CognitiveConfig  # type: ignore
-    from .orchestration.cognitive_agent import CognitiveAgent  # type: ignore
-except Exception:  # Avoid failing when optional deps (e.g., openai) missing for simple submodule imports
-    CognitiveAgent = None  # type: ignore
-    CognitiveConfig = None  # type: ignore
+# Core cognitive components — fully lazy to avoid pulling in torch/transformers
+# (which add 10-30s of startup time).  Access via src.CognitiveAgent etc.
+CognitiveAgent = None  # type: ignore
+CognitiveConfig = None  # type: ignore
+
+try:  # pragma: no cover
+    from .core.config import CognitiveConfig  # type: ignore  (lightweight, no heavy deps)
+except Exception:
+    pass
+
 try:  # pragma: no cover
     from .utils import get_cognitive_logger, setup_logging  # type: ignore
 except Exception:
@@ -28,6 +31,15 @@ except Exception:
         return None
     def setup_logging(*args, **kwargs):  # type: ignore
         return None
+
+
+def __getattr__(name: str):
+    """Lazy-load CognitiveAgent on first access to avoid slow torch import at startup."""
+    if name == "CognitiveAgent":
+        global CognitiveAgent
+        from .orchestration.cognitive_agent import CognitiveAgent  # type: ignore
+        return CognitiveAgent
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "CognitiveAgent",

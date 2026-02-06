@@ -317,18 +317,25 @@ class ChatService:
 
                         # Attempt STM refresh (rehearsal) if stm supports method.
                         if stm_obj is not None:
-                            # If STM has method to update activation; else re-add item to refresh recency
+                            # If STM has method to update activation; else re-store to refresh recency
                             if hasattr(stm_obj, "refresh_item_activation"):
                                 try:
                                     key = f"{cm.memory_type}:{meta['subject']}:{meta['object']}"
                                     stm_obj.refresh_item_activation(key)  # type: ignore
-                                except Exception:
-                                    pass
-                            elif hasattr(stm_obj, "add_item"):
+                                except Exception as e:
+                                    logger.debug("STM refresh_item_activation failed: %s", e)
+                            elif hasattr(stm_obj, "store"):
                                 try:
-                                    stm_obj.add_item(content=cm.content, metadata={**meta, "rehearsal": True})  # type: ignore
-                                except Exception:
-                                    pass
+                                    key = f"{cm.memory_type}:{meta['subject']}:{meta['object']}"
+                                    stm_obj.store(
+                                        memory_id=f"rehears-{user_turn.turn_id[:8]}-{key}",
+                                        content=cm.content,
+                                        importance=user_turn.importance or 0.5,
+                                        attention_score=salience,
+                                        emotional_valence=valence,
+                                    )
+                                except Exception as e:
+                                    logger.debug("STM rehearsal store failed: %s", e)
             except Exception:
                 pass
             # Attempt to store in STM if accessible via consolidator
@@ -336,13 +343,24 @@ class ChatService:
                 stm_obj = None
                 if self.consolidator is not None:
                     stm_obj = getattr(self.consolidator, "stm", None)
-                if stm_obj is not None and hasattr(stm_obj, "add_item"):
-                    stm_obj.add_item(content=cm.content, metadata=meta)  # type: ignore
-                # Fallback: if no add_item but store_memory exists
-                elif stm_obj is not None and hasattr(stm_obj, "store_memory"):
-                    stm_obj.store_memory(memory_id=f"cap-{user_turn.turn_id[:8]}-{meta['frequency']}", content=cm.content, importance=0.5)  # type: ignore
-            except Exception:
-                pass
+                if stm_obj is not None and hasattr(stm_obj, "store"):
+                    mem_key = f"{cm.memory_type}:{meta['subject']}:{meta['object']}"
+                    stored = stm_obj.store(
+                        memory_id=f"cap-{user_turn.turn_id[:8]}-{mem_key}",
+                        content=cm.content,
+                        importance=importance,
+                        attention_score=salience,
+                        emotional_valence=valence,
+                    )
+                    if stored:
+                        logger.info("Captured memory stored to STM: %s [%s]", mem_key, cm.memory_type)
+                        metrics_registry.inc("stm_capture_stores_total")
+                    else:
+                        logger.warning("STM store returned False for: %s", mem_key)
+                elif stm_obj is not None:
+                    logger.warning("STM object has no store() method: %s", type(stm_obj).__name__)
+            except Exception as e:
+                logger.error("STM capture store failed: %s", e, exc_info=True)
             # Semantic promotion (identity/preference/goal) when frequency threshold hit
             try:
                 freq = meta.get("frequency", 0)
@@ -378,7 +396,7 @@ class ChatService:
 
                     # Access semantic memory through context_builder if available
                     sem = getattr(self.context_builder, "semantic", None)
-                    if sem is not None and hasattr(sem, "add_item"):
+                    if sem is not None and hasattr(sem, "store_fact"):
                         promo_meta = {k: meta[k] for k in ("memory_type", "subject", "predicate", "object", "frequency") if k in meta}
                         promo_meta.update({
                             "promotion_reason": "frequency_threshold",
@@ -387,7 +405,7 @@ class ChatService:
                             "source": "chat_capture",
                         })
                         try:
-                            sem.add_item(content=cm.content, metadata=promo_meta)  # type: ignore
+                            sem.store_fact(content=cm.content, metadata=promo_meta)  # type: ignore
                             meta["promoted_semantic"] = True
                             metrics_registry.inc("captured_memory_semantic_promotions_total")
                         except Exception:

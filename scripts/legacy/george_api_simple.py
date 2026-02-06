@@ -50,24 +50,20 @@ def _mark_deprecated(response: Response, successor_path: str) -> None:
     response.headers["Deprecation"] = "true"
     response.headers["Link"] = f'<{successor_path}>; rel="successor-version"'
 
-# Mount shared API routers (canonical paths live under /api/*)
+# Mount shared API routers (canonical paths)
 try:
     from src.interfaces.api.procedural_api import router as procedural_router
 
-    # CLI-friendly prefix
-    app.include_router(procedural_router, prefix="/api")
-    # Drop-in compatibility with the main server
     app.include_router(procedural_router)
-    logger.info("Mounted procedural API router at /api and /")
+    logger.info("Mounted procedural API router at /")
 except Exception as exc:
     logger.warning(f"Procedural API router not mounted: {type(exc).__name__}: {exc}")
 
 try:
     from src.interfaces.api.prospective_api import router as prospective_router
 
-    app.include_router(prospective_router, prefix="/api")
     app.include_router(prospective_router)
-    logger.info("Mounted prospective API router at /api and /")
+    logger.info("Mounted prospective API router at /")
 except Exception as exc:
     logger.warning(f"Prospective API router not mounted: {type(exc).__name__}: {exc}")
 
@@ -76,9 +72,7 @@ try:
 
     # The Streamlit UI expects /memory/* (no /api prefix).
     app.include_router(memory_router)
-    # Keep a prefixed variant for convenience.
-    app.include_router(memory_router, prefix="/api")
-    logger.info("Mounted memory API router at / and /api")
+    logger.info("Mounted memory API router at /")
 except Exception as exc:
     logger.warning(f"Memory API router not mounted: {type(exc).__name__}: {exc}")
 
@@ -86,15 +80,14 @@ try:
     from src.interfaces.api.semantic_api import router as semantic_router
 
     app.include_router(semantic_router)
-    app.include_router(semantic_router, prefix="/api")
-    logger.info("Mounted semantic API router at / and /api")
+    logger.info("Mounted semantic API router at /")
 except Exception as exc:
     logger.warning(f"Semantic API router not mounted: {type(exc).__name__}: {exc}")
 
 try:
     from src.interfaces.api.executive_api import router as executive_router
 
-    # Only mount at root to avoid clashing with the legacy /api/executive/status.
+    # Only mount at root to avoid clashing with other executive routes.
     app.include_router(executive_router)
     logger.info("Mounted executive API router at /")
 except Exception as exc:
@@ -241,27 +234,6 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-@app.middleware("http")
-async def mark_api_aliases_deprecated(request: Request, call_next):
-    """Mark /api/* routes as deprecated aliases of unprefixed routes.
-
-    The main server and simple server both mount canonical endpoints without the
-    /api prefix; this middleware provides consistent deprecation signaling for
-    any remaining /api-prefixed aliases, especially those coming from shared
-    routers mounted at both / and /api.
-
-    Explicit per-endpoint deprecations (where the successor isn't a simple
-    "strip /api" mapping) take precedence.
-    """
-    response = await call_next(request)
-
-    path = request.url.path
-    if path.startswith("/api/") and "Deprecation" not in response.headers:
-        successor = path[len("/api") :]
-        if successor:
-            _mark_deprecated(response, successor)
-
-    return response
 
 
 @app.middleware("http")
@@ -307,22 +279,21 @@ def get_agent():
     
     try:
         _agent_initializing = True
-        print("🧠 Initializing George cognitive agent...")
+        print("[INIT] Initializing George cognitive agent...")
         from src.orchestration.agent_singleton import create_agent
         _agent = create_agent()
         # Expose agent via FastAPI app state for shared routers.
         app.state.agent = _agent
-        print("✅ Agent initialized")
+        print("[OK] Agent initialized")
         _agent_initializing = False
         return _agent
     except Exception as e:
         _agent_initializing = False
         _initialization_error = str(e)
-        print(f"❌ Agent initialization failed: {e}")
+        print(f"[ERROR] Agent initialization failed: {e}")
         raise HTTPException(status_code=500, detail=f"Agent initialization failed: {str(e)}")
 
 # Health check endpoint
-@app.get("/api/health")
 @app.get("/health")
 async def health_check():
     """Health check endpoint for verifying server is running."""
@@ -330,7 +301,6 @@ async def health_check():
 
 
 # Enhanced health check with component status
-@app.get("/api/health/detailed")
 @app.get("/health/detailed")
 async def detailed_health_check():
     """Detailed health check with component status."""
@@ -375,14 +345,10 @@ async def detailed_health_check():
 
 # Initialization status endpoint
 @app.get("/agent/init-status")
-@app.get("/api/agent/init-status")
 async def initialization_status(request: Request, response: Response):
     """Check agent initialization status"""
     global _agent, _agent_initializing, _initialization_error
 
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/init-status")
-    
     if _agent is not None:
         return {"status": "ready", "message": "Agent is fully initialized"}
     elif _agent_initializing:
@@ -394,11 +360,8 @@ async def initialization_status(request: Request, response: Response):
 
 # Agent status endpoint
 @app.get("/agent/status")
-@app.get("/api/agent/status")
 async def agent_status(request: Request, response: Response):
     """Get agent status"""
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/status")
     try:
         agent = get_agent()
         status = agent.get_cognitive_status()
@@ -427,10 +390,8 @@ class ProactiveRecallRequest(BaseModel):
     use_ai_summary: bool = False
 
 @app.post("/agent/process")
-@app.post("/api/agent/process")
 async def process_input(request: ProcessInputRequest, response: Response):
     """Process user input through the cognitive agent"""
-    _mark_deprecated(response, "/agent/chat")
     try:
         agent = get_agent()
         response = await agent.process_input(request.text)
@@ -440,16 +401,9 @@ async def process_input(request: ProcessInputRequest, response: Response):
 
 
 @app.post("/agent/chat")
-@app.post("/api/agent/chat")
 async def agent_chat(req: AgentChatRequest, request: Request, response: Response):
     """Chat endpoint compatible with the main API's /agent/chat."""
     headers: dict[str, str] | None = None
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/chat")
-        headers = {
-            "Deprecation": response.headers["Deprecation"],
-            "Link": response.headers["Link"],
-        }
     from src.orchestration.chat.api_runtime import get_chat_service
 
     chat_svc = get_chat_service()
@@ -492,15 +446,12 @@ async def agent_chat(req: AgentChatRequest, request: Request, response: Response
 
 
 @app.get("/agent/chat/preview")
-@app.get("/api/agent/chat/preview")
 async def agent_chat_preview(
     request: Request,
     response: Response,
     message: str,
     session_id: Optional[str] = None,
 ):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/chat/preview")
     from src.orchestration.chat.api_runtime import get_chat_service
 
     chat_svc = get_chat_service()
@@ -508,27 +459,21 @@ async def agent_chat_preview(
 
 
 @app.get("/agent/chat/metrics")
-@app.get("/api/agent/chat/metrics")
 async def agent_chat_metrics(
     request: Request,
     response: Response,
     light: bool = True,
 ):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/chat/metrics")
     from src.orchestration.chat.api_runtime import metrics_registry
 
     return metrics_registry.snapshot_light() if light else metrics_registry.snapshot()
 
 
 @app.get("/agent/chat/performance")
-@app.get("/api/agent/chat/performance")
 async def agent_chat_performance_status(
     request: Request,
     response: Response,
 ):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/chat/performance")
     from src.orchestration.chat.api_runtime import get_chat_service
 
     chat_svc = get_chat_service()
@@ -536,13 +481,10 @@ async def agent_chat_performance_status(
 
 
 @app.get("/agent/chat/metacog/status")
-@app.get("/api/agent/chat/metacog/status")
 async def agent_chat_metacog_status(
     request: Request,
     response: Response,
 ):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/chat/metacog/status")
     from src.orchestration.chat.api_runtime import get_chat_service
 
     chat_svc = get_chat_service()
@@ -560,13 +502,10 @@ async def agent_chat_metacog_status(
 
 
 @app.get("/agent/chat/consolidation/status")
-@app.get("/api/agent/chat/consolidation/status")
 async def agent_chat_consolidation_status(
     request: Request,
     response: Response,
 ):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/chat/consolidation/status")
     from src.orchestration.chat.api_runtime import get_chat_service
 
     chat_svc = get_chat_service()
@@ -583,10 +522,7 @@ class DreamRequest(BaseModel):
 
 
 @app.post("/agent/dream/start")
-@app.post("/api/agent/dream/start")
 async def agent_dream_start(dream_req: DreamRequest, request: Request, response: Response):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/dream/start")
     from src.orchestration.chat.api_runtime import get_agent, get_chat_service
 
     agent = get_agent()
@@ -630,11 +566,8 @@ class LLMConfigUpdate(BaseModel):
 
 
 @app.post("/agent/config/llm")
-@app.post("/api/agent/config/llm")
 async def agent_update_llm_config(config: LLMConfigUpdate, request: Request, response: Response):
     """Update LLM provider configuration and reinitialize the agent provider."""
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/config/llm")
     try:
         agent = get_agent()
         if agent is None:
@@ -676,68 +609,6 @@ async def agent_proactive_recall(req: ProactiveRecallRequest, response: Response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Proactive recall failed: {str(e)}")
 
-# Memory endpoints
-@app.get("/api/agent/memory/list/{system}")
-async def list_memories(system: str, response: Response):
-    """List memories from STM or LTM"""
-    _mark_deprecated(response, f"/memory/{system}/list")
-    try:
-        agent = get_agent()
-        if system == "stm":
-            memories = agent.memory.stm.get_all_memories()
-            return {"memories": [item.__dict__ for item in memories]}
-        elif system == "ltm":
-            ltm_collection = agent.memory.ltm.collection
-            if ltm_collection:
-                result = ltm_collection.get()
-                memories = []
-                if result.get('ids'):
-                    for i, memory_id in enumerate(result['ids']):
-                        memory_dict = {
-                            'id': memory_id,
-                            'content': result.get('documents', [])[i] if i < len(result.get('documents', [])) else '',
-                            'metadata': result.get('metadatas', [])[i] if i < len(result.get('metadatas', [])) else {}
-                        }
-                        memories.append(memory_dict)
-                return {"memories": memories}
-            return {"memories": []}
-        else:
-            raise HTTPException(status_code=400, detail="Invalid system. Use 'stm' or 'ltm'")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Memory error: {str(e)}")
-
-# Executive endpoints
-@app.get("/api/executive/status")
-async def executive_status(response: Response):
-    """Get executive function status (legacy /api alias)."""
-    _mark_deprecated(response, "/executive/status")
-    try:
-        agent = get_agent()
-        if hasattr(agent, "executive") and getattr(agent, "executive", None):
-            executive = getattr(agent, "executive")
-            return {
-                "status": "active",
-                "active_goals": getattr(executive, "goals", []),
-                "active_tasks": getattr(executive, "tasks", []),
-                "decision_count": getattr(executive, "decision_count", 0),
-            }
-        return {
-            "status": "inactive",
-            "active_goals": [],
-            "active_tasks": [],
-            "decision_count": 0,
-            "message": "Executive functions not initialized",
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "active_goals": [],
-            "active_tasks": [],
-            "decision_count": 0,
-            "error": str(e),
-        }
-
-
 def _build_neural_status(agent: Any) -> dict[str, Any]:
     neural_status: dict[str, Any] = {
         "dpad_available": False,
@@ -770,12 +641,6 @@ async def neural_status_root():
     except Exception as e:
         return {"error": str(e), "neural_activity": {}, "performance_metrics": {}}
 
-
-@app.get("/api/neural/status")
-async def neural_status(response: Response):
-    """Get neural network status and activity (legacy /api alias)."""
-    _mark_deprecated(response, "/neural/status")
-    return await neural_status_root()
 
 
 def _build_performance_analytics(status: dict[str, Any]) -> dict[str, Any]:
@@ -824,65 +689,6 @@ async def performance_analytics_root():
         }
 
 
-@app.get("/api/analytics/performance")
-async def performance_analytics(response: Response):
-    """Get comprehensive performance analytics (legacy /api alias)."""
-    _mark_deprecated(response, "/analytics/performance")
-    return await performance_analytics_root()
-
-
-# Prospective Memory endpoints (legacy agent routes)
-@app.get("/api/agent/memory/prospective/list")
-async def list_prospective_memories(response: Response):
-    """List prospective memories (legacy agent endpoint)."""
-    _mark_deprecated(response, "/api/agent/reminders")
-    try:
-        agent = get_agent()
-        if hasattr(agent.memory, "prospective") and agent.memory.prospective:
-            memsys = agent.memory.prospective
-            try:
-                reminders = memsys.list_reminders(include_completed=False)
-            except TypeError:
-                reminders = memsys.list_reminders(include_triggered=False)
-            return {"reminders": jsonable_encoder(reminders)}
-        return {"reminders": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prospective memory error: {str(e)}")
-
-
-@app.post("/api/agent/memory/prospective/create")
-async def create_prospective_memory(request: dict, response: Response):
-    """Create a new prospective memory (legacy agent endpoint)."""
-    _mark_deprecated(response, "/api/agent/reminders")
-    try:
-        agent = get_agent()
-        if hasattr(agent.memory, "prospective") and agent.memory.prospective:
-            memsys = agent.memory.prospective
-            description = request.get("description", "")
-            trigger_time = request.get("trigger_time")
-            tags = request.get("tags", [])
-
-            if hasattr(memsys, "add_reminder"):
-                due_time = None
-                if isinstance(trigger_time, str) and trigger_time:
-                    try:
-                        due_time = datetime.fromisoformat(trigger_time)
-                    except Exception:
-                        due_time = None
-                reminder = memsys.add_reminder(description, due_time=due_time, tags=tags)
-                reminder_id = getattr(reminder, "id", None) or getattr(
-                    reminder, "reminder_id", None
-                )
-                return {"reminder_id": reminder_id, "status": "created"}
-
-            return {"error": "prospective_memory_add_reminder_not_supported"}
-        return {"error": "Prospective memory not available"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Prospective memory creation error: {str(e)}"
-        )
-
-
 # Canonical agent reminder endpoints (preferred over /memory/prospective/*)
 class AgentReminderCreate(BaseModel):
     content: str
@@ -891,11 +697,8 @@ class AgentReminderCreate(BaseModel):
 
 
 @app.post("/agent/reminders")
-@app.post("/api/agent/reminders")
 async def agent_create_reminder(rem: AgentReminderCreate, request: Request, response: Response):
     """Create a reminder using the agent's prospective memory system."""
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/reminders")
     try:
         agent = get_agent()
         memsys = getattr(agent.memory, "prospective", None)
@@ -911,11 +714,8 @@ async def agent_create_reminder(rem: AgentReminderCreate, request: Request, resp
 
 
 @app.get("/agent/reminders")
-@app.get("/api/agent/reminders")
 async def agent_list_reminders(request: Request, response: Response, include_triggered: bool = True):
     """List reminders from the agent's prospective memory system."""
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/reminders")
     try:
         agent = get_agent()
         memsys = getattr(agent.memory, "prospective", None)
@@ -939,11 +739,8 @@ async def agent_list_reminders(request: Request, response: Response, include_tri
 
 
 @app.get("/agent/reminders/due")
-@app.get("/api/agent/reminders/due")
 async def agent_due_reminders(request: Request, response: Response):
     """Return due reminders."""
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/reminders/due")
     try:
         agent = get_agent()
         memsys = getattr(agent.memory, "prospective", None)
@@ -961,11 +758,8 @@ async def agent_due_reminders(request: Request, response: Response):
 
 
 @app.delete("/agent/reminders/triggered")
-@app.delete("/api/agent/reminders/triggered")
 async def agent_purge_triggered_reminders(request: Request, response: Response):
     """Delete all triggered/completed reminders."""
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, "/agent/reminders/triggered")
     try:
         agent = get_agent()
         memsys = getattr(agent.memory, "prospective", None)
@@ -981,10 +775,7 @@ async def agent_purge_triggered_reminders(request: Request, response: Response):
 
 
 @app.post("/agent/reminders/{reminder_id}/complete")
-@app.post("/api/agent/reminders/{reminder_id}/complete")
 async def agent_complete_reminder(reminder_id: str, request: Request, response: Response):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, f"/agent/reminders/{reminder_id}/complete")
     try:
         agent = get_agent()
         memsys = getattr(agent.memory, "prospective", None)
@@ -1001,10 +792,7 @@ async def agent_complete_reminder(reminder_id: str, request: Request, response: 
 
 
 @app.delete("/agent/reminders/{reminder_id}")
-@app.delete("/api/agent/reminders/{reminder_id}")
 async def agent_delete_reminder(reminder_id: str, request: Request, response: Response):
-    if request.url.path.startswith("/api/"):
-        _mark_deprecated(response, f"/agent/reminders/{reminder_id}")
     try:
         agent = get_agent()
         memsys = getattr(agent.memory, "prospective", None)
@@ -1018,182 +806,6 @@ async def agent_delete_reminder(reminder_id: str, request: Request, response: Re
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reminder delete error: {str(e)}")
-
-# Procedural Memory endpoints
-@app.get("/api/agent/memory/procedural/list")
-async def list_procedural_memories(response: Response):
-    """List procedural memories (procedures/skills)"""
-    _mark_deprecated(response, "/api/procedure/list")
-    try:
-        agent = get_agent()
-        if hasattr(agent.memory, 'procedural') and agent.memory.procedural:
-            procedures = agent.memory.procedural.all_procedures()
-            return {"procedures": procedures}
-        return {"procedures": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Procedural memory error: {str(e)}")
-
-@app.post("/api/agent/memory/procedural/create")
-async def create_procedural_memory(request: dict, response: Response):
-    """Create a new procedural memory"""
-    _mark_deprecated(response, "/api/procedure/store")
-    try:
-        agent = get_agent()
-        if hasattr(agent.memory, 'procedural') and agent.memory.procedural:
-            proc_id = agent.memory.procedural.store(
-                description=request.get('description', ''),
-                steps=request.get('steps', []),
-                tags=request.get('tags', []),
-                memory_type=request.get('memory_type', 'stm'),
-                importance=request.get('importance', 0.5)
-            )
-            return {"procedure_id": proc_id, "status": "created"}
-        return {"error": "Procedural memory not available"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Procedural memory creation error: {str(e)}")
-
-
-@app.get("/api/agent/memory/procedural/retrieve/{procedure_id}")
-async def retrieve_procedural_memory(procedure_id: str, response: Response):
-    """Retrieve a procedural memory by id (legacy agent endpoint)."""
-    _mark_deprecated(response, f"/api/procedure/retrieve/{procedure_id}")
-    try:
-        agent = get_agent()
-        if not (hasattr(agent.memory, "procedural") and agent.memory.procedural):
-            raise HTTPException(status_code=503, detail="Procedural memory not available")
-        proc = agent.memory.procedural.retrieve(procedure_id)
-        if not proc:
-            raise HTTPException(status_code=404, detail="Procedure not found")
-        return proc
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Procedural memory error: {str(e)}")
-
-
-@app.post("/api/agent/memory/procedural/search")
-async def search_procedural_memories(request: dict, response: Response):
-    """Search procedural memories (legacy agent endpoint)."""
-    _mark_deprecated(response, "/api/procedure/search")
-    try:
-        agent = get_agent()
-        if not (hasattr(agent.memory, "procedural") and agent.memory.procedural):
-            raise HTTPException(status_code=503, detail="Procedural memory not available")
-
-        query = request.get("query", "") or ""
-        memory_type = request.get("memory_type")
-        tags = request.get("tags")
-        max_results = int(request.get("max_results", 10) or 10)
-
-        results = agent.memory.procedural.search(
-            query,
-            memory_type=memory_type,
-            tags=tags,
-            max_results=max_results,
-        )
-        return {"results": results}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Procedural memory error: {str(e)}")
-
-
-@app.delete("/api/agent/memory/procedural/delete/{procedure_id}")
-async def delete_procedural_memory(procedure_id: str, response: Response):
-    """Delete a procedural memory by id (legacy agent endpoint)."""
-    _mark_deprecated(response, f"/api/procedure/delete/{procedure_id}")
-    try:
-        agent = get_agent()
-        if not (hasattr(agent.memory, "procedural") and agent.memory.procedural):
-            raise HTTPException(status_code=503, detail="Procedural memory not available")
-        success = agent.memory.procedural.delete(procedure_id)
-        if not success:
-            raise HTTPException(status_code=404, detail="Procedure not found")
-        return {"status": "deleted"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Procedural memory error: {str(e)}")
-
-
-@app.post("/api/agent/memory/procedural/clear")
-async def clear_procedural_memories(request: dict, response: Response):
-    """Clear procedural memories (legacy agent endpoint)."""
-    _mark_deprecated(response, "/api/procedure/clear")
-    try:
-        agent = get_agent()
-        if not (hasattr(agent.memory, "procedural") and agent.memory.procedural):
-            raise HTTPException(status_code=503, detail="Procedural memory not available")
-        memory_type = request.get("memory_type")
-        agent.memory.procedural.clear(memory_type=memory_type)
-        return {"status": "cleared"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Procedural memory error: {str(e)}")
-
-# Neural Activity endpoints
-@app.get("/api/neural/status")
-async def neural_status():
-    """Get neural network status and activity"""
-    try:
-        agent = get_agent()
-        # Check for neural components
-        neural_status = {
-            "dpad_available": False,
-            "lshn_available": False,
-            "neural_activity": {
-                "attention_enhancement": 0.0,
-                "pattern_completion": 0.0,
-                "consolidation_activity": 0.0
-            },
-            "performance_metrics": {
-                "response_time": 0.0,
-                "accuracy": 0.0,
-                "efficiency": 0.0
-            }
-        }
-        
-        # Check if neural networks are available
-        if hasattr(agent, 'neural_integration'):
-            neural_status["dpad_available"] = True
-            neural_status["lshn_available"] = True
-            
-        return neural_status
-    except Exception as e:
-        return {"error": str(e), "neural_activity": {}, "performance_metrics": {}}
-
-# Performance Analytics endpoint
-@app.get("/api/analytics/performance")
-async def performance_analytics():
-    """Get comprehensive performance analytics"""
-    try:
-        agent = get_agent()
-        status = agent.get_cognitive_status()
-        
-        analytics = {
-            "cognitive_efficiency": {
-                "overall": status.get("cognitive_integration", {}).get("overall_efficiency", 0.0),
-                "memory": status.get("memory_status", {}).get("system_active", False),
-                "attention": status.get("attention_status", {}).get("capacity_utilization", 0.0),
-                "processing": status.get("cognitive_integration", {}).get("processing_capacity", 0.0)
-            },
-            "usage_statistics": {
-                "session_duration": status.get("memory_status", {}).get("uptime_seconds", 0),
-                "interactions": status.get("conversation_length", 0),
-                "memory_operations": status.get("memory_status", {}).get("operation_counts", {}),
-                "error_rate": 0.0
-            },
-            "trends": {
-                "cognitive_load_trend": "stable",
-                "memory_usage_trend": "increasing",
-                "performance_trend": "improving"
-            }
-        }
-        
-        return analytics
-    except Exception as e:
-        return {"error": str(e), "cognitive_efficiency": {}, "usage_statistics": {}, "trends": {}}
 
 # Reflection endpoints
 class ReflectionStartRequest(BaseModel):
@@ -1280,6 +892,18 @@ async def get_circuit_breaker_status():
         return {"status": "ok", "circuit_breakers": {}, "message": "Resilience module not available"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+def _purge_legacy_api_routes() -> None:
+    """Remove any /api/* routes from the app router."""
+    app.router.routes = [
+        route
+        for route in app.router.routes
+        if not getattr(route, "path", "").startswith("/api/")
+    ]
+
+
+_purge_legacy_api_routes()
 
 
 if __name__ == "__main__":

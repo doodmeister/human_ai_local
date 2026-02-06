@@ -40,16 +40,10 @@ def main() -> int:
         action="store_true",
         help="Also hit agent-initializing endpoints (may be slower).",
     )
-    parser.add_argument(
-        "--show-deprecations",
-        action="store_true",
-        help="Print any Deprecation headers + successor Link values observed.",
-    )
     args = parser.parse_args()
 
     base = (args.base or "").rstrip("/")
     failures: list[str] = []
-    deprecations: list[str] = []
 
     def try_req(method: str, path: str, *, json: Any | None = None) -> None:
         url = f"{base}{path}"
@@ -57,18 +51,11 @@ def main() -> int:
             resp = requests.request(method, url, json=json, timeout=10)
             _check_ok(resp, f"{method} {path}")
 
-            if (resp.headers.get("Deprecation") or "").lower() == "true":
-                link = resp.headers.get("Link")
-                if link:
-                    deprecations.append(f"{method} {path}: {link}")
-                else:
-                    deprecations.append(f"{method} {path}: (no successor Link header)")
         except Exception as exc:
             failures.append(f"{method} {path}: {exc}")
 
     # Always-required checks (should be fast, no agent init required)
     try_req("GET", "/health")
-    try_req("GET", "/api/health")
 
     if args.agent:
         # These may trigger lazy agent init.
@@ -92,10 +79,6 @@ def main() -> int:
     if args.agent:
         print("[smoke] Agent endpoints also OK")
 
-    if args.show_deprecations and deprecations:
-        print("[smoke] Deprecations observed (follow successor Link):")
-        for item in deprecations:
-            print(f"  - {item}")
     return 0
 
 

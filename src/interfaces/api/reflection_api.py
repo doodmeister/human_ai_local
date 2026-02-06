@@ -86,13 +86,13 @@ async def health_check():
     """Health check endpoint for verifying server is running."""
     return {"status": "healthy", "service": "George Cognitive API"}
 
-# Register all routers under /api
-app.include_router(memory_router, prefix="/api")
-app.include_router(procedural_router, prefix="/api")
-app.include_router(prospective_router, prefix="/api")
-app.include_router(semantic_router, prefix="/api")
-app.include_router(agent_router, prefix="/api/agent")
-app.include_router(executive_router, prefix="/api/executive")
+# Register all routers under canonical (unprefixed) routes
+app.include_router(memory_router)
+app.include_router(procedural_router)
+app.include_router(prospective_router)
+app.include_router(semantic_router)
+app.include_router(agent_router)
+app.include_router(executive_router, prefix="/executive")
 
 # Reflection state (for status/report endpoints)
 reflection_lock = threading.Lock()

@@ -38,24 +38,24 @@ def test_store_and_retrieve_memory(system, client):
     payload = MEMORY_PAYLOADS[system]
     
     # Store memory
-    response = client.post(f"/api/memory/{system}/store", json=payload)
+    response = client.post(f"/memory/{system}/store", json=payload)
     assert response.status_code == 200
     memory_id = response.json().get("memory_id")
     assert memory_id
 
     # Retrieve memory
-    response = client.get(f"/api/memory/{system}/retrieve/{memory_id}")
+    response = client.get(f"/memory/{system}/retrieve/{memory_id}")
     assert response.status_code == 200
 
     # Search memory - just verify it doesn't error (results may be empty due to timing)
     search_payload = SEARCH_PAYLOADS[system]
-    response = client.post(f"/api/memory/{system}/search", json=search_payload)
+    response = client.post(f"/memory/{system}/search", json=search_payload)
     assert response.status_code == 200
     assert "results" in response.json()
     # Note: Search results may be empty due to embedding timing, so we don't require results > 0
 
     # Delete memory
-    response = client.delete(f"/api/memory/{system}/delete/{memory_id}")
+    response = client.delete(f"/memory/{system}/delete/{memory_id}")
     # Accept 200 (deleted) or 405 (not supported for this memory type)
     assert response.status_code in [200, 405]
     if response.status_code == 200:

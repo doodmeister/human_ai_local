@@ -141,20 +141,20 @@ The current George interface is a **minimal chat-focused UI** with basic memory 
 
 **Main API**: `george_api_simple.py`
 - `GET /health` - Health check
-- `GET /api/agent/init-status` - Agent initialization status
-- `GET /api/agent/status` - Cognitive status
-- `POST /api/agent/process` - Process user input
-- `POST /api/agent/chat` - Chat endpoint
-- `GET /api/agent/memory/list/{system}` - List memories
-- `POST /api/agent/proactive-recall` - Memory retrieval
-- `GET /api/agent/analytics` - Performance analytics
+- `GET /agent/init-status` - Agent initialization status
+- `GET /agent/status` - Cognitive status
+- `POST /agent/process` - Process user input
+- `POST /agent/chat` - Chat endpoint
+- `GET /memory/{system}/list` - List memories
+- `POST /memory/proactive-recall` - Memory retrieval
+- `GET /analytics/performance` - Performance analytics
 - `POST /reflect` - Trigger reflection
 - `GET /reflection/status` - Reflection scheduler status
 - `GET /reflection/report` - Last reflection report
 - `POST /reflection/start` - Start reflection scheduler
 - `POST /reflection/stop` - Stop reflection scheduler
 
-**Chat Router**: `src/interfaces/api/chat_endpoints.py` (mounted)
+**Chat Router**: `src.interfaces.api.chat_endpoints` (mounted)
 - `POST /agent/chat` - Advanced chat with context building
 - `GET /agent/chat/metrics` - Chat metrics
 - `GET /agent/chat/preview` - Context preview
@@ -170,13 +170,13 @@ The current George interface is a **minimal chat-focused UI** with basic memory 
 
 ### B. Available But Unmounted Endpoints
 
-**Executive API**: `src/interfaces/api/executive_api.py` ❌ **NOT MOUNTED**
+**Executive API**: `src.interfaces.api.executive_api` ❌ **NOT MOUNTED**
 - `POST /executive/goals` - Create goal
 - `GET /executive/goals` - List goals
 - `GET /executive/goals/{goal_id}` - Get goal details
 - `GET /executive/status` - Executive system status
 
-**Memory API**: `src/interfaces/api/memory_api.py` ❌ **NOT MOUNTED**
+**Memory API**: `src.interfaces.api.memory_api` ❌ **NOT MOUNTED**
 - `POST /memory/proactive-recall` - Advanced recall
 - `POST /memory/{system}/store` - Store memory
 - `GET /memory/{system}/retrieve/{memory_id}` - Retrieve memory
@@ -186,14 +186,14 @@ The current George interface is a **minimal chat-focused UI** with basic memory 
 - `GET /memory/{system}/list` - List memories
 - `GET /status` - Memory system status
 
-**Semantic API**: `src/interfaces/api/semantic_api.py` ❌ **NOT MOUNTED**
+**Semantic API**: `src.interfaces.api.semantic_api` ❌ **NOT MOUNTED**
 - `POST /semantic/fact/store` - Store fact
 - `GET /semantic/fact/retrieve/{fact_id}` - Retrieve fact
 - `POST /semantic/fact/search` - Search facts
 - `DELETE /semantic/fact/delete/{fact_id}` - Delete fact
 - `POST /semantic/clear` - Clear all facts
 
-**Prospective API**: `src/interfaces/api/prospective_api.py` ❌ **NOT MOUNTED**
+**Prospective API**: `src.interfaces.api.prospective_api` ❌ **NOT MOUNTED**
 - `POST /prospective/process_due` - Process due reminders
 - `POST /prospective/store` - Store reminder
 - `GET /prospective/retrieve/{event_id}` - Get reminder
@@ -201,7 +201,7 @@ The current George interface is a **minimal chat-focused UI** with basic memory 
 - `DELETE /prospective/delete/{event_id}` - Delete reminder
 - `POST /prospective/clear` - Clear reminders
 
-**Procedural API**: `src/interfaces/api/procedural_api.py` ❌ **NOT MOUNTED**
+**Procedural API**: `src.interfaces.api.procedural_api` ❌ **NOT MOUNTED**
 - `POST /procedure/store` - Store procedure
 - `GET /procedure/retrieve/{procedure_id}` - Retrieve procedure
 - `POST /procedure/search` - Search procedures

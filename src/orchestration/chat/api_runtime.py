@@ -45,13 +45,14 @@ def get_chat_service() -> ChatService:
 
     chat_cfg = get_chat_config().to_dict()
 
-    stm = ltm = episodic = attention = executive = None
+    stm = ltm = episodic = semantic = attention = executive = None
     if agent is not None:
         memory = getattr(agent, "memory", None)
         if memory is not None:
             stm = getattr(memory, "stm", None)
             ltm = getattr(memory, "ltm", None)
             episodic = getattr(memory, "episodic", None)
+            semantic = getattr(memory, "semantic", None)
         attention = getattr(agent, "attention", None)
         executive = getattr(agent, "performance_optimizer", None)
 
@@ -60,6 +61,7 @@ def get_chat_service() -> ChatService:
         stm=stm,
         ltm=ltm,
         episodic=episodic,
+        semantic=semantic,
         attention=attention,
         executive=executive,
     )

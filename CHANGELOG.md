@@ -4,13 +4,18 @@ All notable changes to the Human-AI Cognition Framework.
 
 ---
 
+## [February 2026] - API Alias Removal
+
+- Removed legacy `/api/*` route aliases from the simple server and reflection API.
+- Canonical routes (unprefixed) are now required.
+
 ## [January 2026] - API Compatibility & Deprecation Policy
 
 ### API surface stabilization ✅
 - **Canonical endpoints**: Prefer unprefixed routes like `/agent/chat`, `/agent/reminders*`, `/memory/*`, `/procedure/*`, `/executive/*`.
-- **Legacy aliases**: `/api/*` routes remain available temporarily but return deprecation headers.
-- **Deprecation signaling**: Deprecated endpoints return `Deprecation: true` and `Link: <successor>; rel="successor-version"`.
-- **Removal milestone**: Deprecated aliases planned for removal on **2026-04-01** (or first release after).
+- **Legacy aliases**: `/api/*` routes were available temporarily and returned deprecation headers.
+- **Deprecation signaling**: Deprecated endpoints returned `Deprecation: true` and `Link: <successor>; rel="successor-version"`.
+- **Removal milestone**: Deprecated aliases removed on **2026-02-06**.
 
 ## [November 2025] - Learning Infrastructure (Week 16)
 

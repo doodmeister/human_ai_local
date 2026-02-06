@@ -35,12 +35,22 @@ try:
 except ImportError:
     pass
 
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    SentenceTransformer = None
+# sentence_transformers is lazy-loaded to avoid 10-30s startup delay (torch/sklearn)
+SentenceTransformer = None
+SENTENCE_TRANSFORMERS_AVAILABLE: bool | None = None  # None = not yet checked
+
+
+def _ensure_sentence_transformers():
+    global SentenceTransformer, SENTENCE_TRANSFORMERS_AVAILABLE
+    if SENTENCE_TRANSFORMERS_AVAILABLE is not None:
+        return SENTENCE_TRANSFORMERS_AVAILABLE
+    try:
+        from sentence_transformers import SentenceTransformer as _ST
+        SentenceTransformer = _ST
+        SENTENCE_TRANSFORMERS_AVAILABLE = True
+    except ImportError:
+        SENTENCE_TRANSFORMERS_AVAILABLE = False
+    return SENTENCE_TRANSFORMERS_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +297,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         
         # Initialize embedding model
         self.embedding_model = None
-        if SENTENCE_TRANSFORMERS_AVAILABLE and SentenceTransformer is not None:
+        if _ensure_sentence_transformers() and SentenceTransformer is not None:
             try:
                 import torch
                 self.embedding_model = SentenceTransformer(embedding_model)
@@ -703,7 +713,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 distances = _safe_first_list(search_results.get('distances'))
                 for i, memory_id in enumerate(result_ids):
                     distance = distances[i] if distances and i < len(distances) else 0.0
-                    relevance = 1.0 - distance
+                    relevance = 1.0 / (1.0 + distance)
                     if relevance < min_relevance:
                         continue
                     memory = self.retrieve_memory(memory_id)

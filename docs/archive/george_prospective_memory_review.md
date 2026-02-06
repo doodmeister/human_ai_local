@@ -588,7 +588,7 @@ schedule = scheduler.schedule(
 
 **To align with roadmap goals:**
 
-1. **Mount executive API routes** (`src/interfaces/api/executive_api.py`)
+1. **Mount executive API routes** (`src.interfaces.api.executive_api`)
 2. **Build goal management UI** (create, track, prioritize)
 3. **Visualize GOAP plans** (action sequences, metrics)
 4. **Render schedules** (Gantt charts, resources)
@@ -611,8 +611,8 @@ schedule = scheduler.schedule(
 - `src/executive/integration.py` (not exposed)
 
 **API:**
-- `src/interfaces/api/chat_endpoints.py` (reminders mounted)
-- `src/interfaces/api/executive_api.py` (NOT mounted)
+- `src.interfaces.api.chat_endpoints` (reminders mounted)
+- `src.interfaces.api.executive_api` (NOT mounted)
 
 **UI:**
 - `scripts/george_streamlit_chat.py` (874 lines, reminders only)

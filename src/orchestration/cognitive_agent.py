@@ -15,9 +15,27 @@ from ..core.config import CognitiveConfig
 from ..memory import MemorySystem, MemorySystemConfig
 from ..cognition.attention.attention_mechanism import AttentionMechanism
 from ..cognition.processing.sensory import SensoryInterface, SensoryProcessor
-from ..cognition.processing.dream import DreamProcessor
-from ..optimization.performance_optimizer import PerformanceOptimizer
 from ..orchestration import CognitiveStep, CognitiveTick
+
+# Heavy-dep modules (torch-based) — lazy-import to keep server startup fast
+DreamProcessor = None
+PerformanceOptimizer = None
+
+
+def _lazy_import_dream():
+    global DreamProcessor
+    if DreamProcessor is None:
+        from ..cognition.processing.dream import DreamProcessor as _DP
+        DreamProcessor = _DP
+    return DreamProcessor
+
+
+def _lazy_import_optimizer():
+    global PerformanceOptimizer
+    if PerformanceOptimizer is None:
+        from ..optimization.performance_optimizer import PerformanceOptimizer as _PO
+        PerformanceOptimizer = _PO
+    return PerformanceOptimizer
 
 # Lazy import LLM provider to avoid circular dependencies
 def _lazy_import_llm():
@@ -138,7 +156,7 @@ class CognitiveAgent:
             self.neural_integration = None
 
         # Dream processor (initialized after memory system and neural integration)
-        self.dream_processor = DreamProcessor(
+        self.dream_processor = _lazy_import_dream()(
             memory_system=self.memory,
             enable_scheduling=True,
             consolidation_threshold=0.6,
@@ -148,7 +166,7 @@ class CognitiveAgent:
         # Performance optimizer (if enabled in config)
         self.performance_optimizer = None
         if self.config.performance.enabled:
-            self.performance_optimizer = PerformanceOptimizer(
+            self.performance_optimizer = _lazy_import_optimizer()(
                 config=self.config.performance
             )
             logger.info("Performance optimizer initialized")

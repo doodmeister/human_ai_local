@@ -20,7 +20,7 @@ client = TestClient(app)
 @pytest.mark.parametrize("memory_type", ["stm", "ltm"])
 def test_store_and_retrieve_procedure(memory_type):
     # Store
-    response = client.post("/api/procedure/store", json={
+    response = client.post("/procedure/store", json={
         "description": f"test-procedure-{memory_type}",
         "steps": ["step1", "step2"],
         "tags": ["test", memory_type],
@@ -29,7 +29,7 @@ def test_store_and_retrieve_procedure(memory_type):
     assert response.status_code == 200
     proc_id = response.json()["procedure_id"]
     # Retrieve
-    response = client.get(f"/api/procedure/retrieve/{proc_id}")
+    response = client.get(f"/procedure/retrieve/{proc_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["description"] == f"test-procedure-{memory_type}"
@@ -38,14 +38,14 @@ def test_store_and_retrieve_procedure(memory_type):
 @pytest.mark.parametrize("memory_type", ["stm", "ltm"])
 def test_search_procedure(memory_type):
     # Store
-    client.post("/api/procedure/store", json={
+    client.post("/procedure/store", json={
         "description": f"searchable-proc-{memory_type}",
         "steps": ["search-step"],
         "tags": ["search", memory_type],
         "memory_type": memory_type
     })
     # Search
-    response = client.post("/api/procedure/search", json={
+    response = client.post("/procedure/search", json={
         "query": f"searchable-proc-{memory_type}",
         "memory_type": memory_type
     })
@@ -55,7 +55,7 @@ def test_search_procedure(memory_type):
 
 def test_use_and_delete_procedure():
     # Store
-    response = client.post("/api/procedure/store", json={
+    response = client.post("/procedure/store", json={
         "description": "use-proc",
         "steps": ["do this", "do that"],
         "tags": ["use"],
@@ -63,30 +63,30 @@ def test_use_and_delete_procedure():
     })
     proc_id = response.json()["procedure_id"]
     # Use
-    response = client.post(f"/api/procedure/use/{proc_id}")
+    response = client.post(f"/procedure/use/{proc_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["description"] == "use-proc"
     # Delete
-    response = client.delete(f"/api/procedure/delete/{proc_id}")
+    response = client.delete(f"/procedure/delete/{proc_id}")
     assert response.status_code == 200
     # Confirm deleted
-    response = client.get(f"/api/procedure/retrieve/{proc_id}")
+    response = client.get(f"/procedure/retrieve/{proc_id}")
     assert response.status_code == 404
 
 def test_clear_procedures():
     # Store a procedure
-    client.post("/api/procedure/store", json={
+    client.post("/procedure/store", json={
         "description": "clear-proc",
         "steps": ["step"],
         "tags": ["clear"],
         "memory_type": "stm"
     })
     # Clear all STM procedures
-    response = client.post("/api/procedure/clear", params={"memory_type": "stm"})
+    response = client.post("/procedure/clear", params={"memory_type": "stm"})
     assert response.status_code == 200
     # Search should return nothing
-    response = client.post("/api/procedure/search", json={"query": "clear-proc", "memory_type": "stm"})
+    response = client.post("/procedure/search", json={"query": "clear-proc", "memory_type": "stm"})
     assert response.status_code == 200
     results = response.json()["results"]
     assert not results
