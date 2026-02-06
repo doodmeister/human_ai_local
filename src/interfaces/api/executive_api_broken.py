@@ -108,13 +108,13 @@ async def create_goal(goal_request: CreateGoalRequest, request: Request):
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid deadline format. Use YYYY-MM-DD or YYYY-MM-DD HH:MM")
         
-        goal_id = executive.goals.create_goal(
+        goal_id = executive.create_goal(
             title=goal_request.description,  # Using description as title for now
             description=goal_request.description,
             priority=GoalPriority.HIGH if goal_request.priority > 0.7 else 
                      GoalPriority.LOW if goal_request.priority < 0.3 else GoalPriority.MEDIUM,
             parent_id=goal_request.parent_goal_id,
-            target_date=target_date
+            target_date=target_date,
         )
         
         return {"status": "success", "goal_id": goal_id}

@@ -45,7 +45,7 @@ class ChatService:
     Orchestrates chat turn processing:
     - Adds user turn with salience/valence tagging
     - Builds context (via ContextBuilder)
-    - Generates placeholder assistant response (to be replaced with LLM call)
+    - Generates assistant response via configured agent when needed
     - Applies consolidation decision heuristic
     - Returns structured payload
     """
@@ -596,7 +596,7 @@ class ChatService:
         # Decide (single decision owner per tick)
         tick.assert_step(CognitiveStep.DECIDE)
 
-        assistant_content = self._invoke_agent_response(message, built)
+        assistant_content: Optional[str] = None
         # Before forming assistant response, check retrieval for simple questions
         try:
             answer = self._attempt_fact_answer(message)
@@ -641,9 +641,9 @@ class ChatService:
 
         # Act
         tick.assert_step(CognitiveStep.ACT)
-        
+
         if not assistant_content:
-            assistant_content = self._generate_placeholder_response(message)
+            assistant_content = self._invoke_agent_response(message, built)
         assistant_turn = TurnRecord(
             role="assistant",
             content=assistant_content,
@@ -1917,11 +1917,6 @@ class ChatService:
             # Running inside an active loop; caller should avoid this path.
             coro.close()
             raise
-
-    def _generate_placeholder_response(self, user_text: str) -> str:
-        # Deterministic placeholder for early integration testing.
-        snippet = user_text[:60].strip()
-        return f"Acknowledged: {snippet}"
 
     # --- Metacognition ---
 

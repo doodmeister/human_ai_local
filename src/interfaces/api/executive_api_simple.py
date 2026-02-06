@@ -72,11 +72,11 @@ async def create_goal(goal_request: CreateGoalRequest, request: Request):
         else:
             priority = GoalPriority.MEDIUM
         
-        goal_id = executive.goals.create_goal(
+        goal_id = executive.create_goal(
             title=goal_request.title,
             description=goal_request.description,
             priority=priority,
-            target_date=target_date
+            target_date=target_date,
         )
         
         return {"status": "success", "goal_id": goal_id}

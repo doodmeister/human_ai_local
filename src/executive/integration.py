@@ -19,6 +19,7 @@ import logging
 
 # Component imports
 from src.executive.goal_manager import GoalManager, Goal, GoalStatus, GoalPriority
+from src.executive.goals import HTNGoalManagerAdapter
 from src.executive.decision_engine import DecisionEngine, DecisionOption, DecisionResult
 from src.executive.planning.goap_planner import GOAPPlanner, Plan, WorldState, get_metrics_registry
 from src.executive.planning.action_library import create_default_action_library
@@ -120,6 +121,9 @@ class IntegrationConfig:
 
     # Side effects (advisor-only defaults)
     create_reminders_from_schedule: bool = False
+
+    # HTN integration
+    enable_htn_goals: bool = True
     
     # Performance settings
     enable_telemetry: bool = True
@@ -161,6 +165,7 @@ class ExecutiveSystem:
         logger.info("Initializing ExecutiveSystem components...")
         
         self.goal_manager = GoalManager(max_active_goals=20)
+        self.htn_adapter = HTNGoalManagerAdapter(self.goal_manager) if self.config.enable_htn_goals else None
         self.decision_engine = DecisionEngine()
         
         # GOAP planner with default action library
@@ -183,6 +188,72 @@ class ExecutiveSystem:
         
         logger.info("ExecutiveSystem initialized successfully")
         self.metrics.inc("executive_system_init_total")
+
+    def create_goal(
+        self,
+        title: str,
+        description: str = "",
+        priority: GoalPriority = GoalPriority.MEDIUM,
+        parent_id: Optional[str] = None,
+        target_date: Optional[datetime] = None,
+        success_criteria: Optional[List[str]] = None,
+        resources_needed: Optional[List[str]] = None,
+        *,
+        use_htn: Optional[bool] = None,
+        compound: bool = False,
+        preconditions: Optional[Dict[str, Any]] = None,
+        postconditions: Optional[Dict[str, Any]] = None,
+        dependencies: Optional[List[str]] = None,
+    ) -> str:
+        """Create a goal, optionally via HTN decomposition."""
+        if use_htn is None:
+            use_htn = self.htn_adapter is not None
+
+        if use_htn and self.htn_adapter is not None:
+            htn_priority = self._htn_priority_from_legacy(priority)
+            if compound:
+                result = self.htn_adapter.create_compound_goal(
+                    description=description or title,
+                    priority=htn_priority,
+                    preconditions=preconditions,
+                    postconditions=postconditions,
+                    deadline=target_date,
+                    dependencies=dependencies,
+                    current_state={},
+                )
+                if result.goals:
+                    return result.goals[0].id
+                return ""
+
+            return self.htn_adapter.create_primitive_goal(
+                description=description or title,
+                priority=htn_priority,
+                preconditions=preconditions,
+                postconditions=postconditions,
+                deadline=target_date,
+                dependencies=dependencies,
+                parent_id=parent_id,
+            )
+
+        return self.goal_manager.create_goal(
+            title=title,
+            description=description,
+            priority=priority,
+            parent_id=parent_id,
+            target_date=target_date,
+            success_criteria=success_criteria,
+            resources_needed=resources_needed,
+        )
+
+    def _htn_priority_from_legacy(self, priority: GoalPriority) -> int:
+        mapping = {
+            GoalPriority.LOW: 2,
+            GoalPriority.MEDIUM: 5,
+            GoalPriority.HIGH: 7,
+            GoalPriority.URGENT: 8,
+            GoalPriority.CRITICAL: 10,
+        }
+        return mapping.get(priority, 5)
     
     def execute_goal(self, goal_id: str, initial_state: Optional[WorldState] = None) -> ExecutionContext:
         """Backward-compatible alias for :meth:`plan_goal`.
