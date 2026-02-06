@@ -7,12 +7,6 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from collections import deque
-from pydantic import BaseModel, Field
-try:  # Pydantic v2
-    from pydantic import ConfigDict
-except Exception:  # fallback for older versions
-    ConfigDict = None  # type: ignore
-
 from .conversation_session import SessionManager
 from .models import TurnRecord
 from .context_builder import ContextBuilder
@@ -29,6 +23,8 @@ from .intent_classifier_v2 import (
     ConversationContext,
     create_intent_classifier_v2,
 )
+from .goal_handlers import GoalIntentHandler
+from .metacog_manager import MetacogManager
 from .goal_detector import GoalDetector  # Production Phase 1
 from .executive_orchestrator import ExecutiveOrchestrator  # Production Phase 1 - Task 6
 from .memory_query_parser import create_memory_query_parser  # Production Phase 1 - Task 8
@@ -84,6 +80,7 @@ class ChatService:
         self._session_goal_index: Dict[str, Set[str]] = {}
         self._goal_detector = None  # Lazy init to avoid circular dependency with executive system
         self._orchestrator = None  # Lazy init for background goal execution (Task 6)
+        self._goal_handler: Optional[GoalIntentHandler] = None
         # Production Phase 1 - Task 8: Memory query handling
         self._memory_query_parser = create_memory_query_parser()
         self._memory_query_interface = None  # Lazy init with memory systems
@@ -93,6 +90,7 @@ class ChatService:
         self._turn_counter = 0
         self._last_metacog_snapshot = None
         self._metacog_interval = int(self.context_builder.cfg.get("metacog_turn_interval", 5))
+        self._metacog_manager = MetacogManager(metrics_registry)
         # Snapshot history ring buffer
         history_size = int(self.context_builder.cfg.get("metacog_snapshot_history_size", 50))
         self._metacog_history = deque(maxlen=history_size)
@@ -284,6 +282,7 @@ class ChatService:
                     # Benefit: milestone-scaled frequency signal.
                     # Cost: small update cost + STM pressure (reinforcement increases downstream retrieval likelihood).
                     stm_pressure = 0.0
+                    stm_obj = None
                     try:
                         stm_obj = getattr(self.consolidator, "stm", None) if self.consolidator is not None else None
                         if stm_obj is not None:
@@ -607,7 +606,7 @@ class ChatService:
         
         # Production Phase 1: Enrich response with goal confirmation if detected
         if detected_goal and detected_goal.confirmation_needed:
-            goal_confirmation = self._format_goal_confirmation(detected_goal)
+            goal_confirmation = self._get_goal_handler().format_goal_confirmation(detected_goal)
             if assistant_content:
                 assistant_content = assistant_content + "\n\n" + goal_confirmation
             else:
@@ -739,7 +738,11 @@ class ChatService:
         attach_metacog = False
         if self._metacog_interval > 0 and (self._turn_counter % self._metacog_interval == 0):
             try:
-                self._last_metacog_snapshot = self._metacog_snapshot()
+                self._last_metacog_snapshot = self._metacog_manager.snapshot(
+                    turn_counter=self._turn_counter,
+                    consolidation_log=self.consolidation_log,
+                    consolidator=self.consolidator,
+                )
                 metrics_registry.inc("metacog_snapshots_total")
                 attach_metacog = True
             except Exception:
@@ -859,99 +862,15 @@ class ChatService:
                 payload["metrics"]["performance_degraded"] = degraded
         # --- Dynamic metacog interval adjustment ---
         try:
-            # Use a simple stability heuristic: if last 5 turns not degraded and stm util < 70%, relax interval (+1 up to 10)
-            # If degraded or high util (>=85%) tighten (-1 down to min 2)
-            # Estimate current stm util again (cheap best-effort)
-            stm_util = None
-            cons = getattr(self, "consolidator", None)
-            if cons is not None:
-                stm_obj = getattr(cons, "stm", None)
-                if stm_obj is not None:
-                    cap = getattr(stm_obj, "capacity", None)
-                    size = None
-                    if hasattr(stm_obj, "__len__"):
-                        try:
-                            size = len(stm_obj)  # type: ignore
-                        except Exception:
-                            size = None
-                    if size is None:
-                        size = getattr(stm_obj, "size", None)
-                    if isinstance(size, int) and isinstance(cap, int) and cap:
-                        stm_util = min(1.0, size / cap)
-            degraded_flag = metrics_registry.state.get("performance_degraded")
-            current_interval = self._metacog_interval
-            new_interval = current_interval
-            # Phase 7: utility-based learning law.
-            cost = 0.0
-            if degraded_flag:
-                cost += 0.6
-            if stm_util is not None and stm_util >= 0.85:
-                cost += 0.6
-            u = utility_score(benefit=clamp01(metrics_registry.state.get("retrieval_benefit_ema", 0.5)), cost=clamp01(cost))
-            if u < 0.0:
-                if current_interval > 2:
-                    new_interval = current_interval - 1
-            else:
-                if (stm_util is None or stm_util < 0.70) and not degraded_flag:
-                    if current_interval < 10:
-                        new_interval = current_interval + 1
-            if new_interval != current_interval:
-                self._metacog_interval = new_interval
-                metrics_registry.state["metacog_interval"] = new_interval
+            self._metacog_interval = self._metacog_manager.adjust_interval(
+                current_interval=self._metacog_interval,
+                consolidator=self.consolidator,
+            )
         except Exception:
             pass
         # --- Adaptive STM activation weight modulation (meta-driven) ---
         try:
-            # Accessible stm via consolidator if available
-            stm_obj = None
-            if getattr(self, 'consolidator', None) is not None:
-                stm_obj = getattr(self.consolidator, 'stm', None)
-            # Only proceed if stm exposes set_activation_weights
-            if stm_obj is not None and hasattr(stm_obj, 'set_activation_weights') and hasattr(stm_obj, 'get_activation_weights'):
-                weights = stm_obj.get_activation_weights()
-                degraded_flag = metrics_registry.state.get('performance_degraded')
-                # Recompute util (reuse above if still in scope)
-                stm_util_ratio = None
-                try:
-                    cap = getattr(stm_obj, 'capacity', None)
-                    size = None
-                    if hasattr(stm_obj, '__len__'):
-                        size = len(stm_obj)  # type: ignore
-                    if isinstance(size, int) and isinstance(cap, int) and cap:
-                        stm_util_ratio = min(1.0, size / cap)
-                except Exception:
-                    pass
-                rec = weights.get('recency', 0.4)
-                freq = weights.get('frequency', 0.3)
-                sal = weights.get('salience', 0.3)
-                adjusted = False
-                # Phase 7: utility-based learning law.
-                cost = 0.0
-                if degraded_flag:
-                    cost += 0.6
-                if stm_util_ratio is not None and stm_util_ratio >= 0.85:
-                    cost += 0.6
-                u = utility_score(benefit=clamp01(metrics_registry.state.get("retrieval_benefit_ema", 0.5)), cost=clamp01(cost))
-                if u < 0.0:
-                    # If degraded: bias toward recency (fresh context more reliable)
-                    if degraded_flag:
-                        rec += 0.05
-                        sal -= 0.025
-                        freq -= 0.025
-                        adjusted = True
-                    # If high utilization: bias toward salience (select stronger memories)
-                    if stm_util_ratio is not None and stm_util_ratio >= 0.85:
-                        sal += 0.05
-                        rec -= 0.025
-                        freq -= 0.025
-                        adjusted = True
-                # Clamp non-negative
-                if adjusted:
-                    rec = max(0.01, rec)
-                    freq = max(0.01, freq)
-                    sal = max(0.01, sal)
-                    stm_obj.set_activation_weights(recency=rec, frequency=freq, salience=sal)
-                    metrics_registry.inc('metacog_activation_weight_adjustments_total')
+            self._metacog_manager.adjust_activation_weights(consolidator=self.consolidator)
         except Exception:
             pass
         tick.finish()
@@ -991,6 +910,12 @@ class ChatService:
         # Refresh active goal context to keep boosts accurate
         classifier.context.active_goals = set(self._session_goal_index.get(session_id, set()))
         return classifier
+
+    def _get_goal_handler(self) -> GoalIntentHandler:
+        """Return a goal intent handler bound to the current orchestrator."""
+        if self._goal_handler is None or self._goal_handler.orchestrator is not self._orchestrator:
+            self._goal_handler = GoalIntentHandler(self._orchestrator)
+        return self._goal_handler
 
     def _record_session_goal(self, session_id: str, goal_id: str) -> None:
         """Track goal IDs per session for context-aware intent boosts."""
@@ -1063,7 +988,7 @@ class ChatService:
                         "duration_ms": 0.0,
                     })
                     continue
-                handler_callable = partial(self._handle_goal_update, intent, session_id)
+                handler_callable = partial(self._get_goal_handler().handle_goal_update, intent, session_id)
             elif handler_name == "goal_query":
                 if self._orchestrator is None:
                     execution_log.append({
@@ -1075,7 +1000,7 @@ class ChatService:
                         "duration_ms": 0.0,
                     })
                     continue
-                handler_callable = partial(self._handle_goal_query, intent, session_id)
+                handler_callable = partial(self._get_goal_handler().handle_goal_query, intent, session_id)
             elif handler_name == "memory_query":
                 handler_callable = partial(self._handle_memory_query, message, session_id)
             elif handler_name == "reminder_request":
@@ -1318,364 +1243,6 @@ class ChatService:
         emotional_weight = min(1.0, abs(valence))
         return max(salience * 0.5 + length_factor * 0.3 + emotional_weight * 0.2, salience * 0.6)
     
-    def _format_goal_confirmation(self, detected_goal) -> str:
-        """
-        Format a natural language goal confirmation for the user.
-        
-        Production Phase 1: Automatic goal detection integration.
-        """
-        confirmation = f"\n\n🎯 **Goal Created**: {detected_goal.title}"
-        
-        if detected_goal.deadline:
-            # Format deadline nicely
-            deadline_date = detected_goal.deadline
-            today = datetime.now().date()
-            if deadline_date.date() == today:
-                deadline_str = "today"
-            elif deadline_date.date() == (today + timedelta(days=1)):
-                deadline_str = "tomorrow"
-            else:
-                # Show day of week if within next week
-                days_until = (deadline_date.date() - today).days
-                if days_until <= 7:
-                    deadline_str = deadline_date.strftime("%A")  # e.g., "Friday"
-                else:
-                    deadline_str = deadline_date.strftime("%B %d")  # e.g., "November 15"
-            
-            confirmation += f" (Due: {deadline_str})"
-        
-        # Add priority indicator if high priority
-        if hasattr(detected_goal, 'priority') and detected_goal.priority:
-            try:
-                from src.executive.goal_manager import GoalPriority
-                if detected_goal.priority == GoalPriority.HIGH:
-                    confirmation += " ⚡"
-            except Exception:
-                pass
-        
-        # Add estimated duration if available
-        if detected_goal.estimated_duration:
-            minutes = int(detected_goal.estimated_duration.total_seconds() / 60)
-            if minutes < 60:
-                confirmation += f"\n📊 Estimated time: {minutes} minutes"
-            else:
-                hours = minutes / 60
-                confirmation += f"\n📊 Estimated time: {hours:.1f} hours"
-        
-        confirmation += f"\n\nI'll track this goal for you. Ask me 'How's my {detected_goal.title[:20]}...' to check progress anytime!"
-        
-        return confirmation
-    
-    def _handle_goal_query(self, intent: IntentV2, session_id: str) -> Optional[str]:
-        """
-        Handle goal status queries (Task 6).
-        
-        Args:
-            intent: Classified intent with goal_query type
-            session_id: Current session ID
-            
-        Returns:
-            Formatted status text or None if no goals found
-        """
-        if not self._orchestrator:
-            return None
-        
-        # Check query subtype
-        query_subtype = intent.entities.get('query_subtype', 'general')
-        
-        # Handle "list all goals" query
-        if query_subtype == 'list_all':
-            return self._format_all_goals_for_chat()
-        
-        # Handle execution progress query - show all active executions
-        if query_subtype == 'execution_progress':
-            return self._format_execution_progress_for_chat()
-        
-        # Extract goal identifier from entities
-        goal_identifier = (
-            intent.entities.get('goal_identifier')
-            or intent.entities.get('goal_reference')
-        )
-        if not goal_identifier:
-            # No specific goal - list all goals
-            return self._format_all_goals_for_chat()
-        
-        # Try to find goal by identifier (title substring match) via orchestrator
-        try:
-            # Access goal manager through orchestrator's executive system
-            if hasattr(self._orchestrator, 'executive_system'):
-                goal_manager = self._orchestrator.executive_system.goal_manager
-            elif hasattr(self._orchestrator, '_executive_system'):
-                goal_manager = getattr(self._orchestrator, '_executive_system').goal_manager  # legacy attribute support
-            else:
-                # Fallback: just list active executions
-                active_executions = self._orchestrator.list_active_executions()
-                if not active_executions:
-                    return "You don't have any active goals at the moment."
-                return self._orchestrator.format_status_for_chat(active_executions[0].goal_id)
-            
-            matching_goals = []
-            for goal_id, goal in goal_manager.goals.items():
-                if goal_identifier.lower() in goal.title.lower():
-                    matching_goals.append(goal)
-            
-            if not matching_goals:
-                return f"I couldn't find a goal matching '{goal_identifier}'."
-            
-            # Show status of first match
-            goal = matching_goals[0]
-            return self._orchestrator.format_status_for_chat(goal.goal_id)
-        except Exception:
-            # Fallback to showing active executions
-            active_executions = self._orchestrator.list_active_executions()
-            if not active_executions:
-                return "You don't have any active goals at the moment."
-            return self._orchestrator.format_status_for_chat(active_executions[0].goal_id)
-    
-    def _format_all_goals_for_chat(self) -> str:
-        """
-        Format all goals for chat display.
-        
-        Returns:
-            Formatted string with all goals
-        """
-        try:
-            # Access goal manager through orchestrator's executive system
-            goal_manager = None
-            if hasattr(self._orchestrator, 'executive_system'):
-                goal_manager = self._orchestrator.executive_system.goal_manager
-            elif hasattr(self._orchestrator, '_executive_system'):
-                goal_manager = getattr(self._orchestrator, '_executive_system').goal_manager
-            
-            if not goal_manager or not goal_manager.goals:
-                return "You don't have any goals at the moment. Try saying something like 'I need to finish the report by Friday' to create one!"
-            
-            # Group goals by status
-            active_goals = []
-            completed_goals = []
-            failed_goals = []
-            
-            for goal_id, goal in goal_manager.goals.items():
-                status = getattr(goal, 'status', 'unknown')
-                if hasattr(status, 'value'):
-                    status = status.value
-                status_lower = str(status).lower()
-                
-                goal_info = {
-                    'id': goal_id,
-                    'title': goal.title,
-                    'priority': getattr(goal, 'priority', 'medium'),
-                    'deadline': getattr(goal, 'deadline', None),
-                    'status': status_lower,
-                }
-                
-                if status_lower in ['completed', 'done']:
-                    completed_goals.append(goal_info)
-                elif status_lower in ['failed', 'cancelled']:
-                    failed_goals.append(goal_info)
-                else:
-                    active_goals.append(goal_info)
-            
-            # Build response
-            lines = ["📋 **Your Goals**\n"]
-            
-            if active_goals:
-                lines.append("**Active:**")
-                for g in active_goals:
-                    priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
-                        str(getattr(g['priority'], 'value', g['priority'])).lower(), "⚪"
-                    )
-                    deadline_str = ""
-                    if g['deadline']:
-                        if hasattr(g['deadline'], 'strftime'):
-                            deadline_str = f" (due: {g['deadline'].strftime('%b %d')})"
-                        else:
-                            deadline_str = f" (due: {str(g['deadline'])[:10]})"
-                    lines.append(f"  {priority_emoji} {g['title']}{deadline_str}")
-            
-            if completed_goals:
-                lines.append("\n**Completed:** ✅")
-                for g in completed_goals[:3]:  # Show last 3 completed
-                    lines.append(f"  ✓ {g['title']}")
-                if len(completed_goals) > 3:
-                    lines.append(f"  ...and {len(completed_goals) - 3} more")
-            
-            if not active_goals and not completed_goals:
-                return "You don't have any goals yet. Try saying something like 'I need to finish the report by Friday' to create one!"
-            
-            lines.append(f"\n*{len(active_goals)} active, {len(completed_goals)} completed*")
-            lines.append("\nAsk me about a specific goal for details, or say 'I need to...' to create a new one.")
-            
-            return "\n".join(lines)
-            
-        except Exception as e:
-            return f"I had trouble getting your goals. Error: {str(e)}"
-    
-    def _format_execution_progress_for_chat(self) -> str:
-        """
-        Format all active goal executions for chat display.
-        
-        Returns:
-            Formatted string with execution progress
-        """
-        try:
-            if not self._orchestrator:
-                return "Goal execution is not available right now."
-            
-            active_executions = self._orchestrator.list_active_executions()
-            
-            if not active_executions:
-                return "No goals are currently being executed. All your goals are either waiting to start or already complete."
-            
-            lines = ["⚙️ **Currently Executing:**\n"]
-            
-            for progress in active_executions:
-                # Phase emoji
-                phase_emoji = {
-                    'queued': '⏳',
-                    'deciding': '🤔',
-                    'planning': '📝',
-                    'scheduling': '📅',
-                    'executing': '▶️',
-                    'completed': '✅',
-                    'failed': '❌',
-                    'cancelled': '🚫'
-                }.get(progress.phase.value, '⚙️')
-                
-                lines.append(f"{phase_emoji} **{progress.goal_title}**")
-                lines.append(f"   Phase: {progress.phase.value.title()}")
-                
-                if progress.total_actions > 0:
-                    lines.append(f"   Progress: {progress.progress_percent:.0f}% ({progress.actions_completed}/{progress.total_actions} steps)")
-                
-                if progress.current_action:
-                    lines.append(f"   Current: {progress.current_action}")
-                
-                # Show elapsed time
-                if hasattr(progress, 'start_time') and progress.start_time:
-                    from datetime import datetime
-                    elapsed = datetime.now() - progress.start_time
-                    if elapsed.total_seconds() < 60:
-                        lines.append(f"   Running: {int(elapsed.total_seconds())}s")
-                    else:
-                        lines.append(f"   Running: {int(elapsed.total_seconds() / 60)}m")
-                
-                lines.append("")  # Blank line between goals
-            
-            lines.append(f"*{len(active_executions)} goal(s) in progress*")
-            lines.append("\nSay 'check my goals' to see all goals, or ask about a specific one for details.")
-            
-            return "\n".join(lines)
-            
-        except Exception as e:
-            return f"I had trouble getting execution progress: {str(e)}"
-    
-    def _handle_goal_update(self, intent: "IntentV2", session_id: str) -> Optional[str]:
-        """
-        Handle goal update intent (complete, cancel, change priority/deadline).
-        
-        Args:
-            intent: Classified intent with goal_update entities
-            session_id: Current session ID
-            
-        Returns:
-            Confirmation message or error
-        """
-        try:
-            # Get orchestrator and goal_manager
-            orchestrator = getattr(self, '_orchestrator', None)
-            if not orchestrator:
-                return "Goal management is not available right now."
-            
-            goal_manager = getattr(orchestrator, 'goal_manager', None)
-            if not goal_manager:
-                return "Goal management is not available right now."
-            
-            # Extract entities from intent
-            entities = intent.entities if hasattr(intent, 'entities') else {}
-            goal_reference = entities.get('goal_reference', '')
-            update_action = entities.get('update_action', '')
-            new_priority = entities.get('new_priority')
-            new_deadline = entities.get('new_deadline')
-            
-            if not goal_reference:
-                return "I couldn't identify which goal you want to update. Try being more specific, like 'mark the report goal as complete'."
-            
-            if not update_action:
-                return "I'm not sure what you want to do with that goal. You can complete it, cancel it, or change its priority or deadline."
-            
-            # Find the goal by reference (fuzzy matching on title)
-            all_goals = goal_manager.goals if hasattr(goal_manager, 'goals') else {}
-            matching_goal = None
-            matching_goal_id = None
-            goal_reference_lower = goal_reference.lower()
-            
-            for goal_id, goal in all_goals.items():
-                goal_title = getattr(goal, 'title', str(goal)).lower() if hasattr(goal, 'title') else str(goal).lower()
-                if goal_reference_lower in goal_title or goal_title in goal_reference_lower:
-                    matching_goal = goal
-                    matching_goal_id = goal_id
-                    break
-            
-            if not matching_goal:
-                # Try partial match
-                for goal_id, goal in all_goals.items():
-                    goal_title = getattr(goal, 'title', str(goal)).lower() if hasattr(goal, 'title') else str(goal).lower()
-                    # Check if any word from reference matches goal title
-                    ref_words = set(goal_reference_lower.split())
-                    title_words = set(goal_title.split())
-                    if ref_words & title_words:  # Any common words
-                        matching_goal = goal
-                        matching_goal_id = goal_id
-                        break
-            
-            if not matching_goal:
-                return f"I couldn't find a goal matching '{goal_reference}'. Try saying 'check my goals' to see your current goals."
-            
-            goal_title = getattr(matching_goal, 'title', str(matching_goal))
-            
-            # Apply the update
-            if update_action == 'complete':
-                if hasattr(goal_manager, 'complete_goal'):
-                    goal_manager.complete_goal(matching_goal_id)
-                elif hasattr(matching_goal, 'status'):
-                    matching_goal.status = 'completed'
-                return f"✅ Marked '{goal_title}' as complete. Nice work!"
-                
-            elif update_action == 'cancel':
-                if hasattr(goal_manager, 'cancel_goal'):
-                    goal_manager.cancel_goal(matching_goal_id)
-                elif hasattr(goal_manager, 'remove_goal'):
-                    goal_manager.remove_goal(matching_goal_id)
-                elif hasattr(matching_goal, 'status'):
-                    matching_goal.status = 'cancelled'
-                return f"🚫 Cancelled '{goal_title}'."
-                
-            elif update_action == 'priority_change':
-                if new_priority and hasattr(goal_manager, 'update_goal_priority'):
-                    goal_manager.update_goal_priority(matching_goal_id, new_priority)
-                    return f"📊 Updated priority of '{goal_title}' to {new_priority}."
-                elif new_priority and hasattr(matching_goal, 'priority'):
-                    matching_goal.priority = new_priority
-                    return f"📊 Updated priority of '{goal_title}' to {new_priority}."
-                else:
-                    return f"I couldn't update the priority. Try saying 'set {goal_title} to high priority'."
-                    
-            elif update_action == 'deadline_change':
-                if new_deadline and hasattr(goal_manager, 'update_goal_deadline'):
-                    goal_manager.update_goal_deadline(matching_goal_id, new_deadline)
-                    return f"📅 Updated deadline of '{goal_title}' to {new_deadline}."
-                elif new_deadline and hasattr(matching_goal, 'deadline'):
-                    matching_goal.deadline = new_deadline
-                    return f"📅 Updated deadline of '{goal_title}' to {new_deadline}."
-                else:
-                    return f"I couldn't update the deadline. Try saying 'change {goal_title} deadline to Friday'."
-            
-            return f"I'm not sure how to '{update_action}' a goal. You can complete, cancel, or change the priority or deadline."
-            
-        except Exception as e:
-            return f"I had trouble updating the goal: {str(e)}"
-    
     def _handle_memory_query(self, message: str, session_id: str) -> Optional[str]:
         """
         Handle memory query intent using MemoryQueryParser and Interface.
@@ -1789,10 +1356,13 @@ class ChatService:
         target_text = self._format_latency_ms(status.get("target_p95_ms"))
         ema_text = self._format_latency_ms(status.get("ema_turn_latency_ms"))
         throughput = status.get("chat_turns_per_sec")
-        try:
-            throughput_text = f"{float(throughput):.2f} turns/sec"
-        except Exception:
+        if throughput is None:
             throughput_text = "unknown throughput"
+        else:
+            try:
+                throughput_text = f"{float(throughput):.2f} turns/sec"
+            except (TypeError, ValueError):
+                throughput_text = "unknown throughput"
         degraded = bool(status.get("performance_degraded"))
         health_text = "⚠️ Running slower than target" if degraded else "✅ Meeting latency target"
 
@@ -1917,98 +1487,6 @@ class ChatService:
             # Running inside an active loop; caller should avoid this path.
             coro.close()
             raise
-
-    # --- Metacognition ---
-
-    class SnapshotModel(BaseModel):
-        ts: float = Field(..., description="Timestamp (epoch seconds)")
-        turn_counter: int
-        performance: Optional[Dict[str, Any]] = None
-        recent_consolidation_selectivity: Optional[float] = None
-        promotion_age_p95_seconds: Optional[float] = None
-        stm_utilization: Optional[float] = None
-        stm_capacity: Optional[int] = None
-        last_user_turn_status: Optional[str] = None
-        # Allow extra fields (pydantic v2 style if available, else legacy Config)
-        if ConfigDict is not None:  # pydantic v2
-            model_config = ConfigDict(extra="allow")  # type: ignore
-        else:  # pragma: no cover - legacy compatibility
-            class Config:  # type: ignore
-                extra = "allow"
-
-    def _metacog_snapshot(self) -> Dict[str, Any]:
-        """Generate a lightweight metacognitive snapshot.
-
-        Returns a dict with:
-        - timestamp
-        - turn_counter
-        - stm_utilization (0..1) if consolidator present
-        - stm_capacity
-        - recent_consolidation_selectivity (ltm_promotions / stm_store) if counters present
-        - performance (latency_p95_ms, degraded flag) if available
-        - last_user_turn_status (status of most recent consolidation attempt)
-        Safe – all failures swallowed returning partial data.
-        """
-        snap: Dict[str, Any] = {
-            "ts": time.time(),
-            "turn_counter": self._turn_counter,
-        }
-        try:
-            # Performance state
-            perf_p95 = metrics_registry.get_p95("chat_turn_latency_ms")
-            degraded = metrics_registry.state.get("performance_degraded")
-            snap["performance"] = {"latency_p95_ms": perf_p95, "degraded": degraded}
-            # Consolidation selectivity
-            stm_total = metrics_registry.counters.get("consolidation_stm_store_total")
-            ltm_promos = metrics_registry.counters.get("consolidation_ltm_promotions_total")
-            if isinstance(stm_total, (int, float)) and stm_total > 0 and isinstance(ltm_promos, (int, float)):
-                snap["recent_consolidation_selectivity"] = ltm_promos / max(stm_total, 1)
-            # Promotion age p95 if recorded
-            if "consolidation_promotion_age_seconds" in metrics_registry.histograms:
-                try:
-                    age_p95 = metrics_registry.percentile("consolidation_promotion_age_seconds", 95)
-                    snap["promotion_age_p95_seconds"] = age_p95
-                except Exception:
-                    pass
-            # STM utilization via consolidator if it exposes method / attrs
-            util = None
-            capacity = None
-            if self.consolidator is not None:
-                # Expect consolidator.stm for vector STM with capacity attr or method
-                stm_obj = getattr(self.consolidator, "stm", None)
-                if stm_obj is not None:
-                    try:
-                        capacity = getattr(stm_obj, "capacity", None)
-                        size = None
-                        if hasattr(stm_obj, "__len__"):
-                            try:
-                                size = len(stm_obj)  # type: ignore
-                            except Exception:
-                                size = None
-                        if size is None:
-                            size = getattr(stm_obj, "size", None)
-                        if isinstance(size, int) and isinstance(capacity, int) and capacity > 0:
-                            util = min(1.0, size / capacity)
-                    except Exception:
-                        pass
-            if util is not None:
-                snap["stm_utilization"] = util
-            if capacity is not None:
-                snap["stm_capacity"] = capacity
-            # Last user turn consolidation status
-            if self.consolidation_log:
-                snap["last_user_turn_status"] = self.consolidation_log[-1]["status"]
-        except Exception:
-            pass
-        try:
-            # Validate and coerce via model (drops invalid fields if any)
-            model = self.SnapshotModel(**snap)
-            # Prefer model_dump in v2; fallback to dict()
-            if hasattr(model, "model_dump"):
-                return model.model_dump()
-            return model.dict()
-        except Exception:
-            return snap
 
     def _maybe_consolidate(self, user_turn: TurnRecord, assistant_turn: TurnRecord) -> bool:
         # Prefer new consolidator if available
