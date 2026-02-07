@@ -917,6 +917,15 @@ class ChatService:
             self._goal_handler = GoalIntentHandler(self._orchestrator)
         return self._goal_handler
 
+    def _format_goal_confirmation(self, detected_goal: Any) -> str:
+        return self._get_goal_handler().format_goal_confirmation(detected_goal)
+
+    def _handle_goal_query(self, intent: IntentV2, session_id: str) -> Optional[str]:
+        return self._get_goal_handler().handle_goal_query(intent, session_id)
+
+    def _handle_goal_update(self, intent: IntentV2, session_id: str) -> Optional[str]:
+        return self._get_goal_handler().handle_goal_update(intent, session_id)
+
     def _record_session_goal(self, session_id: str, goal_id: str) -> None:
         """Track goal IDs per session for context-aware intent boosts."""
         goals = self._session_goal_index.setdefault(session_id, set())

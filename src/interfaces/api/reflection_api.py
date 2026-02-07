@@ -108,6 +108,8 @@ def reflect(request: Request):
     agent = _get_agent(request)
     with reflection_lock:
         report = agent.reflect()
+        if report is None:
+            report = {"status": "empty"}
         last_reflection_report = report
     return {"status": "ok", "report": report}
 

@@ -93,12 +93,21 @@ class GoalDetector:
         
         # Create goal in executive system
         try:
-            goal_ref = self.executive.create_goal(
-                title=title,
-                description=entities.get('goal_description', message),
-                priority=priority,
-                target_date=deadline,
-            )
+            goal_manager = getattr(self.executive, "goal_manager", None)
+            if goal_manager is not None and hasattr(goal_manager, "create_goal"):
+                goal_ref = goal_manager.create_goal(
+                    title=title,
+                    description=entities.get('goal_description', message),
+                    priority=priority,
+                    target_date=deadline,
+                )
+            else:
+                goal_ref = self.executive.create_goal(
+                    title=title,
+                    description=entities.get('goal_description', message),
+                    priority=priority,
+                    target_date=deadline,
+                )
             goal_id: str
             if isinstance(goal_ref, str):
                 goal_id = goal_ref
