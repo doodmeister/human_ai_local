@@ -327,6 +327,7 @@ human_ai_local/
 - Chat interface with full context building
 - REST API with 30+ endpoints
 - A/B testing and ML training pipeline
+- Phase 2 cognitive layers (Drives → Narrative) integrated
 
 ### In Progress 🚧
 - Enhanced UI visualizations (plan viewer, Gantt charts)

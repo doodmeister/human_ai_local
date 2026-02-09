@@ -2,6 +2,8 @@
 
 **Execution tracking:** For the current P1 workstream (observability + reliability), see [archive/P1_ACTION_PLAN.md](archive/P1_ACTION_PLAN.md). For current system status, see [nextsteps.md](nextsteps.md).
 
+**Phase 2 update (2026-02-09):** Layers 0-5 (Drives through Narrative) are implemented and integrated; Trauma & Crisis remains deferred pending ethical review.
+
 ## 1. Mid-Term Goals (Next 3–6 Months)
 
 ### Episodic & Semantic Memory Expansion
