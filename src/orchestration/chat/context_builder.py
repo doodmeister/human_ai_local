@@ -122,6 +122,54 @@ class ContextBuilder:
             trace=trace,
         )
 
+        # Phase 2, Layer 0: Drive context injection
+        self._run_stage(
+            name="drive_context",
+            func=self._inject_drive_context,
+            sink=items,
+            trace=trace,
+        )
+
+        # Phase 2, Layer 1: Felt-sense / mood context injection
+        self._run_stage(
+            name="felt_sense_context",
+            func=self._inject_felt_sense_context,
+            sink=items,
+            trace=trace,
+        )
+
+        # Phase 2, Layer 2: Relational context injection
+        self._run_stage(
+            name="relational_context",
+            func=self._inject_relational_context,
+            sink=items,
+            trace=trace,
+        )
+
+        # Phase 2, Layer 3: Emergent patterns context injection
+        self._run_stage(
+            name="pattern_context",
+            func=self._inject_pattern_context,
+            sink=items,
+            trace=trace,
+        )
+
+        # Phase 2, Layer 4: Self-model context injection
+        self._run_stage(
+            name="selfmodel_context",
+            func=self._inject_selfmodel_context,
+            sink=items,
+            trace=trace,
+        )
+
+        # Phase 2, Layer 5: Narrative context injection
+        self._run_stage(
+            name="narrative_context",
+            func=self._inject_narrative_context,
+            sink=items,
+            trace=trace,
+        )
+
         # Composite scoring & deterministic ranking
         items = score_and_rank(items)
 
@@ -761,6 +809,321 @@ class ContextBuilder:
             # Don't fail if reminder injection doesn't work
             pass
         
+        return items
+
+    def _inject_drive_context(self) -> List[ContextItem]:
+        """Phase 2, Layer 0: Inject drive state and conflicts into LLM context.
+
+        The drive system is owned by ChatService; we access it via the
+        current session's most recent CognitiveTick state bag (threaded through
+        by ChatService before calling build()).  As a fallback, we attempt to
+        lazy-import and read the global drive state.
+        """
+        items: List[ContextItem] = []
+
+        try:
+            from src.cognition.drives import DriveState, DriveProcessor
+
+            # Attempt to get drive state from session state (set by ChatService)
+            drive_state: DriveState | None = None
+            drive_processor: DriveProcessor | None = None
+
+            # Access via the attached session if ChatService stored it
+            session = getattr(self, "_current_session", None)
+            if session is not None:
+                drive_state = getattr(session, "_drive_state_snapshot", None)
+
+            # If not found via session, try to read from a module-level singleton
+            if drive_state is None:
+                try:
+                    from src.orchestration.chat.factory import _lazy_import
+                    # We can't easily get it without ChatService reference; skip gracefully
+                    return items
+                except Exception:
+                    return items
+
+            # Build drive processor for context generation helpers
+            drive_processor = DriveProcessor()
+
+            # Main drive context item
+            drive_summary = drive_processor.drive_context_summary(drive_state)
+            items.append(
+                ContextItem(
+                    source_id="drive_state",
+                    source_system="drives",
+                    content=drive_summary,
+                    rank=RANK_BASE_EXECUTIVE + 1,
+                    reason="drive_pressure",
+                    scores={"drive_pressure": drive_state.total_pressure()},
+                    metadata=drive_state.get_pressure(),
+                )
+            )
+
+            # Conflict context (only if conscious conflicts exist)
+            conflicts = drive_processor.detect_conflicts(drive_state)
+            conflict_summary = drive_processor.conflict_context_summary(conflicts)
+            if conflict_summary:
+                items.append(
+                    ContextItem(
+                        source_id="drive_conflict",
+                        source_system="drives",
+                        content=conflict_summary,
+                        rank=RANK_BASE_EXECUTIVE + 2,
+                        reason="internal_conflict",
+                        scores={"tension": max(c.tension for c in conflicts if c.conscious)},
+                    )
+                )
+
+        except ImportError:
+            pass  # Drive system not installed yet — graceful degradation
+        except Exception:
+            pass
+
+        return items
+
+    def _inject_felt_sense_context(self) -> List[ContextItem]:
+        """Phase 2, Layer 1: Inject felt-sense and mood into LLM context.
+
+        Like drives, felt-sense state is owned by ChatService and passed
+        to ContextBuilder via the session snapshot.
+        """
+        items: List[ContextItem] = []
+
+        try:
+            from src.cognition.felt_sense import Mood, MoodLabeler
+
+            session = getattr(self, "_current_session", None)
+            mood = None
+            if session is not None:
+                mood = getattr(session, "_mood_snapshot", None)
+
+            if mood is None:
+                return items
+
+            # Build context string
+            summary = MoodLabeler.mood_context_summary(mood)
+            items.append(
+                ContextItem(
+                    source_id="felt_sense_mood",
+                    source_system="felt_sense",
+                    content=summary,
+                    rank=RANK_BASE_EXECUTIVE + 3,
+                    reason="mood_state",
+                    scores={"mood_intensity": mood.arousal, "mood_valence": mood.valence},
+                    metadata={"mood_label": mood.label, "confidence": mood.confidence},
+                )
+            )
+
+        except ImportError:
+            pass  # Felt-sense system not installed — graceful degradation
+        except Exception:
+            pass
+
+        return items
+
+    def _inject_relational_context(self) -> List[ContextItem]:
+        """Phase 2, Layer 2: Inject relationship context into LLM prompt.
+
+        The relational model for the current interlocutor is stashed on
+        the session by ChatService.  Only injected when the relationship
+        is significant (enough interactions to be meaningful).
+        """
+        items: List[ContextItem] = []
+
+        try:
+            from src.cognition.relational import RelationalModel, RelationalProcessor
+
+            session = getattr(self, "_current_session", None)
+            rel_model: RelationalModel | None = None
+            if session is not None:
+                rel_model = getattr(session, "_relational_model_snapshot", None)
+
+            if rel_model is None:
+                return items
+
+            # Only inject for significant relationships
+            if not rel_model.is_significant():
+                return items
+
+            summary = RelationalProcessor.relational_context_summary(rel_model)
+            items.append(
+                ContextItem(
+                    source_id="relational_context",
+                    source_system="relational",
+                    content=summary,
+                    rank=RANK_BASE_EXECUTIVE + 4,
+                    reason="relationship_context",
+                    scores={
+                        "felt_quality": rel_model.felt_quality,
+                        "attachment": rel_model.attachment_strength,
+                    },
+                    metadata={
+                        "person_id": rel_model.person_id,
+                        "status": rel_model.current_status,
+                    },
+                )
+            )
+
+        except ImportError:
+            pass  # Relational system not installed — graceful degradation
+        except Exception:
+            pass
+
+        return items
+
+    def _inject_pattern_context(self) -> List[ContextItem]:
+        """Phase 2, Layer 3: Inject emergent-pattern context into LLM prompt.
+
+        The pattern field is stashed on the session by ChatService.  Only
+        injected when patterns have been detected (count > 0).
+        """
+        items: List[ContextItem] = []
+
+        try:
+            from src.cognition.patterns import PatternField, PatternDetector
+
+            session = getattr(self, "_current_session", None)
+            pf: PatternField | None = None
+            if session is not None:
+                pf = getattr(session, "_pattern_field_snapshot", None)
+
+            if pf is None or pf.count() == 0:
+                return items
+
+            # Only inject if there are established patterns
+            active = pf.active_patterns(min_strength=0.05)
+            if not active:
+                return items
+
+            summary = PatternDetector.pattern_context_summary(pf)
+            items.append(
+                ContextItem(
+                    source_id="pattern_context",
+                    source_system="patterns",
+                    content=summary,
+                    rank=RANK_BASE_EXECUTIVE + 5,
+                    reason="emergent_patterns",
+                    scores={
+                        "pattern_count": float(len(active)),
+                        "top_strength": active[0].strength if active else 0.0,
+                    },
+                    metadata={
+                        "dominant": [p.name for p in pf.dominant_patterns()],
+                    },
+                )
+            )
+
+        except ImportError:
+            pass  # Pattern system not installed — graceful degradation
+        except Exception:
+            pass
+
+        return items
+
+    def _inject_selfmodel_context(self) -> List[ContextItem]:
+        """Phase 2, Layer 4: Inject self-model context into LLM prompt.
+
+        The self-model is stashed on the session by ChatService.  Only
+        injected when a self-model has been built.  Blind spots are
+        NOT included — the context represents what the agent believes
+        about itself.
+        """
+        items: List[ContextItem] = []
+
+        try:
+            from src.cognition.selfmodel import SelfModel, SelfModelBuilder
+
+            session = getattr(self, "_current_session", None)
+            sm: SelfModel | None = None
+            if session is not None:
+                sm = getattr(session, "_self_model_snapshot", None)
+
+            if sm is None:
+                return items
+
+            # Only inject if there's meaningful self-knowledge
+            if not sm.perceived_patterns:
+                return items
+
+            summary = SelfModelBuilder.self_model_context_summary(sm)
+            if not summary:
+                return items
+
+            items.append(
+                ContextItem(
+                    source_id="selfmodel_context",
+                    source_system="selfmodel",
+                    content=summary,
+                    rank=RANK_BASE_EXECUTIVE + 6,
+                    reason="self_model",
+                    scores={
+                        "self_regard": sm.self_regard,
+                        "identity_stability": sm.identity_stability,
+                    },
+                    metadata={
+                        "perceived_count": len(sm.perceived_patterns),
+                        "blind_spot_count": sm.blind_spot_count,
+                        "has_discoveries": len(sm.recent_discoveries) > 0,
+                    },
+                )
+            )
+
+        except ImportError:
+            pass  # Self-model system not installed — graceful degradation
+        except Exception:
+            pass
+
+        return items
+
+    def _inject_narrative_context(self) -> List[ContextItem]:
+        """Phase 2, Layer 5: Inject narrative context into LLM prompt.
+
+        The narrative is stashed on the session by ChatService.  Only
+        injected when a narrative has been constructed and is non-empty.
+        The identity_summary is the primary content, supplemented by
+        growth story and current themes.
+        """
+        items: List[ContextItem] = []
+
+        try:
+            from src.cognition.narrative import SelfNarrative, NarrativeConstructor
+
+            session = getattr(self, "_current_session", None)
+            narr: SelfNarrative | None = None
+            if session is not None:
+                narr = getattr(session, "_narrative_snapshot", None)
+
+            if narr is None or narr.is_empty:
+                return items
+
+            summary = NarrativeConstructor.narrative_context_summary(narr)
+            if not summary:
+                return items
+
+            items.append(
+                ContextItem(
+                    source_id="narrative_context",
+                    source_system="narrative",
+                    content=summary,
+                    rank=RANK_BASE_EXECUTIVE + 7,
+                    reason="narrative",
+                    scores={
+                        "version": float(narr.version),
+                    },
+                    metadata={
+                        "chapter_count": len(narr.chapters),
+                        "theme_count": len(narr.active_themes),
+                        "has_growth_story": bool(narr.growth_story),
+                        "trigger": narr.update_trigger,
+                    },
+                )
+            )
+
+        except ImportError:
+            pass  # Narrative system not installed — graceful degradation
+        except Exception:
+            pass
+
         return items
 
     # --- Existing stage runner & recent turns selection (unchanged logic with minor adjustments) ---

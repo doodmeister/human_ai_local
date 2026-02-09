@@ -2,7 +2,7 @@
 Core configuration settings for the Human-AI Cognition Framework
 """
 import os
-from typing import Optional
+from typing import Any, Optional
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -175,7 +175,86 @@ class CognitiveConfig:
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
-    
+
+    # Phase 2: Drive system configuration (lazy import to avoid circular deps)
+    _drive_config: Optional[Any] = field(default=None, repr=False)
+    # Phase 2: Felt-sense / mood configuration
+    _felt_sense_config: Optional[Any] = field(default=None, repr=False)
+    # Phase 2: Relational-field configuration
+    _relational_config: Optional[Any] = field(default=None, repr=False)
+    # Phase 2: Emergent-patterns configuration
+    _pattern_config: Optional[Any] = field(default=None, repr=False)
+    # Phase 2: Self-model configuration
+    _self_model_config: Optional[Any] = field(default=None, repr=False)
+    # Phase 2: Narrative configuration
+    _narrative_config: Optional[Any] = field(default=None, repr=False)
+
+    @property
+    def drives(self):
+        """Drive system configuration (Phase 2, Layer 0)."""
+        if self._drive_config is None:
+            try:
+                from src.cognition.drives.drive_config import DriveConfig
+                self._drive_config = DriveConfig()
+            except ImportError:
+                return None
+        return self._drive_config
+
+    @property
+    def felt_sense(self):
+        """Felt-sense / mood configuration (Phase 2, Layer 1)."""
+        if self._felt_sense_config is None:
+            try:
+                from src.cognition.felt_sense.felt_sense_config import FeltSenseConfig
+                self._felt_sense_config = FeltSenseConfig()
+            except ImportError:
+                return None
+        return self._felt_sense_config
+
+    @property
+    def relational(self):
+        """Relational-field configuration (Phase 2, Layer 2)."""
+        if self._relational_config is None:
+            try:
+                from src.cognition.relational.relational_config import RelationalConfig
+                self._relational_config = RelationalConfig()
+            except ImportError:
+                return None
+        return self._relational_config
+
+    @property
+    def patterns(self):
+        """Emergent-patterns configuration (Phase 2, Layer 3)."""
+        if self._pattern_config is None:
+            try:
+                from src.cognition.patterns.pattern_config import PatternConfig
+                self._pattern_config = PatternConfig()
+            except ImportError:
+                return None
+        return self._pattern_config
+
+    @property
+    def selfmodel(self):
+        """Self-model configuration (Phase 2, Layer 4)."""
+        if self._self_model_config is None:
+            try:
+                from src.cognition.selfmodel.self_model_config import SelfModelConfig
+                self._self_model_config = SelfModelConfig()
+            except ImportError:
+                return None
+        return self._self_model_config
+
+    @property
+    def narrative(self):
+        """Narrative configuration (Phase 2, Layer 5)."""
+        if self._narrative_config is None:
+            try:
+                from src.cognition.narrative.narrative_config import NarrativeConfig
+                self._narrative_config = NarrativeConfig()
+            except ImportError:
+                return None
+        return self._narrative_config
+
     def __post_init__(self):
         """Create data and model directories after initialization"""
         self.data_dir = self.project_root / "data"

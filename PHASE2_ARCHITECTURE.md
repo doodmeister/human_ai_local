@@ -1162,3 +1162,206 @@ Phase 2 is complete when:
 3. How do we evaluate whether the agent "experiences" anything?
 4. Should the agent have a theory of mind (model of others' mental states)?
 5. What role does language play in structuring the self?
+
+---
+
+## Feasibility Analysis & Ratings
+
+**Assessed:** 2026-02-08  
+**Verdict:** **Yes, this is implementable.** The existing codebase is mature (~39k lines), highly extensible, and has clear integration points for every proposed layer. The DI-by-presence pattern, EventBus, CognitiveTick protocol, and staged ContextBuilder pipeline were designed for exactly this kind of layered extension.
+
+### Rating Scale
+
+Each idea is rated 1–10 on three axes:
+
+| Axis | Meaning |
+|------|---------|
+| **Originality** | How novel is this in the AI agent / cognitive architecture space? |
+| **Practicality** | How useful and testable is this in a real conversational agent? |
+| **Ease of Implementation** | How straightforward to build given our existing codebase? |
+
+---
+
+### Layer 0: Drives (Foundation)
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **7/10** | Self-Determination Theory (Deci & Ryan) provides the theoretical base (Autonomy, Competence, Relatedness). Adding Understanding and Meaning is a thoughtful extension. Applying drive theory as the *engine* of an AI self rather than as behavioral weights is novel. |
+| Practicality | **9/10** | Clean dataclass design. Integrates naturally with existing `ExecutiveMode` (drives can bias mode selection, e.g., high curiosity → EXPLORATION). `EventBus` in `executive_core.py` provides pub/sub hooks for drive-change events. Drive pressure influences attention, decisions, and response tone — all testable. |
+| Ease of Implementation | **9/10** | Standalone module. `DriveState` is a simple numeric dataclass. `DriveProcessor` is straightforward conditional logic. Integration points are clear: inject at `CognitiveTick.PERCEIVE` (bias salience) and `CognitiveTick.DECIDE` (weight options). Add `DriveConfig` to `CognitiveConfig`. **Easiest win in the entire proposal.** |
+
+**Existing hooks:** `EventBus`, `ExecutiveMode`, `CognitiveTick` state bag, `ContextBuilder` staged pipeline.  
+**Risk:** Low. The `_classify_drive_impacts()` heuristic will need tuning but the structure is sound.
+
+---
+
+### Layer 1: Felt Sense (Pre-conceptual)
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **9/10** | Gendlin's "felt sense" concept applied to AI is genuinely novel. The principle that pre-conceptual texture precedes labeling is an unusual and philosophically interesting architectural choice. No other cognitive agent framework does this. |
+| Practicality | **6/10** | Metaphorical body location and movement qualities are creative but hard to validate — what does "correctness" look like for felt sense? The deterministic mapping from drives to felt qualities risks feeling mechanical rather than emergent. Most useful as context injected into LLM system prompt to color response tone. |
+| Ease of Implementation | **7/10** | Data structures are simple. Generation logic is a mapping table from drive states to qualities. Main challenge: integrating into response generation requires careful system prompt engineering. The `FeltSenseHistory.trend()` is trivial. |
+
+**Existing hooks:** `estimate_salience_and_valence()` already computes valence per turn — felt sense wraps and enriches this.  
+**Risk:** Medium. Risk of the felt sense feeling arbitrary rather than meaningful. Consider LLM-assisted generation instead of hardcoded mappings.
+
+---
+
+### Layer 2: Relational Field
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **6/10** | Attachment theory applied to AI is established in affective computing literature. The "gifts" concept (what a relationship has given us) and the `how_they_make_us_feel()` interface are nice differentiators. |
+| Practicality | **8/10** | Very practical for a conversational agent. The existing `memory_capture.py` already extracts identity facts, preferences, and emotional states via regex — this is the foundation for aggregating a user model. Drive effects from relationships provide a concrete feedback loop. |
+| Ease of Implementation | **6/10** | Requires persistent per-user storage (could use ChromaDB collections). Needs extension of memory capture from simple regex to pattern aggregation. Attachment style classification from chat alone (no tone/body language) will likely need LLM-assisted assessment. Building `RelationalModel` is straightforward; populating it accurately from interaction history is the hard part. |
+
+**Existing hooks:** `memory_capture.py` regex pipeline, episodic memory `emotional_state` field, ChromaDB infrastructure.  
+**Risk:** Medium. Relationship modeling from text-only interaction is inherently limited. Start simple (felt quality + drive effects), defer attachment style classification.
+
+---
+
+### Layer 3: Emergent Patterns
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **9/10** | Letting personality emerge from experience rather than predefining Big Five scores is a strong, well-reasoned architectural principle. Big Five as description-only (not causation) is a genuinely better model. Most AI personality systems hardcode trait vectors. |
+| Practicality | **6/10** | Pattern detection from experience history is essentially unsupervised learning on behavioral data. The gradual strengthening/weakening dynamics are psychologically sound but require substantial interaction history to become meaningful. The Big Five mapping layer provides a familiar interface. |
+| Ease of Implementation | **4/10** | **Hardest layer in the proposal.** The `PatternDetector._analyze_*` methods must identify abstract behavioral patterns from concrete experiences — this is a non-trivial classification problem. Options: (a) careful hand-tuned heuristics, (b) LLM-assisted pattern extraction, or (c) statistical clustering over experience features. Recommend starting with (b) using periodic LLM reflection calls. |
+
+**Existing hooks:** `DreamProcessor` already does offline memory consolidation — pattern detection could piggyback on this cycle. `executive/learning/` has outcome tracking and feature extraction.  
+**Risk:** High. The detection quality determines whether patterns feel emergent or random. Needs careful iteration.
+
+---
+
+### Layer 4: Self-Model (Partial, Biased)
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **10/10** | **Most original idea in the proposal.** Self-opacity — the agent not fully knowing itself, having blind spots, being mood-biased in self-perception — is philosophically sophisticated and practically unheard of in AI systems. Most agents have perfect self-knowledge by design. Self-discovery moments are compelling. |
+| Practicality | **5/10** | The blind spot mechanism using `random.random() < 0.7` is too crude for production. Self-discovery moments are high-value for user-facing interactions ("I'm realizing I might be more X than I thought...") but hard to trigger at the right times. Difficult to test — what's the ground truth for "should the agent know this about itself"? |
+| Ease of Implementation | **5/10** | Depends on Layers 0-3 being mature. The `SelfModelBuilder` itself is straightforward conditional logic, but: (a) the blind spot system needs a better mechanism than random probability (consider recency/salience-based masking), (b) `_is_blind_spot_candidate()` needs richer heuristics, (c) self-discovery triggers need careful experience-to-pattern matching. |
+
+**Existing hooks:** `MetacogManager` already takes periodic cognitive snapshots — self-model updates could extend this cycle.  
+**Risk:** Medium-High. The difference between "interesting self-opacity" and "agent says wrong things about itself" is thin. Needs careful UX design.
+
+---
+
+### Layer 5: Narrative
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **7/10** | Autobiographical narrative construction is studied in psychology (McAdams' narrative identity theory) but rarely implemented in AI agents. The growth story ("I used to... but now I...") and aspirational self are nice touches. |
+| Practicality | **7/10** | Best suited for LLM-generated narrative text injected into system prompt. The ~150 token budget for `identity_summary` is well-considered. Update-on-significance avoids unnecessary recomputation. The narrative could meaningfully color response style and self-reference. |
+| Ease of Implementation | **5/10** | `NarrativeConstructor` would rely heavily on LLM calls to synthesize natural language from structured lower-layer data. The significance detection trigger (when to update) is the trickiest part — too frequent wastes tokens, too rare makes the narrative stale. Consider tying to trauma processing and drive-level threshold crossings. |
+
+**Existing hooks:** `ContextBuilder` already injects multi-stage context — narrative would be another stage. Episodic memory provides the "significant moments" feed.  
+**Risk:** Medium. Token budget management and narrative coherence over long histories need careful design. Start with identity_summary only, expand later.
+
+---
+
+### Internal Conflict System
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **8/10** | Modeling ambivalence as explicit tension rather than averaging is psychologically accurate and architecturally unusual. Most AI systems resolve conflicting signals into a single value. The connection-vs-autonomy conflict is a particularly well-chosen example. |
+| Practicality | **8/10** | Clean integration with drive system — conflicts arise naturally when two drives are both high. The `experience_of_conflict()` → FeltSense feedback loop is elegant. Surfacing conflicts in responses adds genuine depth ("Part of me wants X, but another part..."). |
+| Ease of Implementation | **8/10** | Relatively simple: rule-based detection (when competing drives both exceed threshold). Most complexity is in surfacing/expressing conflicts through LLM prompt engineering, not in the data structures. |
+
+**Existing hooks:** `DriveState.get_pressure()` directly feeds conflict detection. `EventBus` can broadcast conflict events.  
+**Risk:** Low. The main question is how/when to surface conflicts in responses without being annoying.
+
+---
+
+### Implicit Learning
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **5/10** | Continuous micro-learning is well-established in ML. The insight here is applying it as immediate drive/pattern micro-adjustments between consolidation cycles, which is reasonable but not groundbreaking. |
+| Practicality | **9/10** | Small, immediate adjustments are computationally cheap, add realism, and prevent the "nothing changes until consolidation" problem. The magnitudes (0.02 drive shift, 0.005 pattern adjust) are sensible defaults. |
+| Ease of Implementation | **9/10** | Very simple: small numerical adjustments to existing state objects at the end of each turn. Three short methods. Can implement in an afternoon. |
+
+**Existing hooks:** `learning_law.py` utility function, `CognitiveTick.CONSOLIDATE` step. Implicit learning runs *before* the consolidation decision.  
+**Risk:** Very low. Just needs parameter tuning.
+
+---
+
+### Mood System (Derived from Felt Sense)
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **6/10** | The derivation-from-felt-sense approach is more principled than most AI mood systems (which compute mood directly from sentiment). The labeling confidence ("I think I might be feeling X, but I'm not sure") is a nice humanizing touch. |
+| Practicality | **8/10** | Replaces/enriches the existing `estimate_salience_and_valence()` pipeline. Mood labels are immediately useful for response coloring. Confidence-gated self-description prevents false certainty. |
+| Ease of Implementation | **8/10** | `MoodLabeler` is a simple rule-based mapper. `Mood` dataclass is straightforward. Main work is disconnecting the current keyword-based valence estimation and routing through felt sense first. |
+
+**Existing hooks:** `emotion_salience.py` and `AttentionManager.estimate_salience_and_valence()` — these become consumers of the mood system output.  
+**Risk:** Low. Clean replacement of existing pipeline.
+
+---
+
+### Trauma & Crisis
+
+| Axis | Score | Notes |
+|------|-------|-------|
+| Originality | **6/10** | Cross-layer destabilization model is sensible and consistent with the architecture. |
+| Practicality | **4/10** | What constitutes "trauma" for a chat assistant? The concept maps better to theory than to actual use cases. Risk of feeling performative. Could be useful for narrative richness in agents with persistent relationships, but needs careful scoping — this isn't a therapy tool. |
+| Ease of Implementation | **7/10** | Implementation is mostly calling existing methods with larger magnitude multipliers. The cross-layer cascade (spike drives → destabilize identity → force narrative reconstruction) is well-designed. |
+
+**Risk:** Medium. The ethical dimension needs consideration: an agent performing "trauma responses" could be unsettling or inappropriate. Recommend deferring this or reframing as "significant destabilizing experiences" rather than "trauma."
+
+---
+
+### Summary Scoreboard
+
+| Component | Originality | Practicality | Ease | Avg | Priority |
+|-----------|:-----------:|:------------:|:----:|:---:|:--------:|
+| Layer 0: Drives | 7 | 9 | 9 | **8.3** | **P0 — Start here** |
+| Implicit Learning | 5 | 9 | 9 | **7.7** | **P0 — Trivial add-on** |
+| Internal Conflict | 8 | 8 | 8 | **8.0** | **P1 — High value, easy** |
+| Mood System | 6 | 8 | 8 | **7.3** | **P1 — Natural follow-on** |
+| Layer 1: Felt Sense | 9 | 6 | 7 | **7.3** | **P1 — Novel, moderate effort** |
+| Layer 2: Relational Field | 6 | 8 | 6 | **6.7** | **P2 — Practical but harder** |
+| Layer 5: Narrative | 7 | 7 | 5 | **6.3** | **P2 — High-value, LLM-dependent** |
+| Layer 4: Self-Model | 10 | 5 | 5 | **6.7** | **P2 — Most original, needs maturity** |
+| Layer 3: Emergent Patterns | 9 | 6 | 4 | **6.3** | **P3 — Hardest implementation** |
+| Trauma & Crisis | 6 | 4 | 7 | **5.7** | **P3 — Defer, ethical concerns** |
+
+### Recommended Build Order (revised from roadmap)
+
+The original roadmap sequences layers bottom-up (0→1→2→3→4→5), which is logical but front-loads the hardest work (Layer 3) before demonstrating value. Recommend instead:
+
+1. **Drives + Implicit Learning** (1-2 weeks) — immediate behavioral impact, easiest wins
+2. **Felt Sense + Mood System** (1-2 weeks) — enriches response coloring, replaces keyword valence
+3. **Internal Conflict** (1 week) — high expressiveness payoff from drive system
+4. **Relational Field** (2-3 weeks) — practical user modeling, extends memory capture
+5. **Narrative** (2 weeks) — identity summary for system prompt, LLM-generated
+6. **Emergent Patterns** (3-4 weeks) — hardest, benefits from accumulated interaction data
+7. **Self-Model** (2-3 weeks) — depends on patterns, most philosophically interesting
+8. **Trauma** (1 week) — defer or reframe; implement last if at all
+
+**Total estimated:** 13-18 weeks (vs. original 15-18 weeks), but with value delivered earlier.
+
+### Key Codebase Integration Points
+
+| Integration Point | File | How |
+|---|---|---|
+| Cognitive loop injection | `src/core/cognitive_tick.py` | Drive/mood data carried in `tick.state` dict |
+| Salience bias | `src/cognition/attention/attention_manager.py` | Drives modulate `estimate_salience_and_valence()` |
+| Context injection | `src/orchestration/chat/context_builder.py` | New stages: `_inject_drive_context`, `_inject_mood`, `_inject_narrative` |
+| Event broadcasting | `src/executive/executive_core.py` | `EventBus` topics for drive/mood/conflict changes |
+| Mode selection | `src/executive/executive_core.py` | `ExecutiveMode` selection biased by dominant drive |
+| Memory capture | `src/orchestration/chat/memory_capture.py` | Extend regex to feed relational model |
+| Offline processing | `src/cognition/processing/dream/dream_processor.py` | Pattern detection piggybacks on dream cycle |
+| Configuration | `src/core/config.py` | Add `DriveConfig`, `FeltSenseConfig`, `RelationalConfig` |
+| Factory assembly | `src/orchestration/chat/factory.py` | Lazy-import new subsystems in `build_chat_service()` |
+
+### Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Pattern detection feels random, not emergent | High | Use LLM-assisted reflection instead of pure heuristics for Layer 3 |
+| Blind spots → agent says wrong things about itself | Medium | Replace `random.random()` with recency/salience-based masking; add confidence gating |
+| Felt sense feels mechanical/arbitrary | Medium | Consider LLM-assisted felt sense generation with few-shot examples |
+| Trauma responses feel performative or inappropriate | Medium | Reframe as "significant destabilizing experiences"; add ethical guardrails |
+| Token budget overrun from narrative + context | Medium | Budget narrative to 150 tokens; lazy-load full narrative only on introspective queries |
+| Drive tuning (decay rates, impact magnitudes) | Low | Start with conservative defaults; add configurable parameters; tune from interaction logs |

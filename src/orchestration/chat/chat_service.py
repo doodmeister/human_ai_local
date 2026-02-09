@@ -94,6 +94,32 @@ class ChatService:
         # Snapshot history ring buffer
         history_size = int(self.context_builder.cfg.get("metacog_snapshot_history_size", 50))
         self._metacog_history = deque(maxlen=history_size)
+        # Phase 2, Layer 0: Drive system (lazy init)
+        self._drive_state = None
+        self._drive_processor = None
+        self._drive_last_turn_time: Optional[float] = None
+        self._drive_impact_history: list = []  # recent DriveImpact list for sensitivity adaptation
+        # Phase 2, Layer 1: Felt-sense / mood system (lazy init)
+        self._felt_sense_generator = None
+        self._felt_sense_history = None
+        self._mood_labeler = None
+        self._current_mood = None
+        self._recent_valences: list = []  # rolling valence window for felt-sense generation
+        # Phase 2, Layer 2: Relational field (lazy init)
+        self._relational_field = None
+        self._relational_processor = None
+        # Phase 2, Layer 3: Emergent patterns (lazy init)
+        self._pattern_field = None
+        self._pattern_detector = None
+        self._pattern_turn_counter = 0
+        # Phase 2, Layer 4: Self-model (lazy init)
+        self._self_model = None
+        self._self_model_builder = None
+        self._self_model_turn_counter = 0
+        # Phase 2, Layer 5: Narrative (lazy init)
+        self._narrative = None
+        self._narrative_constructor = None
+        self._narrative_turn_counter = 0
     # Metacog metrics counters (initialized lazily via metrics_registry)
     # Counter names:
     #  - metacog_snapshots_total
@@ -195,6 +221,136 @@ class ChatService:
         
         salience, valence = estimate_salience_and_valence(message)
         importance = self._estimate_importance(message, salience, valence)
+
+        # Phase 2, Layer 0: Update drive state from this turn
+        drive_impact = None
+        drive_conflicts = []
+        try:
+            ds, dp = self._get_drive_system()
+            now_ts = time.time()
+            elapsed_min = (now_ts - self._drive_last_turn_time) / 60.0 if self._drive_last_turn_time else 0.0
+            self._drive_last_turn_time = now_ts
+            ds, drive_impact = dp.process_turn(
+                ds, message,
+                salience=salience, valence=valence, elapsed_minutes=elapsed_min,
+            )
+            drive_conflicts = dp.detect_conflicts(ds)
+            # Stash in tick state for downstream stages
+            tick.state["drive_state"] = ds
+            tick.state["drive_impact"] = drive_impact
+            tick.state["drive_conflicts"] = drive_conflicts
+            # Make drive state accessible to ContextBuilder via session
+            setattr(sess, "_drive_state_snapshot", ds)
+            # Track impacts for long-term sensitivity adaptation
+            self._drive_impact_history.append(drive_impact)
+            if len(self._drive_impact_history) > 100:
+                self._drive_impact_history = self._drive_impact_history[-50:]
+            # Periodically adapt baselines (every 20 turns)
+            if self._turn_counter % 20 == 0 and self._turn_counter > 0:
+                dp.adapt_baselines(ds)
+                dp.adapt_sensitivities(ds, self._drive_impact_history[-20:])
+        except Exception as exc:
+            logger.debug("Drive processing skipped: %s", exc)
+
+        # Phase 2, Layer 1: Generate felt sense and derive mood
+        try:
+            self._recent_valences.append(valence)
+            if len(self._recent_valences) > 10:
+                self._recent_valences = self._recent_valences[-10:]
+
+            ds_for_felt = tick.state.get("drive_state") or self._drive_state
+            if ds_for_felt is not None:
+                fsg, fsh, ml = self._get_felt_sense_system()
+                felt = fsg.generate(ds_for_felt, recent_valences=self._recent_valences)
+                fsh.update(felt)
+                mood = ml.label_mood(felt)
+                self._current_mood = mood
+
+                tick.state["felt_sense"] = felt
+                tick.state["mood"] = mood
+                tick.state["felt_sense_trend"] = fsh.trend()
+                setattr(sess, "_felt_sense_snapshot", felt)
+                setattr(sess, "_mood_snapshot", mood)
+        except Exception as exc:
+            logger.debug("Felt-sense processing skipped: %s", exc)
+
+        # Phase 2, Layer 2: Update relational field for current interlocutor
+        try:
+            rf, rp = self._get_relational_system()
+            person_id = sess.session_id or "default"
+            rf.set_interlocutor(person_id)
+            drive_impact_obj = tick.state.get("drive_impact")
+            rel_model = rp.process_turn(
+                rf, person_id, message,
+                valence=valence, salience=salience,
+                drive_impact=drive_impact_obj,
+            )
+            tick.state["relational_model"] = rel_model
+            setattr(sess, "_relational_model_snapshot", rel_model)
+        except Exception as exc:
+            logger.debug("Relational processing skipped: %s", exc)
+
+        # Phase 2, Layer 3: Periodic emergent pattern detection
+        try:
+            self._pattern_turn_counter += 1
+            pf, pd = self._get_pattern_system()
+            if self._pattern_turn_counter % pd.config.detection_interval == 0:
+                pd.detect_patterns(
+                    pf,
+                    drive_state=tick.state.get("drive_state"),
+                    drive_impacts=self._drive_impact_history[-20:] or None,
+                    felt_sense_history=self._felt_sense_history,
+                    relational_field=self._relational_field,
+                    conflicts=tick.state.get("drive_conflicts") or None,
+                )
+            tick.state["pattern_field"] = pf
+            setattr(sess, "_pattern_field_snapshot", pf)
+        except Exception as exc:
+            logger.debug("Pattern detection skipped: %s", exc)
+
+        # Phase 2, Layer 4: Periodic self-model rebuild
+        try:
+            self._self_model_turn_counter += 1
+            smb = self._get_self_model_system()
+            if self._self_model_turn_counter % smb.config.update_interval == 0:
+                self._self_model = smb.build_self_model(
+                    pattern_field=self._pattern_field,
+                    drive_state=tick.state.get("drive_state"),
+                    felt_sense=tick.state.get("felt_sense"),
+                    mood=tick.state.get("mood"),
+                    existing_self_model=self._self_model,
+                )
+            if self._self_model is not None:
+                tick.state["self_model"] = self._self_model
+                setattr(sess, "_self_model_snapshot", self._self_model)
+        except Exception as exc:
+            logger.debug("Self-model update skipped: %s", exc)
+
+        # Phase 2, Layer 5: Narrative construction
+        try:
+            self._narrative_turn_counter += 1
+            nc = self._get_narrative_system()
+            should, trigger = nc.should_update(
+                self_model=self._self_model,
+                previous_narrative=self._narrative,
+                turn_counter=self._narrative_turn_counter,
+            )
+            if should:
+                self._narrative = nc.construct_narrative(
+                    self_model=self._self_model,
+                    pattern_field=self._pattern_field,
+                    drive_state=tick.state.get("drive_state"),
+                    relational_field=self._relational_field,
+                    mood=tick.state.get("mood"),
+                    previous_narrative=self._narrative,
+                    trigger=trigger,
+                )
+            if self._narrative is not None:
+                tick.state["narrative"] = self._narrative
+                setattr(sess, "_narrative_snapshot", self._narrative)
+        except Exception as exc:
+            logger.debug("Narrative construction skipped: %s", exc)
+
         user_turn = TurnRecord(
             role="user",
             content=message,
@@ -800,6 +956,60 @@ class ChatService:
                 for ci in built.items
             ] + extra_due,
         }
+        # Phase 2, Layer 0: Attach drive state to payload
+        try:
+            ds = tick.state.get("drive_state")
+            if ds is not None:
+                payload["drives"] = ds.to_dict()
+                di = tick.state.get("drive_impact")
+                if di is not None:
+                    payload["drives"]["impact"] = di.summary()
+                dc = tick.state.get("drive_conflicts")
+                if dc:
+                    payload["drives"]["conflicts"] = [c.describe() for c in dc]
+        except Exception:
+            pass
+        # Phase 2, Layer 1: Attach felt sense and mood to payload
+        try:
+            mood = tick.state.get("mood")
+            if mood is not None:
+                payload["mood"] = mood.to_dict()
+                payload["mood"]["trend"] = tick.state.get("felt_sense_trend", "stable")
+        except Exception:
+            pass
+        # Phase 2, Layer 2: Attach relational context to payload
+        try:
+            rel_model = tick.state.get("relational_model")
+            if rel_model is not None and rel_model.is_significant(
+                self._get_relational_system()[1].config.significant_interaction_threshold
+            ):
+                payload["relationship"] = rel_model.to_dict()
+        except Exception:
+            pass
+        # Phase 2, Layer 3: Attach emergent patterns to payload
+        try:
+            pf = tick.state.get("pattern_field")
+            if pf is not None and pf.count() > 0:
+                payload["patterns"] = pf.to_dict()
+        except Exception:
+            pass
+        # Phase 2, Layer 4: Attach self-model to payload
+        try:
+            sm = tick.state.get("self_model")
+            if sm is not None:
+                # Exclude blind spots from user-facing payload
+                sm_dict = sm.to_dict()
+                sm_dict.pop("_blind_spots", None)
+                payload["self_model"] = sm_dict
+        except Exception:
+            pass
+        # Phase 2, Layer 5: Attach narrative to payload
+        try:
+            narr = tick.state.get("narrative")
+            if narr is not None and not narr.is_empty:
+                payload["narrative"] = narr.to_dict()
+        except Exception:
+            pass
         if attach_metacog and self._last_metacog_snapshot:
             payload["metacog"] = self._last_metacog_snapshot
             # Persist snapshot into LTM (best-effort) if LTM available via context builder
@@ -1251,7 +1461,154 @@ class ChatService:
         length_factor = min(1.0, len(content.split()) / 30.0)
         emotional_weight = min(1.0, abs(valence))
         return max(salience * 0.5 + length_factor * 0.3 + emotional_weight * 0.2, salience * 0.6)
-    
+
+    # ------------------------------------------------------------------
+    # Phase 2, Layer 0: Drive system helpers
+    # ------------------------------------------------------------------
+
+    def _get_drive_system(self):
+        """Lazy-init and return (DriveState, DriveProcessor) pair."""
+        if self._drive_state is None:
+            from src.cognition.drives import DriveState, DriveProcessor, DriveConfig
+            from src.core.config import get_global_config
+            cfg = get_global_config()
+            drive_cfg = cfg.drives if cfg.drives is not None else DriveConfig()
+            self._drive_processor = DriveProcessor(config=drive_cfg)
+            self._drive_state = DriveState()
+            self._drive_last_turn_time = time.time()
+            logger.info("Drive system initialized: %s", self._drive_state.summary())
+        return self._drive_state, self._drive_processor
+
+    def get_drive_state(self) -> Optional[Dict[str, Any]]:
+        """Public accessor for current drive state (for API/telemetry)."""
+        if self._drive_state is None:
+            return None
+        return self._drive_state.to_dict()
+
+    # ------------------------------------------------------------------
+    # Phase 2, Layer 1: Felt-sense / mood helpers
+    # ------------------------------------------------------------------
+
+    def _get_felt_sense_system(self):
+        """Lazy-init and return (FeltSenseGenerator, FeltSenseHistory, MoodLabeler)."""
+        if self._felt_sense_generator is None:
+            from src.cognition.felt_sense import (
+                FeltSenseGenerator, FeltSenseHistory, MoodLabeler, FeltSenseConfig,
+            )
+            from src.core.config import get_global_config
+            cfg = get_global_config()
+            fs_cfg = cfg.felt_sense if cfg.felt_sense is not None else FeltSenseConfig()
+            self._felt_sense_generator = FeltSenseGenerator(config=fs_cfg)
+            self._felt_sense_history = FeltSenseHistory(max_size=fs_cfg.history_size)
+            self._mood_labeler = MoodLabeler(config=fs_cfg)
+            logger.info("Felt-sense system initialized")
+        return self._felt_sense_generator, self._felt_sense_history, self._mood_labeler
+
+    def get_mood_state(self) -> Optional[Dict[str, Any]]:
+        """Public accessor for current mood (for API/telemetry)."""
+        if self._current_mood is None:
+            return None
+        return self._current_mood.to_dict()
+
+    # ------------------------------------------------------------------
+    # Phase 2, Layer 2: Relational field helpers
+    # ------------------------------------------------------------------
+
+    def _get_relational_system(self):
+        """Lazy-init and return (RelationalField, RelationalProcessor) pair."""
+        if self._relational_field is None:
+            from src.cognition.relational import (
+                RelationalField, RelationalProcessor, RelationalConfig,
+            )
+            from src.core.config import get_global_config
+            cfg = get_global_config()
+            rel_cfg = cfg.relational if cfg.relational is not None else RelationalConfig()
+            self._relational_field = RelationalField()
+            self._relational_processor = RelationalProcessor(config=rel_cfg)
+            logger.info("Relational field initialized")
+        return self._relational_field, self._relational_processor
+
+    def get_relational_state(self) -> Optional[Dict[str, Any]]:
+        """Public accessor for current relational field (for API/telemetry)."""
+        if self._relational_field is None:
+            return None
+        return self._relational_field.to_dict()
+
+    # ------------------------------------------------------------------
+    # Phase 2, Layer 3: Emergent patterns helpers
+    # ------------------------------------------------------------------
+
+    def _get_pattern_system(self):
+        """Lazy-init and return (PatternField, PatternDetector) pair."""
+        if self._pattern_field is None:
+            from src.cognition.patterns import (
+                PatternField, PatternDetector, PatternConfig,
+            )
+            from src.core.config import get_global_config
+            cfg = get_global_config()
+            pat_cfg = cfg.patterns if cfg.patterns is not None else PatternConfig()
+            self._pattern_field = PatternField(max_patterns=pat_cfg.max_patterns)
+            self._pattern_detector = PatternDetector(config=pat_cfg)
+            logger.info("Pattern system initialized")
+        return self._pattern_field, self._pattern_detector
+
+    def get_pattern_state(self) -> Optional[Dict[str, Any]]:
+        """Public accessor for emergent patterns (for API/telemetry)."""
+        if self._pattern_field is None:
+            return None
+        return self._pattern_field.to_dict()
+
+    # ------------------------------------------------------------------
+    # Phase 2, Layer 4: Self-model helpers
+    # ------------------------------------------------------------------
+
+    def _get_self_model_system(self):
+        """Lazy-init and return SelfModelBuilder."""
+        if self._self_model_builder is None:
+            from src.cognition.selfmodel import (
+                SelfModelBuilder, SelfModelConfig,
+            )
+            from src.core.config import get_global_config
+            cfg = get_global_config()
+            sm_cfg = cfg.selfmodel if cfg.selfmodel is not None else SelfModelConfig()
+            self._self_model_builder = SelfModelBuilder(config=sm_cfg)
+            logger.info("Self-model system initialized")
+        return self._self_model_builder
+
+    def get_self_model_state(self) -> Optional[Dict[str, Any]]:
+        """Public accessor for self-model (for API/telemetry).
+
+        Blind spots are excluded from the public-facing dict.
+        """
+        if self._self_model is None:
+            return None
+        d = self._self_model.to_dict()
+        d.pop("_blind_spots", None)
+        return d
+
+    # ------------------------------------------------------------------
+    # Phase 2, Layer 5: Narrative helpers
+    # ------------------------------------------------------------------
+
+    def _get_narrative_system(self):
+        """Lazy-init and return NarrativeConstructor."""
+        if self._narrative_constructor is None:
+            from src.cognition.narrative import (
+                NarrativeConstructor, NarrativeConfig,
+            )
+            from src.core.config import get_global_config
+            cfg = get_global_config()
+            narr_cfg = cfg.narrative if cfg.narrative is not None else NarrativeConfig()
+            self._narrative_constructor = NarrativeConstructor(config=narr_cfg)
+            logger.info("Narrative system initialized")
+        return self._narrative_constructor
+
+    def get_narrative_state(self) -> Optional[Dict[str, Any]]:
+        """Public accessor for narrative (for API/telemetry)."""
+        if self._narrative is None:
+            return None
+        return self._narrative.to_dict()
+
     def _handle_memory_query(self, message: str, session_id: str) -> Optional[str]:
         """
         Handle memory query intent using MemoryQueryParser and Interface.

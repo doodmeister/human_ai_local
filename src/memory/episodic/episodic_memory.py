@@ -293,10 +293,10 @@ class EpisodicMemorySystem(BaseMemorySystem):
         self.storage_path = Path(storage_path or "data/memory_stores/episodic")
         self.collection_name = collection_name
         self.enable_json_backup = enable_json_backup
-                self._embedding_model_name = embedding_model
-                self._lazy_embeddings = lazy_embeddings
-                self._embedding_lock = threading.Lock()
-          # Create directories
+        self._embedding_model_name = embedding_model
+        self._lazy_embeddings = lazy_embeddings
+        self._embedding_lock = threading.Lock()
+        # Create directories
         self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         
