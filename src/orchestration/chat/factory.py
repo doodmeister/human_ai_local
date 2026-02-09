@@ -4,6 +4,7 @@ from .chat_service import ChatService
 from .conversation_session import SessionManager
 from .context_builder import ContextBuilder
 from src.core.config import get_chat_config
+from src.memory.metrics import metrics_registry
 from importlib import import_module
  
 
@@ -26,6 +27,7 @@ def build_chat_service(
     Create a ChatService with injected subsystems if provided.
     Real memory / attention / executive instances can be passed here.
     """
+    metrics_registry.reset()
     memory_system = None
     if stm is None or ltm is None or episodic is None:
         MemorySystem = _lazy_import("src.memory", "MemorySystem")

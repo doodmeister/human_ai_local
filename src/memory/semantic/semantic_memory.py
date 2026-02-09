@@ -1,5 +1,6 @@
 
 from typing import Dict, Any, Optional, List, Sequence
+import threading
 import uuid
 from ..base import BaseMemorySystem
 
@@ -49,7 +50,13 @@ class SemanticMemorySystem(BaseMemorySystem):
     Stores and retrieves factual knowledge as triples (subject, predicate, object).
     """
 
-    def __init__(self, chroma_persist_dir: Optional[str] = None, collection_name: str = "semantic_facts", embedding_model: str = "all-MiniLM-L6-v2"):
+    def __init__(
+        self,
+        chroma_persist_dir: Optional[str] = None,
+        collection_name: str = "semantic_facts",
+        embedding_model: str = "all-MiniLM-L6-v2",
+        lazy_embeddings: bool = True
+    ):
         """
         Initializes the SemanticMemorySystem with ChromaDB.
         Args:
@@ -61,16 +68,14 @@ class SemanticMemorySystem(BaseMemorySystem):
         self.chroma_persist_dir = Path(chroma_persist_dir or "data/memory_stores/chroma_semantic")
         self.collection_name = collection_name
         self.embedding_model: Optional[Any] = None
+        self._embedding_model_name = embedding_model
+        self._lazy_embeddings = lazy_embeddings
+        self._embedding_lock = threading.Lock()
 
         # Initialize embedding model with GPU support if available
-        try:
-            import torch
-            _ensure_sentence_transformers()
-            self.embedding_model = SentenceTransformer(embedding_model)
-            if torch.cuda.is_available():
-                self.embedding_model = self.embedding_model.to("cuda")
-        except Exception as e:
-            raise RuntimeError(f"SemanticMemorySystem failed to load embedding model: {e}") from e
+        if not self._lazy_embeddings:
+            if not self._ensure_embedding_model():
+                raise RuntimeError("SemanticMemorySystem failed to load embedding model")
 
         # Initialize ChromaDB
         self.chroma_client = None
@@ -103,7 +108,9 @@ class SemanticMemorySystem(BaseMemorySystem):
 
 
     def _generate_embedding(self, text: str) -> Optional[List[float]]:
-        if not self.embedding_model or not text:
+        if not text:
+            return None
+        if not self._ensure_embedding_model():
             return None
         try:
             content_str = str(text)
@@ -117,12 +124,34 @@ class SemanticMemorySystem(BaseMemorySystem):
         except Exception:
             return None
 
+    def _ensure_embedding_model(self) -> bool:
+        if self.embedding_model is not None:
+            return True
+        try:
+            _ensure_sentence_transformers()
+        except ImportError:
+            return False
+        if SentenceTransformer is None:
+            return False
+        with self._embedding_lock:
+            if self.embedding_model is not None:
+                return True
+            try:
+                import torch
+                self.embedding_model = SentenceTransformer(self._embedding_model_name)
+                if torch.cuda.is_available():
+                    self.embedding_model = self.embedding_model.to("cuda")
+                return True
+            except Exception:
+                self.embedding_model = None
+                return False
+
     def store_fact(self, subject: str, predicate: str, object_val: Any) -> str:
         """
         Stores a new fact in the vector store.
         Returns the unique fact ID.
         """
-        if not self.collection or not self.embedding_model:
+        if not self.collection or not self._ensure_embedding_model():
             return ""
         fact_id = str(uuid.uuid4())
         fact_text = f"{subject} {predicate} {object_val}"

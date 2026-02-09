@@ -997,7 +997,7 @@ class ChatService:
                         "duration_ms": 0.0,
                     })
                     continue
-                handler_callable = partial(self._get_goal_handler().handle_goal_update, intent, session_id)
+                handler_callable = partial(self._handle_goal_update, intent, session_id)
             elif handler_name == "goal_query":
                 if self._orchestrator is None:
                     execution_log.append({
@@ -1009,7 +1009,7 @@ class ChatService:
                         "duration_ms": 0.0,
                     })
                     continue
-                handler_callable = partial(self._get_goal_handler().handle_goal_query, intent, session_id)
+                handler_callable = partial(self._handle_goal_query, intent, session_id)
             elif handler_name == "memory_query":
                 handler_callable = partial(self._handle_memory_query, message, session_id)
             elif handler_name == "reminder_request":
@@ -1553,8 +1553,17 @@ class ChatService:
     def _summarize_context_items(self, items):
         max_items = self.context_builder.cfg.get("preview_max_items", PREVIEW_MAX_ITEMS)
         max_chars = self.context_builder.cfg.get("preview_max_content_chars", PREVIEW_MAX_CONTENT_CHARS)
+        sorted_items = sorted(
+            enumerate(items),
+            key=lambda pair: (
+                pair[1].rank if pair[1].rank is not None else 1_000_000,
+                pair[1].source_system or "",
+                pair[1].content or "",
+                pair[0],
+            ),
+        )
         out = []
-        for ci in items[:max_items]:
+        for _idx, ci in sorted_items[:max_items]:
             content = ci.content
             if len(content) > max_chars:
                 content = content[: max_chars - 3] + "..."

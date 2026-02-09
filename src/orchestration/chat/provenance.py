@@ -10,7 +10,7 @@ def build_item_provenance(items: List[ContextItem], top_n: int = 5) -> List[Dict
     out: List[Dict[str, Any]] = []
     for ci in items:
         factors = factor_breakdown(ci)
-        composite = ci.scores.get("composite", 0.0)
+        composite = round(ci.scores.get("composite", 0.0), 6)
         partial_sum = sum(f["contribution"] for f in factors)
         prov = {
             "source_id": ci.source_id,

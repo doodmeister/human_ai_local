@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
+import threading
 import uuid
 import sys
 import re
@@ -274,7 +275,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
         collection_name: str = "episodic_memories",
         embedding_model: str = "all-MiniLM-L6-v2",
         enable_json_backup: bool = True,
-        storage_path: Optional[str] = None
+        storage_path: Optional[str] = None,
+        lazy_embeddings: bool = True
     ):
         """
         Initialize Episodic Memory System
@@ -291,21 +293,17 @@ class EpisodicMemorySystem(BaseMemorySystem):
         self.storage_path = Path(storage_path or "data/memory_stores/episodic")
         self.collection_name = collection_name
         self.enable_json_backup = enable_json_backup
+                self._embedding_model_name = embedding_model
+                self._lazy_embeddings = lazy_embeddings
+                self._embedding_lock = threading.Lock()
           # Create directories
         self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         
         # Initialize embedding model
         self.embedding_model = None
-        if _ensure_sentence_transformers() and SentenceTransformer is not None:
-            try:
-                import torch
-                self.embedding_model = SentenceTransformer(embedding_model)
-                if torch.cuda.is_available():
-                    self.embedding_model = self.embedding_model.to("cuda")
-                logger.info(f"Loaded embedding model: {embedding_model} (GPU: {torch.cuda.is_available()})")
-            except Exception as e:
-                logger.warning(f"Failed to load embedding model: {e}")
+        if not self._lazy_embeddings:
+            self._ensure_embedding_model()
         
         # Initialize ChromaDB
         self.chroma_client = None
@@ -405,7 +403,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
     
     def _generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate embedding for text"""
-        if not self.embedding_model:
+        if not self._ensure_embedding_model():
             return None
             
         try:
@@ -413,6 +411,30 @@ class EpisodicMemorySystem(BaseMemorySystem):
         except Exception as e:
             logger.warning(f"Failed to generate embedding: {e}")
             return None
+
+    def _ensure_embedding_model(self) -> bool:
+        if self.embedding_model is not None:
+            return True
+        if not _ensure_sentence_transformers() or SentenceTransformer is None:
+            return False
+        with self._embedding_lock:
+            if self.embedding_model is not None:
+                return True
+            try:
+                import torch
+                self.embedding_model = SentenceTransformer(self._embedding_model_name)
+                if torch.cuda.is_available():
+                    self.embedding_model = self.embedding_model.to("cuda")
+                logger.info(
+                    "Loaded embedding model: %s (GPU: %s)",
+                    self._embedding_model_name,
+                    torch.cuda.is_available()
+                )
+                return True
+            except Exception as e:
+                logger.warning("Failed to load embedding model: %s", e)
+                self.embedding_model = None
+                return False
 
     def store(
         self,

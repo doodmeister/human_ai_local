@@ -3,10 +3,21 @@ from pydantic import BaseModel
 from typing import Optional
 import sys
 import os
+from datetime import datetime
+
+from src.orchestration.agent_singleton import create_agent
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 router = APIRouter()
+
+
+def _get_agent(request: Request):
+    agent = getattr(request.app.state, "agent", None)
+    if agent is None:
+        request.app.state.agent = create_agent()
+        agent = request.app.state.agent
+    return agent
 
 
 # Add /reflect endpoint for manual reflection trigger
@@ -15,10 +26,17 @@ async def reflect(request: Request):
     """
     Trigger agent-level metacognitive reflection and return the report.
     """
-    agent = request.app.state.agent
+    agent = _get_agent(request)
     if not hasattr(agent, "reflect"):
         raise HTTPException(status_code=501, detail="Reflection not implemented in agent.")
     report = await agent.reflect() if callable(getattr(agent.reflect, "__await__", None)) else agent.reflect()
+    if report is None or report == {}:
+        report = {"status": "empty"}
+    if not isinstance(report, dict):
+        report = {"status": "ok", "value": str(report)}
+    report.setdefault("timestamp", datetime.utcnow().isoformat())
+    request.app.state.last_reflection_report = report
+    request.app.state.reflection_report_available = True
     return {"status": "ok", "report": report}
 
 

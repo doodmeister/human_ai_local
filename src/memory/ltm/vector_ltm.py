@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
+import threading
 import types
 
 from ..base import BaseMemorySystem
@@ -432,27 +433,51 @@ class VectorLongTermMemory(BaseMemorySystem):
         self,
         chroma_persist_dir: Optional[str] = None,
         collection_name: str = "ltm_memories",
-        embedding_model: str = "all-MiniLM-L6-v2"
+        embedding_model: str = "all-MiniLM-L6-v2",
+        lazy_embeddings: bool = True
     ):
         """Initialize Vector-only LTM system (ChromaDB only)"""
         self.chroma_persist_dir = Path(chroma_persist_dir or "data/memory_stores/chroma_ltm")
         self.collection_name = collection_name
+        self._embedding_model_name = embedding_model
+        self._lazy_embeddings = lazy_embeddings
+        self._embedding_lock = threading.Lock()
         self.embedding_model = None
-        if _ensure_sentence_transformers() and SentenceTransformer:
-            try:
-                import torch
-                self.embedding_model = SentenceTransformer(embedding_model)
-                if torch.cuda.is_available():
-                    self.embedding_model = self.embedding_model.to("cuda")
-                logger.info(f"LTM loaded embedding model: {embedding_model} (GPU: {torch.cuda.is_available()})")
-            except Exception as e:
-                logger.warning(f"LTM failed to load embedding model {embedding_model}: {e}")
-                self.embedding_model = None
+        if not self._lazy_embeddings:
+            self._ensure_embedding_model()
         self.chroma_client = None
         self.collection = None
         self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
         self._initialize_chromadb()
         logger.info("Vector LTM initialized (vector-only, no fallback)")
+
+    def _ensure_embedding_model(self) -> bool:
+        if self.embedding_model is not None:
+            return True
+        if not _ensure_sentence_transformers() or not SentenceTransformer:
+            return False
+        with self._embedding_lock:
+            if self.embedding_model is not None:
+                return True
+            try:
+                import torch
+                self.embedding_model = SentenceTransformer(self._embedding_model_name)
+                if torch.cuda.is_available():
+                    self.embedding_model = self.embedding_model.to("cuda")
+                logger.info(
+                    "LTM loaded embedding model: %s (GPU: %s)",
+                    self._embedding_model_name,
+                    torch.cuda.is_available()
+                )
+                return True
+            except Exception as e:
+                logger.warning(
+                    "LTM failed to load embedding model %s: %s",
+                    self._embedding_model_name,
+                    e
+                )
+                self.embedding_model = None
+                return False
     
     def _initialize_chromadb(self):
         """Initialize ChromaDB client and collection"""
@@ -509,7 +534,9 @@ class VectorLongTermMemory(BaseMemorySystem):
     
     def _generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate embedding for text content"""
-        if not self.embedding_model or not text:
+        if not text:
+            return None
+        if not self._ensure_embedding_model():
             return None
         
         try:
@@ -546,7 +573,7 @@ class VectorLongTermMemory(BaseMemorySystem):
         """
         Store memory in ChromaDB only (vector-only LTM)
         """
-        if not self.collection or not self.embedding_model:
+        if not self.collection or not self._ensure_embedding_model():
             logger.error("ChromaDB or embedding model not available for LTM store.")
             return False
         try:
@@ -660,7 +687,7 @@ class VectorLongTermMemory(BaseMemorySystem):
         min_importance: float = 0.0
     ) -> List[dict]:
         """Semantic search using vector similarity (ChromaDB only)"""
-        if not self.collection or not self.embedding_model:
+        if not self.collection or not self._ensure_embedding_model():
             return []
         try:
             # Build where clause for filtering

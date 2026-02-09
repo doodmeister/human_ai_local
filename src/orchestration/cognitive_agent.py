@@ -10,6 +10,7 @@ import threading
 import time
 import schedule
 import logging
+import os
 
 from ..core.config import CognitiveConfig
 from ..memory import MemorySystem, MemorySystemConfig
@@ -125,6 +126,7 @@ class CognitiveAgent:
     
     def _initialize_components(self):
         """Initialize all cognitive architecture components"""
+        fast_init = os.getenv("FAST_AGENT_INIT") == "1"
         # Memory systems - use MemorySystemConfig
         memory_config = MemorySystemConfig(
             stm_capacity=self.config.memory.stm_capacity,
@@ -136,6 +138,9 @@ class CognitiveAgent:
             embedding_model=self.config.processing.embedding_model,
             semantic_storage_path=self.config.memory.semantic_storage_path
         )
+        if fast_init:
+            memory_config.use_vector_stm = False
+            memory_config.use_vector_ltm = False
         self.memory = MemorySystem(memory_config)
         
         # Attention mechanism
@@ -143,33 +148,43 @@ class CognitiveAgent:
         self.sensory_processor = SensoryProcessor()
         self.sensory_interface = SensoryInterface(self.sensory_processor)
 
-        # Neural integration manager (DPAD)
-        try:
-            from ..cognition.processing.neural import NeuralIntegrationManager
-            self.neural_integration = NeuralIntegrationManager(
-                cognitive_config=self.config,
-                model_save_path="./data/models/dpad"
-            )
-            logger.info("Neural integration (DPAD) initialized")
-        except ImportError as e:
-            logger.info(f"Neural integration disabled: {e}")
+        if fast_init:
             self.neural_integration = None
 
-        # Dream processor (initialized after memory system and neural integration)
-        self.dream_processor = _lazy_import_dream()(
-            memory_system=self.memory,
-            enable_scheduling=True,
-            consolidation_threshold=0.6,
-            neural_integration_manager=self.neural_integration
-        )
+            class _NoopDreamProcessor:
+                def __init__(self):
+                    self.enable_scheduling = False
 
-        # Performance optimizer (if enabled in config)
-        self.performance_optimizer = None
-        if self.config.performance.enabled:
-            self.performance_optimizer = _lazy_import_optimizer()(
-                config=self.config.performance
+            self.dream_processor = _NoopDreamProcessor()
+            self.performance_optimizer = None
+        else:
+            # Neural integration manager (DPAD)
+            try:
+                from ..cognition.processing.neural import NeuralIntegrationManager
+                self.neural_integration = NeuralIntegrationManager(
+                    cognitive_config=self.config,
+                    model_save_path="./data/models/dpad"
+                )
+                logger.info("Neural integration (DPAD) initialized")
+            except ImportError as e:
+                logger.info(f"Neural integration disabled: {e}")
+                self.neural_integration = None
+
+            # Dream processor (initialized after memory system and neural integration)
+            self.dream_processor = _lazy_import_dream()(
+                memory_system=self.memory,
+                enable_scheduling=True,
+                consolidation_threshold=0.6,
+                neural_integration_manager=self.neural_integration
             )
-            logger.info("Performance optimizer initialized")
+
+            # Performance optimizer (if enabled in config)
+            self.performance_optimizer = None
+            if self.config.performance.enabled:
+                self.performance_optimizer = _lazy_import_optimizer()(
+                    config=self.config.performance
+                )
+                logger.info("Performance optimizer initialized")
         
         logger.info("Cognitive components initialized")
     

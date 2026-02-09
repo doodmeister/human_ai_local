@@ -146,6 +146,7 @@ class STMConfiguration:
     weight_frequency: float = 0.3
     weight_salience: float = 0.3
     enable_gpu: bool = True
+    lazy_embeddings: bool = True
     max_concurrent_operations: int = 4
     connection_timeout: int = 30
     retry_attempts: int = 3
@@ -184,13 +185,15 @@ class STMConfiguration:
 class EmbeddingManager:
     """Manages embedding model lifecycle and operations"""
     
-    def __init__(self, model_name: str, enable_gpu: bool = True):
+    def __init__(self, model_name: str, enable_gpu: bool = True, *, lazy_init: bool = True):
         self.model_name = model_name
         self.enable_gpu = enable_gpu
         self._model: Optional[SentenceTransformer] = None
         self._lock = threading.Lock()
         self._device = None
-        self._initialize_model()
+        self._lazy_init = lazy_init
+        if not self._lazy_init:
+            self._initialize_model()
     
     def _initialize_model(self):
         """Initialize the embedding model with error handling"""
@@ -218,10 +221,12 @@ class EmbeddingManager:
     
     def encode(self, text: str) -> Optional[List[float]]:
         """Generate embedding for text with error handling"""
-        if not self._model or not text:
+        if not text:
             return None
         
         try:
+            if self._model is None:
+                self._initialize_model()
             with self._lock:
                 embedding = self._model.encode(text.strip())
                 
@@ -238,6 +243,11 @@ class EmbeddingManager:
     
     def get_device(self) -> str:
         """Get the device the model is running on"""
+        if self._model is None:
+            try:
+                self._initialize_model()
+            except Exception:
+                return "cpu"
         return self._device or "cpu"
     
     def get_model_name(self) -> str:
@@ -403,12 +413,13 @@ class VectorShortTermMemory:
         self.config = config or STMConfiguration()
         self._disable_storage = disable_storage
         if not self._disable_storage:
-            self._validate_dependencies()
+            self._validate_dependencies(lazy_embeddings=self.config.lazy_embeddings)
         # Initialize components (embedding manager still needed for activation fairness if used)
         self.persist_dir = Path(self.config.chroma_persist_dir or "data/memory_stores/chroma_stm")
         self.embedding_manager = EmbeddingManager(
             self.config.embedding_model,
-            self.config.enable_gpu
+            self.config.enable_gpu,
+            lazy_init=self.config.lazy_embeddings
         ) if not disable_storage else None
         self.chroma_manager = ChromaDBManager(
             self.persist_dir,
@@ -425,18 +436,19 @@ class VectorShortTermMemory:
         
         logger.info(f"Vector STM initialized successfully (capacity={self.config.capacity})")
     
-    def _validate_dependencies(self):
+    def _validate_dependencies(self, *, lazy_embeddings: bool = False) -> None:
         """Validate that required dependencies are available"""
-        _ensure_sentence_transformers()
-        if not HAS_SENTENCE_TRANSFORMERS:
-            raise VectorSTMConfigError(
-                "sentence-transformers is required. Install with: pip install sentence-transformers"
-            )
-        
         if not HAS_CHROMADB:
             raise VectorSTMConfigError(
                 "chromadb is required. Install with: pip install chromadb"
             )
+
+        if not lazy_embeddings:
+            _ensure_sentence_transformers()
+            if not HAS_SENTENCE_TRANSFORMERS:
+                raise VectorSTMConfigError(
+                    "sentence-transformers is required. Install with: pip install sentence-transformers"
+                )
     
     def _safe_metadata_to_memory_item(self, memory_id: str, metadata: Dict[str, Any], content: str = "") -> MemoryItem:
         """Convert ChromaDB metadata to MemoryItem with comprehensive validation"""

@@ -71,6 +71,7 @@ class MemorySystemConfig:
     embedding_model: str = "all-MiniLM-L6-v2"
     semantic_storage_path: Optional[str] = None
     max_concurrent_operations: int = 4
+    lazy_embeddings: bool = True
     consolidation_threshold_importance: float = 0.6
     consolidation_threshold_emotional: float = 0.5
     consolidation_age_minutes: int = 30
@@ -238,7 +239,8 @@ class MemorySystem:
                 chroma_persist_dir=self._config.chroma_persist_dir,
                 embedding_model=self._config.embedding_model,
                 capacity=self._config.stm_capacity,
-                enable_gpu=getattr(self._config, 'enable_gpu', True)
+                enable_gpu=getattr(self._config, 'enable_gpu', True),
+                lazy_embeddings=self._config.lazy_embeddings
             )
             self._stm = VectorShortTermMemory(stm_config)
             
@@ -246,7 +248,8 @@ class MemorySystem:
             if self._config.use_vector_ltm:
                 self._ltm = VectorLongTermMemory(
                     chroma_persist_dir=self._config.chroma_persist_dir,
-                    embedding_model=self._config.embedding_model
+                    embedding_model=self._config.embedding_model,
+                    lazy_embeddings=self._config.lazy_embeddings
                 )
             else:
                 raise MemorySystemError("LTM initialization failed: VectorLTM must be used")
@@ -254,7 +257,8 @@ class MemorySystem:
             # Initialize Episodic Memory
             self._episodic = EpisodicMemorySystem(
                 chroma_persist_dir=self._config.chroma_persist_dir,
-                embedding_model=self._config.embedding_model
+                embedding_model=self._config.embedding_model,
+                lazy_embeddings=self._config.lazy_embeddings
             )
             
             # Initialize Semantic Memory (using ChromaDB)
@@ -266,7 +270,8 @@ class MemorySystem:
                     from .semantic.semantic_memory import SemanticMemorySystem as _SemanticMemorySystem
                     self._semantic = _SemanticMemorySystem(
                         chroma_persist_dir=self._config.chroma_persist_dir or "data/memory_stores/chroma_semantic",
-                        embedding_model=self._config.embedding_model
+                        embedding_model=self._config.embedding_model,
+                        lazy_embeddings=self._config.lazy_embeddings
                     )
                 except Exception as e:
                     self._semantic = None
