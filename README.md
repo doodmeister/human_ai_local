@@ -32,6 +32,14 @@ Complete cognitive framework with:
 - **Scheduling**: Google OR-Tools CP-SAT constraint solver
 - **Learning**: Outcome tracking, A/B testing, 4 ML models
 
+### Phase 2 Cognitive Layers (Implemented)
+- **Layer 0: Drives** with implicit learning and internal conflict detection
+- **Layer 1: Felt Sense** with mood derivation
+- **Layer 2: Relational Field** for relationship-aware cognition
+- **Layer 3: Emergent Patterns** including Big Five descriptions
+- **Layer 4: Self-Model** with blind spots and self-discovery
+- **Layer 5: Narrative** for identity synthesis and context injection
+
 ### API Endpoints
 - **Chat**: `/agent/chat` - Conversational interface with memory
 - **Memory**: `/agent/memory/*` - STM/LTM storage and retrieval
@@ -253,7 +261,13 @@ pytest tests/test_memory_*.py        # Memory systems
 pytest --cov=src --cov-report=html
 ```
 
-**200+ tests** covering memory, executive, chat, API, and integration scenarios.
+**350+ tests** covering memory, executive, chat, API, and integration scenarios.
+
+Phase 2 regression suite (Layers 0-5):
+```bash
+pytest tests/test_drive_system.py tests/test_felt_sense_system.py tests/test_relational_field.py \
+    tests/test_emergent_patterns.py tests/test_self_model.py tests/test_narrative.py
+```
 
 ---
 
@@ -285,7 +299,7 @@ human_ai_local/
 │   ├── attention/         # Attention mechanism
 │   ├── interfaces/        # API endpoints
 │   └── core/              # Configuration
-├── tests/                 # 200+ tests
+├── tests/                 # 350+ tests
 ├── scripts/
 │   ├── chainlit_app/      # Chainlit chat UI (recommended)
 │   └── george_streamlit_chat.py  # Legacy Streamlit UI
