@@ -122,10 +122,14 @@ Completed:
 4. Added non-default smoke and persistence tiers.
 5. Pruned the most obviously superseded legacy files, including zero-byte test files and older integration files replaced by `fixed` or `new` variants.
 6. Removed the remaining zero-test scenario demo scripts that overlapped with the new smoke tier.
+7. Removed additional scenario demo-style pytest files that were presentation-oriented and overlapped with the curated smoke coverage.
+8. Removed generic integration demo files that overlapped with the curated contract and smoke suites, leaving the more specialized vector, semantic, proactive recall, and neural integration tests as legacy/manual coverage.
+9. Removed top-level script-style legacy tests that were diagnostic probes or walkthroughs rather than durable assertion-driven tests.
+10. Trimmed remaining top-level legacy memory files to remove manual `__main__` runners and obvious demo-only scaffolding while preserving assertion-based coverage.
 
 Next:
 
-1. Continue pruning legacy files that are redundant but not yet zero-risk obvious.
+1. Review whether the remaining print-heavy episodic and LTM legacy tests should be rewritten into smaller focused modules or simply left as manual legacy coverage.
 2. Decide whether any remaining legacy suites should be archived outside `tests/` entirely.
 
 ## Additional Non-Default Tests
