@@ -1,6 +1,6 @@
 # Test Organization
 
-This directory contains both the active curated test suites and the older legacy suites that are being phased out of the default developer workflow.
+This directory now contains only the active test suites and a small set of focused specialized memory tests.
 
 ## ⚠️ Important: Test File Naming Convention
 
@@ -36,14 +36,18 @@ Smoke tests exercise broader paths, such as the full agent processing loop, but 
 ### `persistence/` - Non-Default Storage Checks
 Persistence tests verify reload and storage behavior directly, such as episodic JSON-backed persistence.
 
-## Legacy Suites
+## Focused Specialized Tests
 
-These remain in the repository for selective validation and migration work, but they are not part of the default `pytest -q` run:
+These remain under `tests/` because they are still assertion-driven and useful for targeted validation, but they are not part of the default `pytest -q` run:
 
-- `integration/`
-- `scenarios/`
-- older top-level `test_*.py` files
-- many historical `unit/` files
+- `test_enhanced_ltm_comprehensive.py`
+- `test_episodic_memory_integration.py`
+
+## Archived Manual Legacy Tests
+
+Manual-only legacy suites and older exploratory test files were moved out of `tests/` to:
+
+- `archived_tests/manual_legacy/`
 
 ## Running Tests
 
@@ -59,10 +63,17 @@ pytest tests/smoke -q
 pytest tests/persistence -q
 ```
 
-### Run Legacy Suites Intentionally
+### Run Focused Specialized Files
 ```bash
-pytest tests/integration -q
-pytest tests/scenarios -q
+pytest tests/test_enhanced_ltm_comprehensive.py -q
+pytest tests/test_episodic_memory_integration.py -q
+```
+
+### Run Archived Legacy Material Intentionally
+```bash
+pytest archived_tests/manual_legacy/integration -q
+pytest archived_tests/manual_legacy/scenarios -q
+pytest archived_tests/manual_legacy/unit -q
 ```
 
 ### Run A Specific File
@@ -77,7 +88,8 @@ pytest tests/persistence/test_episodic_json_persistence.py -q
 - New default developer tests should usually go in `contracts/`.
 - Broader system checks that are still valuable but slower should go in `smoke/`.
 - Storage and reload verification should go in `persistence/`.
-- Do not add new demo-style scripts as `test_*.py` files in legacy directories unless they are intended for pytest discovery.
+- Focused specialized tests that are still maintained can live at the top level of `tests/`.
+- Do not add new demo-style scripts as `test_*.py` files. Historical manual-only material belongs under `archived_tests/manual_legacy/`, not in `tests/`.
 
 ## Contributing New Tests
 

@@ -126,11 +126,12 @@ Completed:
 8. Removed generic integration demo files that overlapped with the curated contract and smoke suites, leaving the more specialized vector, semantic, proactive recall, and neural integration tests as legacy/manual coverage.
 9. Removed top-level script-style legacy tests that were diagnostic probes or walkthroughs rather than durable assertion-driven tests.
 10. Trimmed remaining top-level legacy memory files to remove manual `__main__` runners and obvious demo-only scaffolding while preserving assertion-based coverage.
+11. Rewrote the remaining top-level LTM and episodic legacy tests into focused assertion-driven modules with fake-backed or constructor-neutralized dependencies, then validated them independently.
+12. Archived the remaining manual-only legacy suites and older exploratory top-level tests under `archived_tests/manual_legacy/`, leaving only active suites and maintained specialized tests under `tests/`.
 
 Next:
 
-1. Review whether the remaining print-heavy episodic and LTM legacy tests should be rewritten into smaller focused modules or simply left as manual legacy coverage.
-2. Decide whether any remaining legacy suites should be archived outside `tests/` entirely.
+1. Optional future work only: decide whether the two remaining specialized top-level memory files should eventually move into a named active tier.
 
 ## Additional Non-Default Tests
 

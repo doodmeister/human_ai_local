@@ -233,6 +233,7 @@ def test_consolidation_candidates_and_statistics_reflect_memory_state(tmp_path, 
 
     before = system.retrieve_memory(primary_id)
     assert before is not None
+    before_consolidation = before.consolidation_strength
 
     assert system.consolidate_memory(primary_id, strength_increment=0.3) is True
 
@@ -241,7 +242,7 @@ def test_consolidation_candidates_and_statistics_reflect_memory_state(tmp_path, 
     stats = system.get_memory_statistics()
 
     assert after is not None
-    assert after.consolidation_strength > before.consolidation_strength
+    assert after.consolidation_strength > before_consolidation
     assert {candidate.id for candidate in candidates} == {primary_id, neutral_id}
     assert stats["total_memories"] == 3
     assert stats["life_period_count"] == 3
