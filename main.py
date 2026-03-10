@@ -136,7 +136,8 @@ def _run_ui(*, port: int, with_backend: bool, api_host: str, api_port: int) -> i
                     api_host,
                     "--port",
                     str(api_port),
-                ]
+                ],
+                text=True,
             )
 
             # Best-effort wait for health endpoint.
@@ -188,7 +189,8 @@ def _run_chainlit(*, port: int, with_backend: bool, api_host: str, api_port: int
                     api_host,
                     "--port",
                     str(api_port),
-                ]
+                ],
+                text=True,
             )
             health_url = f"http://{api_host}:{api_port}/health"
             for _ in range(30):

@@ -12,11 +12,13 @@ from src.memory.consolidation.consolidator import ConsolidationPolicy, MemoryCon
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from src.memory.metrics import metrics_registry  # noqa: F401
 from src.orchestration.agent_singleton import create_agent
-from src.orchestration.chat import ChatService, ContextBuilder, SessionManager
+
+if False:  # pragma: no cover
+    from src.orchestration.chat import ChatService
 
 _session_manager: SessionManager | None = None
 _context_builder: ContextBuilder | None = None
-_chat_service: ChatService | None = None
+_chat_service: "ChatService" | None = None
 _agent_instance: Any | None = None
 _prospective = get_inmemory_prospective_memory()
 
@@ -32,9 +34,13 @@ def get_prospective():
     return _prospective
 
 
-def get_chat_service() -> ChatService:
+def get_chat_service() -> "ChatService":
     """Lazy initialization of ChatService with agent support."""
     global _session_manager, _context_builder, _chat_service
+
+    from src.orchestration.chat.context_builder import ContextBuilder
+    from src.orchestration.chat.conversation_session import SessionManager
+    from src.orchestration.chat.chat_service import ChatService
 
     if _chat_service is not None:
         return _chat_service

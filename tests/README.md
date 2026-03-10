@@ -1,6 +1,6 @@
 # Test Organization
 
-This directory contains all tests for the Human-AI Cognition Framework, organized into logical categories for easy navigation and maintenance.
+This directory contains both the active curated test suites and the older legacy suites that are being phased out of the default developer workflow.
 
 ## ⚠️ Important: Test File Naming Convention
 
@@ -16,100 +16,75 @@ Debug and one-off scripts have been removed from this directory. If you need tem
 debugging scripts, create them in a `scratch/` subdirectory (gitignored) or use
 descriptive names like `debug_chromadb.py` which are excluded by `.gitignore`.
 
-## Directory Structure
+## Active Test Tiers
 
-### 📦 `unit/` - Unit Tests
-Tests for individual components in isolation:
-- `test_core.py` - Core system unit tests
-- `test_memory_components.py` - Individual memory component tests
-- `test_memory.py` - Memory system unit tests
-- `test_memory_only.py` - Memory-only functionality tests
-- `test_stm_isolated.py` - Short-term memory isolation tests
-- `test_stm_fix.py` - STM specific fixes and tests
-- `test_dummy_classes.py` - Mock/dummy class testing
-- `test_import.py`, `test_imports.py` - Import validation tests
-- `test_pytorch_compatibility.py` - PyTorch compatibility tests
+### `contracts/` - Default Fast Suite
+Contract tests for stable, high-value behavior.
 
-### 🔗 `integration/` - Integration Tests
-Tests for cross-component interactions and system integration:
-- `test_basic_integration.py` - Basic cognitive agent integration
-- `test_cognitive_integration.py` - Cognitive system integration
-- `test_attention_integration.py` - Attention mechanism integration
-- `test_memory_integration.py`, `test_memory_integration_new.py` - Memory system integration
-- `test_sensory_integration.py` - Sensory processing integration
-- `test_dpad_integration_fixed.py`, `test_dapd_integration.py` - DPAD neural network integration
-- `test_lshn_integration.py` - LSHN neural network integration
-- `test_vector_stm_integration.py` - Vector STM integration
-- `test_vector_ltm.py` - Vector LTM integration
-- `test_performance_optimization.py` - Performance optimization integration
+This is the default pytest target configured in `pytest.ini`.
 
-### 🧠 `cognitive/` - Cognitive Behavior Tests
-Tests for high-level cognitive behaviors and complete system demonstrations:
-- `test_attention_demo.py` - Attention mechanism demonstration
-- `test_cognitive_working.py` - Working cognitive system tests
-- `test_final_integration_demo.py` - Complete system demonstration
-- `test_enhanced_sensory_cognitive.py` - Enhanced cognitive processing
-- `test_dream_consolidation_pipeline.py` - Dream consolidation testing
-- `test_lshn_neural_replay.py` - Neural replay cognitive testing
-- `test_complete_pipeline.py` - Complete cognitive pipeline
-- `test_quick_pipeline.py` - Quick cognitive pipeline test
+Covers:
+- intent classification
+- context building
+- chat service behavior
+- memory system routing
+- canonical API contracts
 
-### 🐛 `debug/` - Debug & Development Tests
-Tests for debugging, development, and troubleshooting:
-- `test_debug.py` - Main debug utilities
-- `test_async_debug.py`, `test_sync_debug.py` - Async/sync debugging
-- `test_attention_debug.py` - Attention mechanism debugging
-- `test_bypass.py` - Bypass testing for development
-- `test_simple.py` - Simple functionality tests
-- `test_status_sync.py` - Status synchronization tests
-- `test_sensory_processing.py` - Sensory processing debugging
-- `test_complete_pipeline_bak.py` - Backup pipeline tests
+### `smoke/` - Non-Default Orchestration Checks
+Smoke tests exercise broader paths, such as the full agent processing loop, but stay out of the default fast suite.
+
+### `persistence/` - Non-Default Storage Checks
+Persistence tests verify reload and storage behavior directly, such as episodic JSON-backed persistence.
+
+## Legacy Suites
+
+These remain in the repository for selective validation and migration work, but they are not part of the default `pytest -q` run:
+
+- `integration/`
+- `scenarios/`
+- older top-level `test_*.py` files
+- many historical `unit/` files
 
 ## Running Tests
 
-### Run All Tests
+### Default Fast Suite
 ```bash
-# From project root
-pytest tests/ -v
+pytest -q
 ```
 
-### Run Tests by Category
+### Run By Tier
 ```bash
-# Unit tests only
-pytest tests/unit/ -v
-
-# Integration tests only
-pytest tests/integration/ -v
-
-# Cognitive behavior tests only
-pytest tests/cognitive/ -v
-
-# Debug tests only
-pytest tests/debug/ -v
+pytest tests/contracts -q
+pytest tests/smoke -q
+pytest tests/persistence -q
 ```
 
-### Run Specific Test Files
+### Run Legacy Suites Intentionally
 ```bash
-# Run a specific integration test
-pytest tests/integration/test_basic_integration.py -v
-
-# Run a specific cognitive test
-pytest tests/cognitive/test_final_integration_demo.py -v
+pytest tests/integration -q
+pytest tests/scenarios -q
 ```
 
-## Test Categories Explained
+### Run A Specific File
+```bash
+pytest tests/contracts/test_api_contracts.py -q
+pytest tests/smoke/test_cognitive_agent_smoke.py -q
+pytest tests/persistence/test_episodic_json_persistence.py -q
+```
 
-- **Unit Tests**: Test individual components in isolation to ensure they work correctly on their own
-- **Integration Tests**: Test how different components work together and validate cross-component functionality
-- **Cognitive Tests**: Test complete cognitive behaviors and demonstrate the system's human-like cognitive capabilities
-- **Debug Tests**: Development and troubleshooting tests that help with debugging and system validation
+## Placement Guidance
+
+- New default developer tests should usually go in `contracts/`.
+- Broader system checks that are still valuable but slower should go in `smoke/`.
+- Storage and reload verification should go in `persistence/`.
+- Do not add new demo-style scripts as `test_*.py` files in legacy directories unless they are intended for pytest discovery.
 
 ## Contributing New Tests
 
-When adding new tests, place them in the appropriate directory:
-- Individual component tests → `unit/`
-- Cross-component interaction tests → `integration/`
-- High-level cognitive behavior tests → `cognitive/`
-- Development/debugging utilities → `debug/`
+When adding new tests, prefer the curated tiers first:
+
+- stable public behavior → `contracts/`
+- broader system path → `smoke/`
+- persistence behavior → `persistence/`
 
 Follow the naming convention: `test_[component_or_feature].py`

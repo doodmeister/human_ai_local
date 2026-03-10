@@ -249,25 +249,31 @@ USE_VECTOR_PROSPECTIVE=0  # Set to 1 for semantic reminders
 ## 🧪 Testing
 
 ```bash
-# Run all tests
-pytest
+# Default fast suite
+pytest -q
 
-# Run specific suites
-pytest tests/test_chat_*.py          # Chat system
-pytest tests/test_executive_*.py     # Executive functions
-pytest tests/test_memory_*.py        # Memory systems
+# Curated contract suite only
+pytest tests/contracts -q
 
-# With coverage
-pytest --cov=src --cov-report=html
+# Non-default smoke coverage
+pytest tests/smoke -q
+
+# Non-default persistence coverage
+pytest tests/persistence -q
+
+# Legacy tests, only when intentionally validating older paths
+pytest tests/integration -q
+pytest tests/scenarios -q
 ```
 
-**350+ tests** covering memory, executive, chat, API, and integration scenarios.
+Current test tiers:
 
-Phase 2 regression suite (Layers 0-5):
-```bash
-pytest tests/test_drive_system.py tests/test_felt_sense_system.py tests/test_relational_field.py \
-    tests/test_emergent_patterns.py tests/test_self_model.py tests/test_narrative.py
-```
+- `tests/contracts/`: default fast suite for core contracts. This is what `pytest -q` runs.
+- `tests/smoke/`: broader orchestration checks that should stay out of the default fast loop.
+- `tests/persistence/`: storage and reload behavior checks.
+- `tests/integration/`, `tests/scenarios/`, and older top-level test files: legacy/manual suites retained for migration and selective validation.
+
+The default suite is intentionally small and fast. It covers intent classification, context assembly, chat service behavior, memory routing, and canonical API contracts without pulling in the full legacy test surface.
 
 ---
 
@@ -299,7 +305,7 @@ human_ai_local/
 │   ├── attention/         # Attention mechanism
 │   ├── interfaces/        # API endpoints
 │   └── core/              # Configuration
-├── tests/                 # 350+ tests
+├── tests/                 # Contract, smoke, persistence, and legacy suites
 ├── scripts/
 │   ├── chainlit_app/      # Chainlit chat UI (recommended)
 │   └── george_streamlit_chat.py  # Legacy Streamlit UI
