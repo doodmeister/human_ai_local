@@ -53,34 +53,34 @@ Manual-only legacy suites and older exploratory test files were moved out of `te
 
 ### Default Fast Suite
 ```bash
-pytest -q
+python -m pytest -q
 ```
 
 ### Run By Tier
 ```bash
-pytest tests/contracts -q
-pytest tests/smoke -q
-pytest tests/persistence -q
+python -m pytest tests/contracts -q
+python -m pytest tests/smoke -q
+python -m pytest tests/persistence -q
 ```
 
 ### Run Focused Specialized Files
 ```bash
-pytest tests/test_enhanced_ltm_comprehensive.py -q
-pytest tests/test_episodic_memory_integration.py -q
+python -m pytest tests/test_enhanced_ltm_comprehensive.py -q
+python -m pytest tests/test_episodic_memory_integration.py -q
 ```
 
 ### Run Archived Legacy Material Intentionally
 ```bash
-pytest archived_tests/manual_legacy/integration -q
-pytest archived_tests/manual_legacy/scenarios -q
-pytest archived_tests/manual_legacy/unit -q
+python -m pytest archived_tests/manual_legacy/integration -q
+python -m pytest archived_tests/manual_legacy/scenarios -q
+python -m pytest archived_tests/manual_legacy/unit -q
 ```
 
 ### Run A Specific File
 ```bash
-pytest tests/contracts/test_api_contracts.py -q
-pytest tests/smoke/test_cognitive_agent_smoke.py -q
-pytest tests/persistence/test_episodic_json_persistence.py -q
+python -m pytest tests/contracts/test_api_contracts.py -q
+python -m pytest tests/smoke/test_cognitive_agent_smoke.py -q
+python -m pytest tests/persistence/test_episodic_json_persistence.py -q
 ```
 
 ## Placement Guidance

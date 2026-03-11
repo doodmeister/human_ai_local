@@ -1,14 +1,22 @@
-# Welcome to Chainlit! 🚀🤖
+# George
 
-Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
+George is a cognitive AI workspace built around persistent memory, attention, executive planning, and reflective runtime behavior.
 
-## Useful Links 🔗
+## Start Here
 
-- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
-- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
+- Run the backend with `python main.py api`
+- Or launch the UI and backend together with `python main.py chainlit --with-backend`
+- The default API base is `http://127.0.0.1:8000`
 
-We can't wait to see what you create with Chainlit! Happy coding! 💻😊
+## What This UI Exposes
 
-## Welcome screen
+- Chat grounded in working, long-term, semantic, and prospective memory
+- Goal and reminder workflows backed by the canonical FastAPI runtime
+- Reflection, consolidation, and learning-oriented control surfaces
+- Runtime-configurable LLM provider settings
 
-To modify the welcome screen, edit the `chainlit.md` file at the root of your project. If you do not want a welcome screen, just leave this file empty.
+## Notes
+
+- Chainlit is the primary UI
+- `python main.py ui` still launches the legacy Streamlit interface
+- Current architecture and verification guidance live in `README.md` and `phase3.md`

@@ -5,6 +5,8 @@ Coding standards, domain knowledge, and preferences that AI should follow.
 All code writte in python, terminal is bash running on windows 11
 run all commands in the terminal without prompting to continue
 
+This file is supplementary background material. For the current runtime shape, startup commands, and verification lanes, prefer `README.md`, `phase3.md`, and `.github/copilot-instructions.md`.
+
 # AI Development Guide: Human-AI Cognition Project
 
 > **Project Vision**: Creating a biologically-inspired cognitive architecture that simulates human-like memory, attention, and reasoning capabilities in AI systems.
@@ -87,27 +89,30 @@ The Human-AI Cognition project is an ambitious open-source framework designed to
 
 ### Core Technologies
 - **Python 3.12** - Primary development language
-- **AWS Bedrock** - LLM processing (Claude models)
-- **OpenSearch** - Vector database for memory storage
+- **FastAPI** - Canonical backend interface surface
+- **Chainlit** - Canonical chat UI
+- **Streamlit** - Legacy UI retained for compatibility
+- **Pluggable LLM providers** - Runtime-configurable provider abstraction
 - **SentenceTransformers** - Text embedding generation
-- **Streamlit** - Dashboard and visualization
-- **Terraform** - Infrastructure as Code
-- **boto3** - AWS integration
+- **Chroma/vector-backed memory stores** - Configurable persistence for memory systems
 
 ### Key Architecture Patterns
 - **Retrieval-Augmented Generation (RAG)** - Context building from memory
 - **Vector Similarity Search** - Semantic memory retrieval
-- **Event-Driven Processing** - Lambda-based consolidation cycles
+- **Facade + collaborator extraction** - Thin public surfaces over focused runtime services
 - **Modular Design** - Loosely coupled cognitive components
 
-### Current Development State (Updated 2025-08)
+### Current Development State (Updated 2026-03)
 - ✅ Core cognitive loop with STM/LTM/Attention integration
 - ✅ ChatService with deterministic context + provenance
 - ✅ Memory embedding & retrieval across STM/LTM/Episodic
 - ✅ Dream-state consolidation pipeline (baseline) active
 - ✅ DPAD & LSHN neural components integrated (baseline modes)
 - ✅ Metacognitive adaptive layer (snapshots, dynamic interval, adaptive retrieval & thresholds)
-- 📋 Planned: Extended multi-modal ingestion & advanced executive planning heuristics
+- ✅ Runtime composition consolidated behind `src/orchestration/runtime/`
+- ✅ `ChatService`, `MemorySystem`, and `CognitiveAgent` reduced to stable facades over extracted collaborators
+- ✅ Canonical API routers normalized onto shared request dependency helpers
+- 📋 Planned: Broader test-suite reconciliation and follow-on learning/runtime improvements
 
 ---
 
@@ -250,24 +255,28 @@ The Human-AI Cognition project is an ambitious open-source framework designed to
 
 ### Environment Setup
 ```bash
-# Clone and setup environment
-git clone <repository>
-cd human_ai_cognition_github
+# Setup environment
+cd human_ai_local
 pip install -r requirements.txt
+python main.py api
+```
 
 
 
 ### Development Workflow
-1. **Local Testing**: Use `python cognition/main.py` for interactive testing
-2. **Memory Debugging**: Utilize Streamlit dashboard for memory visualization
-3. **Component Testing**: Run individual module tests in isolation
-4. **Integration Testing**: Full cognitive loop validation
+1. **Canonical Backend**: Use `python main.py api` for the FastAPI backend
+2. **Primary UI**: Use `python main.py chainlit` for interactive testing
+3. **Legacy UI**: Use `python main.py ui` only when working on the older Streamlit surface
+4. **Fast Verification**: Use `python -m pytest -q` for the default contract lane
+5. **Broader Validation**: Use `python -m pytest tests -q -c /dev/null` when checking wider integration behavior
 
 ### Key Files to Understand
-- `cognition/cognitive_agent.py` - Main orchestration logic
-- `memory/` - All memory system implementations
-- `cognition/rag_utils.py` - Context building and prompt engineering
-- `cognition/claude_client.py` - LLM integration wrapper
+- `main.py` - user-facing entrypoints
+- `src/orchestration/runtime/` - canonical runtime/bootstrap layer
+- `src/orchestration/cognitive_agent.py` - cognitive agent facade
+- `src/orchestration/chat/` - chat orchestration collaborators
+- `src/memory/` - memory facade and services
+- `src/interfaces/api/` - mounted API routers
 
 ---
 

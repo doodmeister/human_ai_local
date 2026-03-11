@@ -23,4 +23,4 @@ Welcome to **George**, a cognitive AI assistant with working memory, long-term m
 
 **Settings** — click the ⚙️ icon to change LLM provider, model, salience threshold, and toggle memory/attention.
 
-> Make sure the API backend is running: `python main.py api`
+> Make sure the API backend is running with `python main.py api`, or launch Chainlit with `python main.py chainlit --with-backend`.

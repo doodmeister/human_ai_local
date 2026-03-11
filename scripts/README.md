@@ -1,11 +1,34 @@
-# George: Human-AI Cognition Streamlit Interfaces
+# George: Human-AI Cognition UI Scripts
 
-This directory contains world-class Streamlit interfaces for interacting with George, the Human-AI Cognition Agent. These interfaces showcase the full capabilities of the biologically-inspired cognitive architecture.
+This directory contains the project UI entry scripts and supporting assets.
 
-## 🧠 Available Interfaces
+The canonical user-facing UI is Chainlit via `python main.py chainlit`.
 
-### 1. 🎯 Standard Interface (`george_streamlit.py`)
-**Recommended for daily use**
+The Streamlit entrypoint remains available via `python main.py ui`, but it should be treated as a legacy interface.
+
+## Available Interfaces
+
+### 1. Chainlit (`scripts/chainlit_app/`)
+Recommended for current interactive use.
+
+- Started with `python main.py chainlit`
+- Can also launch the backend automatically with `python main.py chainlit --with-backend`
+- Uses the canonical FastAPI backend from `python main.py api`
+
+### 2. Streamlit (`george_streamlit_chat.py`)
+Legacy UI kept for compatibility and manual exploration.
+
+- Started with `python main.py ui`
+- Can also launch the backend automatically with `python main.py ui --with-backend`
+
+### 3. Older Streamlit variants
+Additional Streamlit files in this directory should be treated as legacy/development surfaces rather than the primary user path.
+
+## Legacy Streamlit Features
+
+The Streamlit interfaces still expose a broad slice of the system:
+
+### Standard Interface (`george_streamlit.py`)
 - Clean, focused chat interface
 - Real-time cognitive status monitoring  
 - Executive goal creation and management
@@ -21,8 +44,8 @@ This directory contains world-class Streamlit interfaces for interacting with Ge
 - Memory context visualization
 - Cognitive break functionality
 
-### 2. 🌟 Enhanced Interface (`george_streamlit_enhanced.py`)
-**Full-featured development interface**
+### Enhanced Interface (`george_streamlit_enhanced.py`)
+Full-featured development interface.
 - Comprehensive cognitive analytics dashboard
 - Executive functioning control panel
 - Memory system explorer
@@ -40,31 +63,40 @@ This directory contains world-class Streamlit interfaces for interacting with Ge
 
 ## 🚀 Quick Start
 
-### Option 1: Use the Startup Scripts (Recommended)
+### Option 1: Canonical UI (Recommended)
 ```bash
-# From the main project directory
+# Chainlit only
+python main.py chainlit
 
-# Single entrypoint
-python main.py ui
+# Chainlit with backend auto-start
+python main.py chainlit --with-backend
 ```
 
-### Option 2: Direct Launch
+### Option 2: Legacy Streamlit UI
 ```bash
-# Install requirements
+# Streamlit only
+python main.py ui
+
+# Streamlit with backend auto-start
+python main.py ui --with-backend
+```
+
+### Option 3: Direct Launch
+```bash
+# Install legacy Streamlit requirements
 pip install streamlit plotly pandas requests
 
-# Minimal chat interface (recommended)
+# Minimal chat interface
 streamlit run george_streamlit_chat.py --server.port 8501
 
-# Enhanced interface (full-featured)  
+# Enhanced interface
 streamlit run george_streamlit_enhanced.py --server.port 8502
 ```
 
 ## 📋 Prerequisites
 
-1. **George API Server** must be running:
+1. **George API Server** must be running unless you use `--with-backend`:
    ```bash
-   # From the main project directory
    python main.py api
    ```
    API will be available at: http://localhost:8000
@@ -136,7 +168,7 @@ streamlit run george_streamlit_enhanced.py --server.port 8502
 - **Executive Settings**: Goal priorities, decision confidence, resource allocation
 - **System Management**: Memory clearing, state resets, full system reboot
 
-## 🌟 Key Capabilities Demonstrated
+## Key Capabilities Demonstrated
 
 ### Human-Like Cognition
 - **Biologically-Inspired**: 7-item STM capacity, attention fatigue, recovery cycles
@@ -156,7 +188,7 @@ streamlit run george_streamlit_enhanced.py --server.port 8502
 - **Scalable Architecture**: Modular design supporting future enhancements
 - **Professional UI**: Clean, intuitive interfaces suitable for demonstrations
 
-## 🔧 Development Notes
+## Development Notes
 
 ### API Integration
 Both interfaces integrate with the complete George API (canonical routes):

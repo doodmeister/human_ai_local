@@ -16,19 +16,19 @@ These files are kept for reference, migration work, and one-off validation, but 
 Use these first:
 
 ```bash
-pytest -q
-pytest tests/smoke -q
-pytest tests/persistence -q
-pytest tests/test_enhanced_ltm_comprehensive.py -q
-pytest tests/test_episodic_memory_integration.py -q
+python -m pytest -q
+python -m pytest tests/smoke -q
+python -m pytest tests/persistence -q
+python -m pytest tests/test_enhanced_ltm_comprehensive.py -q
+python -m pytest tests/test_episodic_memory_integration.py -q
 ```
 
 ## Running Archived Material Intentionally
 
 ```bash
-pytest archived_tests/manual_legacy/integration -q
-pytest archived_tests/manual_legacy/scenarios -q
-pytest archived_tests/manual_legacy/unit -q
+python -m pytest archived_tests/manual_legacy/integration -q
+python -m pytest archived_tests/manual_legacy/scenarios -q
+python -m pytest archived_tests/manual_legacy/unit -q
 ```
 
 If an archived test becomes important again, migrate it back into an active tier rather than growing new legacy-only coverage under `tests/`.

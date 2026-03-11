@@ -1,7 +1,9 @@
 # LLM Provider Selection Feature
 
+This document describes the original provider-selection slice. The feature remains in use, but the current runtime path is `python main.py api`, and the primary UI is Chainlit rather than the legacy Streamlit interface.
+
 ## Overview
-Added ability to select between ChatGPT API and locally-hosted Ollama models in the George cognitive agent, with UI controls in the Streamlit frontend.
+Added ability to select between ChatGPT API and locally-hosted Ollama models in the George cognitive agent, with runtime reconfiguration support exposed through the canonical API.
 
 ## Components Added
 
@@ -44,12 +46,9 @@ POST /agent/config/llm
 ```
 Updates LLM provider configuration at runtime and reinitializes the agent's provider.
 
-### 5. Streamlit UI (`scripts/george_streamlit_chat.py`)
-Added to sidebar:
-- **Provider Selector**: Dropdown to choose OpenAI or Ollama
-- **OpenAI Settings**: Model name input (when OpenAI selected)
-- **Ollama Settings**: Base URL and model name inputs (when Ollama selected)
-- **Apply Button**: Updates backend configuration
+### 5. UI Surfaces
+- The canonical backend endpoint is used by the current Chainlit flow.
+- The legacy Streamlit UI in `scripts/george_streamlit_chat.py` also exposes provider controls for compatibility.
 
 ## Environment Variables (.env)
 ```bash
@@ -69,17 +68,19 @@ OLLAMA_MODEL=llama3.2
 
 ### Using OpenAI (Default)
 1. Set `OPENAI_API_KEY` in `.env`
-2. Select "openai" in UI dropdown
-3. Choose model (e.g., gpt-4.1-nano, gpt-4o, gpt-3.5-turbo)
-4. Click "Apply LLM Config"
+2. Start the backend with `python main.py api`
+3. Select "openai" in the active UI surface, or call the config endpoint directly
+4. Choose model (e.g., gpt-4.1-nano, gpt-4o, gpt-3.5-turbo)
+5. Click "Apply LLM Config"
 
 ### Using Ollama (Local)
 1. Install and start Ollama: https://ollama.ai
 2. Pull a model: `ollama pull llama3.2`
-3. Select "ollama" in UI dropdown
-4. Set base URL (default: http://localhost:11434)
-5. Choose model name
-6. Click "Apply LLM Config"
+3. Start the backend with `python main.py api`
+4. Select "ollama" in the active UI surface, or call the config endpoint directly
+5. Set base URL (default: http://localhost:11434)
+6. Choose model name
+7. Click "Apply LLM Config"
 
 ## Benefits
 - **Flexibility**: Switch between cloud and local models

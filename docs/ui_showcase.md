@@ -1,6 +1,8 @@
 # George UI Showcase
 
-This document tracks the Streamlit interface upgrades that accompany the proactive reminder and session context work. It also acts as the specs hand-off for the future React/Next.js client.
+This document tracks a legacy Streamlit-first UI slice that accompanied the proactive reminder and session context work.
+
+It should be read as design/reference material, not as the canonical UI guide. The current primary UI path is Chainlit via `python main.py chainlit`, while the Streamlit surface remains a legacy interface.
 
 ## Session Context Snapshot
 - Collapsible panel under the main banner shows `session_context` metrics (`captured_memory_count`, `prospective_due_count`, `active_goal_ids`, etc.).
@@ -25,3 +27,7 @@ This document tracks the Streamlit interface upgrades that accompany the proacti
 - Component parity targets: `ReminderToast`, `ReminderTimeline`, `ReminderComposer`, and `ReminderTelemetry` should map directly to their Streamlit counterparts.
 - The API contracts (`proactive_reminders`, `session_context`, `/agent/reminders/*`) stay identical for both UIs.
 - Capture screenshots/GIFs of each panel once visual polish is complete and add them to this document (placeholder sections can be added near each heading).
+
+## Status Note
+- Canonical runtime/backend docs now live in `README.md`, `STARTUP_GUIDE.md`, and `docs/UI_DEVELOPER_API_QUICKSTART.md`.
+- Use this document for historical UI intent and contract-shape reference only.

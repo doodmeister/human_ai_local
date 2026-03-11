@@ -258,19 +258,19 @@ python -m pytest tests -q -c /dev/null
 # Lint source and tests
 python -m ruff check src tests
 
-
-The default `pytest -q` target is intentionally scoped to `tests/contracts` via `pytest.ini`.
 # Non-default persistence coverage
-pytest tests/persistence -q
+python -m pytest tests/persistence -q
 
 # Focused specialized memory validation
-pytest tests/test_enhanced_ltm_comprehensive.py -q
-pytest tests/test_episodic_memory_integration.py -q
+python -m pytest tests/test_enhanced_ltm_comprehensive.py -q
+python -m pytest tests/test_episodic_memory_integration.py -q
 
 # Archived manual-only legacy tests, only when intentionally validating older paths
-pytest archived_tests/manual_legacy/integration -q
-pytest archived_tests/manual_legacy/scenarios -q
+python -m pytest archived_tests/manual_legacy/integration -q
+python -m pytest archived_tests/manual_legacy/scenarios -q
 ```
+
+The default `pytest -q` target is intentionally scoped to `tests/contracts` via `pytest.ini`.
 
 Current test tiers:
 
