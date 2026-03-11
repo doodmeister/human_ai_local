@@ -5,19 +5,11 @@ import sys
 import os
 from datetime import datetime
 
-from src.orchestration.agent_singleton import create_agent
+from src.interfaces.api.dependencies import get_request_agent
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 router = APIRouter()
-
-
-def _get_agent(request: Request):
-    agent = getattr(request.app.state, "agent", None)
-    if agent is None:
-        request.app.state.agent = create_agent()
-        agent = request.app.state.agent
-    return agent
 
 
 # Add /reflect endpoint for manual reflection trigger
@@ -26,7 +18,7 @@ async def reflect(request: Request):
     """
     Trigger agent-level metacognitive reflection and return the report.
     """
-    agent = _get_agent(request)
+    agent = get_request_agent(request)
     if not hasattr(agent, "reflect"):
         raise HTTPException(status_code=501, detail="Reflection not implemented in agent.")
     report = await agent.reflect() if callable(getattr(agent.reflect, "__await__", None)) else agent.reflect()
@@ -35,8 +27,6 @@ async def reflect(request: Request):
     if not isinstance(report, dict):
         report = {"status": "ok", "value": str(report)}
     report.setdefault("timestamp", datetime.utcnow().isoformat())
-    request.app.state.last_reflection_report = report
-    request.app.state.reflection_report_available = True
     return {"status": "ok", "report": report}
 
 
@@ -52,15 +42,10 @@ async def process_input(process_request: ProcessInputRequest, request: Request):
     """
     Processes user input through the cognitive agent and returns the response.
     """
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     response = await agent.process_input(process_request.text)
-    
-    # The context retrieval is trickier as it was an internal call.
-    # For now, we'll just return the main response.
-    # A more advanced implementation might return context as well.
-    processed_input = {"raw_input": process_request.text, "type": "text"}
-    memory_context = await agent._retrieve_memory_context(processed_input)
 
+    memory_context = await agent.retrieve_memory_context(process_request.text)
 
     return {"response": response, "memory_context": memory_context}
 
@@ -72,9 +57,8 @@ async def memory_search(search_request: MemorySearchRequest, request: Request):
     """
     Search all memory systems for a query and return results (STM, LTM, Episodic, Semantic).
     """
-    agent = request.app.state.agent
-    processed_input = {"raw_input": search_request.query, "type": "text"}
-    memory_context = await agent._retrieve_memory_context(processed_input)
+    agent = get_request_agent(request)
+    memory_context = await agent.retrieve_memory_context(search_request.query)
     return {"memory_context": memory_context}
 
 
@@ -84,7 +68,7 @@ async def list_memories(system: str, request: Request):
     """
     List all memories in STM or LTM.
     """
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     if system == "stm":
         # Return all STM items using get_all_memories method
         stm_memories = agent.memory.stm.get_all_memories()
@@ -133,48 +117,28 @@ async def get_agent_status(request: Request):
     Get comprehensive agent cognitive state including attention, memory, and performance metrics.
     """
     try:
-        agent = request.app.state.agent
-        
-        # Get attention status
-        attention_status = {
-            "cognitive_load": getattr(agent.attention, 'cognitive_load', 0.0) if hasattr(agent, 'attention') else 0.0,
-            "fatigue_level": getattr(agent.attention, 'fatigue_level', 0.0) if hasattr(agent, 'attention') else 0.0,
-            "current_focus": []
-        }
-        
-        # Get memory status
-        memory_status = {}
-        if hasattr(agent, 'memory'):
-            memory_status = {
-                "stm": {
-                    "vector_db_count": len(getattr(agent.memory.stm, 'items', {})) if hasattr(agent.memory, 'stm') else 0,
-                    "capacity_utilization": 0.5
-                },
-                "ltm": {
-                    "memory_count": len(getattr(agent.memory.ltm, 'memories', {})) if hasattr(agent.memory, 'ltm') else 0,
-                    "total_size": 0
-                },
-                "episodic": {
-                    "total_memories": 0
-                },
-                "semantic": {
-                    "fact_count": 0
-                }
-            }
-        
-        # Get performance metrics
-        performance_metrics = {
-            "response_time": 1.2,
-            "accuracy": 0.85,
-            "efficiency": 0.75
-        }
-        
+        agent = get_request_agent(request)
+        status = agent.get_cognitive_status()
+        attention_status = status.get("attention_status", {})
+        memory_status = status.get("memory_status", {})
+        integration = status.get("cognitive_integration", {})
+
         return {
             "cognitive_mode": "FOCUSED",
-            "attention_status": attention_status,
+            "attention_status": {
+                "cognitive_load": attention_status.get("cognitive_load", 0.0),
+                "fatigue_level": status.get("fatigue_level", 0.0),
+                "current_focus": status.get("attention_focus", []),
+                "available_capacity": attention_status.get("available_capacity", 0.0),
+            },
             "memory_status": memory_status,
-            "performance_metrics": performance_metrics,
-            "active_processes": 1,
+            "performance_metrics": {
+                "response_time": None,
+                "accuracy": None,
+                "efficiency": integration.get("overall_efficiency", 0.0),
+                "processing_capacity": integration.get("processing_capacity", 0.0),
+            },
+            "active_processes": len(status.get("active_goals", [])) if isinstance(status.get("active_goals"), list) else 0,
             "status": "healthy"
         }
     except Exception as e:
@@ -189,28 +153,25 @@ async def enhanced_chat(chat_request: ChatRequest, request: Request):
     Enhanced chat interface with full cognitive integration.
     """
     try:
-        agent = request.app.state.agent
+        agent = get_request_agent(request)
         
         # Process input through cognitive agent
         response = await agent.process_input(chat_request.text)
         
         # Get memory context
-        processed_input = {"raw_input": chat_request.text, "type": "text"}
         memory_context = []
-        if chat_request.use_memory_context and hasattr(agent, '_retrieve_memory_context'):
+        if chat_request.use_memory_context:
             try:
-                memory_context = await agent._retrieve_memory_context(processed_input)
+                memory_context = await agent.retrieve_memory_context(chat_request.text)
             except Exception:
                 memory_context = []
-        
-        # Track memory events (simulated for now)
-        memory_events = ["Stored interaction in STM"]
-        
-        # Get cognitive state
+
+        memory_events = ["interaction_processed"]
+        status = agent.get_cognitive_status()
         cognitive_state = {
-            "cognitive_load": 0.6,
-            "attention_focus": 3,
-            "memory_operations": len(memory_events)
+            "cognitive_load": status.get("attention_status", {}).get("cognitive_load", 0.0),
+            "attention_focus": len(status.get("attention_focus", [])),
+            "memory_operations": len(memory_events),
         }
         
         # Get reasoning rationale (optional)
@@ -242,16 +203,14 @@ async def take_cognitive_break(break_request: CognitiveBreakRequest, request: Re
     Take a cognitive break to reduce fatigue and reset attention.
     """
     try:
-        # Simulate cognitive break effects
-        duration = break_request.duration_minutes or 1.0
-        cognitive_load_reduction = min(0.3, duration * 0.1)
-        
+        agent = get_request_agent(request)
+        results = agent.take_cognitive_break(break_request.duration_minutes or 1.0)
         return {
-            "cognitive_load_reduction": cognitive_load_reduction,
-            "recovery_effective": True,
-            "new_cognitive_load": max(0.0, 0.6 - cognitive_load_reduction),
-            "break_duration": break_request.duration_minutes,
-            "status": "completed"
+            "cognitive_load_reduction": results.get("cognitive_load_reduction", 0.0),
+            "recovery_effective": results.get("recovery_effective", False),
+            "new_cognitive_load": max(0.0, agent.get_cognitive_status().get("attention_status", {}).get("cognitive_load", 0.0)),
+            "break_duration": results.get("break_duration", break_request.duration_minutes),
+            "status": "completed",
         }
     except Exception as e:
         return {
@@ -265,19 +224,13 @@ async def trigger_memory_consolidation(request: Request):
     Trigger dream-state memory consolidation.
     """
     try:
-        # Simulate consolidation events
-        consolidation_events = [
-            "Transferred 3 memories from STM to LTM",
-            "Strengthened connections between related memories",
-            "Pruned 2 low-relevance memories",
-            "Created new semantic associations"
-        ]
-        
+        agent = get_request_agent(request)
+        dream_results = await agent.enter_dream_state("deep")
         return {
-            "consolidation_events": consolidation_events,
-            "memories_transferred": 3,
-            "memories_pruned": 2,
-            "new_associations": 5,
+            "consolidation_events": ["dream_state_consolidation_triggered"],
+            "memories_transferred": dream_results.get("memories_consolidated", dream_results.get("memories_transferred", 0)),
+            "memories_pruned": dream_results.get("memories_pruned", 0),
+            "new_associations": dream_results.get("new_associations", 0),
             "status": "completed"
         }
     except Exception as e:
@@ -291,6 +244,6 @@ async def start_dream(request: Request, dream_req: DreamRequest = Body(...)):
     """
     Trigger a dream state cycle (light, deep, rem).
     """
-    agent = request.app.state.agent
-    results = await agent.dream_processor.enter_dream_cycle(dream_req.cycle_type)
+    agent = get_request_agent(request)
+    results = await agent.enter_dream_state(dream_req.cycle_type)
     return {"dream_results": results}

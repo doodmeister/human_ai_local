@@ -1,8 +1,7 @@
 """
-REST API for Human-AI Cognition Framework: Executive Functions (Simplified)
+REST API for Human-AI Cognition Framework: Executive Functions
 
-This module provides basic RESTful API endpoints for interacting with the executive
-functioning system. This is a simplified version that works with the actual
+This module provides RESTful API endpoints for interacting with the current
 executive system implementation.
 
 Endpoints:
@@ -23,10 +22,11 @@ from src.orchestration.executive_facade import (
     GoalPriority,
     WorldState,
 )
+from src.interfaces.api.dependencies import get_request_agent
 
 router = APIRouter()
 
-# Simplified Pydantic models for API requests/responses
+# Pydantic models for API requests/responses
 
 class CreateGoalRequest(BaseModel):
     title: str = Field(..., description="Goal title")
@@ -37,7 +37,7 @@ class CreateGoalRequest(BaseModel):
 # Helper function to get executive agent from cognitive agent
 def get_executive_agent(request: Request) -> ExecutiveAgent:
     """Get or create executive agent from the main cognitive agent"""
-    cognitive_agent = request.app.state.agent
+    cognitive_agent = get_request_agent(request)
     
     # Check if cognitive agent has executive capabilities
     if not hasattr(cognitive_agent, 'executive_agent'):
@@ -52,13 +52,48 @@ def get_executive_agent(request: Request) -> ExecutiveAgent:
 
 def get_executive_system(request: Request) -> ExecutiveSystem:
     """Get or create ExecutiveSystem for integrated pipeline operations"""
-    cognitive_agent = request.app.state.agent
+    cognitive_agent = get_request_agent(request)
     
     # Check if cognitive agent has integrated executive system
     if not hasattr(cognitive_agent, 'executive_system'):
         cognitive_agent.executive_system = ExecutiveSystem()
     
     return cognitive_agent.executive_system
+
+
+def _serialize_goal(goal) -> dict:
+    return {
+        "id": goal.id,
+        "title": getattr(goal, "title", getattr(goal, "description", "")),
+        "description": goal.description,
+        "priority": goal.priority.value if hasattr(goal.priority, "value") else str(goal.priority),
+        "progress": getattr(goal, "progress", 0.0),
+        "status": goal.status.value if hasattr(goal.status, "value") else str(goal.status),
+        "created_at": goal.created_at.isoformat() if getattr(goal, "created_at", None) else None,
+        "target_date": goal.target_date.isoformat() if getattr(goal, "target_date", None) else None,
+    }
+
+
+def _serialize_recent_decision(context) -> dict:
+    decision = getattr(context, "decision_result", None)
+    if isinstance(decision, dict):
+        selected_option = decision.get("selected_option")
+        confidence = decision.get("confidence")
+        strategy = decision.get("strategy")
+    else:
+        selected_option = str(getattr(decision, "selected_option", None)) if decision else None
+        confidence = getattr(decision, "confidence", None) if decision else None
+        strategy = getattr(decision, "strategy", None) if decision else None
+
+    timestamp = getattr(context, "start_time", datetime.now())
+    return {
+        "goal_id": getattr(context, "goal_id", None),
+        "goal_title": getattr(context, "goal_title", None),
+        "selected_option": selected_option,
+        "confidence": confidence,
+        "strategy": strategy,
+        "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp),
+    }
 
 # Goal Management Endpoints
 
@@ -172,57 +207,25 @@ async def get_executive_status(request: Request):
     """Get comprehensive executive system status matching UI expectations"""
     try:
         executive = get_executive_agent(request)
+        system = get_executive_system(request)
         
         # Get all goals
         all_goals = list(executive.goals.goals.values())
         active_goals = executive.goals.get_active_goals()
         completed_goals = [g for g in all_goals if g.status.value == "completed"]
-        
-        # Convert goals to dictionaries for JSON response
-        active_goals_data = []
-        for goal in active_goals:
-            goal_dict = {
-                "id": goal.id,
-                "title": getattr(goal, 'title', goal.description[:50]),
-                "description": goal.description,
-                "priority": goal.priority.value if hasattr(goal.priority, 'value') else str(goal.priority),
-                "progress": goal.progress,
-                "status": goal.status.value,
-                "created_at": goal.created_at.isoformat(),
-                "target_date": goal.target_date.isoformat() if goal.target_date else None
-            }
-            active_goals_data.append(goal_dict)
-        
-        completed_goals_data = []
-        for goal in completed_goals:
-            goal_dict = {
-                "id": goal.id,
-                "title": getattr(goal, 'title', goal.description[:50]),
-                "description": goal.description,
-                "priority": goal.priority.value if hasattr(goal.priority, 'value') else str(goal.priority),
-                "progress": goal.progress,
-                "status": goal.status.value,
-                "created_at": goal.created_at.isoformat(),
-                "target_date": goal.target_date.isoformat() if goal.target_date else None
-            }
-            completed_goals_data.append(goal_dict)
-        
-        # Recent decisions (simulated for now)
-        recent_decisions = [
-            {
-                "context": "Sample decision context",
-                "selected_option": "Option A",
-                "confidence": 0.75,
-                "timestamp": datetime.now().isoformat()
-            }
-        ]
-        
-        # Resource allocation (simulated)
+        health = system.get_system_health()
+        learning = system.get_learning_metrics()
+
+        active_goals_data = [_serialize_goal(goal) for goal in active_goals]
+        completed_goals_data = [_serialize_goal(goal) for goal in completed_goals]
+        recent_contexts = list(system.execution_contexts.values())[-5:]
+        recent_decisions = [_serialize_recent_decision(context) for context in recent_contexts]
         resources = {
-            "attention": 0.7,
-            "memory": 0.6,
-            "processing": 0.8,
-            "energy": 0.5
+            "attention": None,
+            "memory": None,
+            "processing": None,
+            "energy": None,
+            "placeholder": "Resource allocation metrics are not exposed by ExecutiveSystem yet."
         }
         
         status = {
@@ -236,8 +239,9 @@ async def get_executive_status(request: Request):
             "executive_state": executive.state.value if hasattr(executive, 'state') else "active",
             "performance_metrics": {
                 "goal_completion_rate": len(completed_goals) / max(len(all_goals), 1),
-                "average_decision_confidence": 0.75,
-                "resource_efficiency": 0.68
+                "average_decision_confidence": learning.get("decision_accuracy", {}).get("accuracy"),
+                "resource_efficiency": None,
+                "failed_workflows": health.get("failed_workflows", 0),
             },
             "timestamp": datetime.now().isoformat()
         }
@@ -373,7 +377,7 @@ async def get_goal_schedule(goal_id: str, request: Request):
             "makespan": schedule.makespan,
             "robustness_score": schedule.quality_metrics.get("robustness_score", 0.0) if hasattr(schedule, 'quality_metrics') else 0.0,
             "cognitive_smoothness": schedule.quality_metrics.get("cognitive_smoothness", 0.0) if hasattr(schedule, 'quality_metrics') else 0.0,
-            "resource_utilization": {},  # Simplified for now
+            "resource_utilization": None,
             "scheduling_time_ms": context.scheduling_time_ms
         }
         
@@ -436,21 +440,13 @@ async def get_system_health(request: Request):
     try:
         system = get_executive_system(request)
         health = system.get_system_health()
-        
-        # Convert to JSON-serializable format
-        health_data = {
-            "active_goals": health.get("active_goals", 0),
-            "total_executions": health.get("total_executions", 0),
-            "success_rate": health.get("success_rate", 0.0),
-            "avg_execution_time_ms": health.get("avg_execution_time_ms", 0.0),
-            "subsystems": health.get("subsystems", {}),
-            "recent_activity": health.get("recent_activity", []),
-            "timestamp": datetime.now().isoformat()
-        }
-        
+
         return {
             "status": "success",
-            "health": health_data
+            "health": {
+                **health,
+                "timestamp": datetime.now().isoformat()
+            }
         }
     
     except Exception as e:

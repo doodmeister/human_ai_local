@@ -4,13 +4,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
+from src.interfaces.api.dependencies import get_request_agent
+
 router = APIRouter()
 
 
 @router.post("/prospective/process_due")
 def process_due_reminders(request: Request):
     """Process due reminders and convert them to LTM."""
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.prospective
     ltm = agent.memory.ltm
     count = memsys.process_due_reminders(ltm_system=ltm)
@@ -24,7 +26,7 @@ class ProspectiveRequest(BaseModel):
 
 @router.post("/prospective/store")
 def store_prospective(req: ProspectiveRequest, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.prospective
     event_id = memsys.store(
         description=req.description,
@@ -36,7 +38,7 @@ def store_prospective(req: ProspectiveRequest, request: Request):
 
 @router.get("/prospective/retrieve/{event_id}")
 def retrieve_prospective(event_id: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.prospective
     event = memsys.retrieve(event_id)
     if not event:
@@ -50,7 +52,7 @@ def list_prospective_reminders(request: Request, include_completed: bool = False
     Optionally filter by goal_id for auto-generated plan reminders.
     Returns a list of reminders as dicts.
     """
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.prospective
     reminders = memsys.list_reminders(include_completed=include_completed)
     
@@ -67,7 +69,7 @@ def list_prospective_reminders(request: Request, include_completed: bool = False
 
 @router.delete("/prospective/delete/{event_id}")
 def delete_prospective(event_id: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.prospective
     success = memsys.delete(event_id)
     if not success:
@@ -76,7 +78,7 @@ def delete_prospective(event_id: str, request: Request):
 
 @router.post("/prospective/clear")
 def clear_prospective(request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.prospective
     memsys.clear()
     return {"status": "cleared"}

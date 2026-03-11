@@ -140,6 +140,15 @@ class MemoryConsolidator:
         except Exception:
             return
 
+    def run_promotion_pass(self) -> int:
+        promoted_count = 0
+        for turn_id, stats in list(self._turn_stats.items()):
+            if stats.get("stm_id") and not stats.get("ltm_id"):
+                self._maybe_promote(turn_id, stats)
+                if stats.get("ltm_id"):
+                    promoted_count += 1
+        return promoted_count
+
     def _estimate_stm_pressure(self) -> float:
         """Best-effort estimate of STM utilization pressure in [0,1]."""
         stm_obj = self.stm

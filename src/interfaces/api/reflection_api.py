@@ -31,7 +31,8 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from src.orchestration.agent_singleton import create_agent
+from src.orchestration.runtime.app_container import get_runtime
+from src.interfaces.api.dependencies import get_request_agent
 from src.interfaces.api.agent_api import router as agent_router
 from src.interfaces.api.executive_api import router as executive_router
 from src.interfaces.api.memory_api import router as memory_router
@@ -42,26 +43,13 @@ from src.interfaces.api.semantic_api import router as semantic_router
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-
 _agent_init_lock = threading.Lock()
 
 
 def _get_agent(request: Request):
-    """Get the agent from app state, lazily initializing when missing.
-
-    Starlette/FastAPI TestClient does not always execute lifespan events unless
-    used as a context manager, so tests may hit endpoints without app.state.agent.
-    """
-    agent = getattr(request.app.state, "agent", None)
-    if agent is not None:
-        return agent
-
+    """Get the agent from shared API dependencies, preserving test behavior."""
     with _agent_init_lock:
-        agent = getattr(request.app.state, "agent", None)
-        if agent is None:
-            request.app.state.agent = create_agent()
-            agent = request.app.state.agent
-    return agent
+        return get_request_agent(request)
 
 
 @asynccontextmanager
@@ -70,7 +58,7 @@ async def lifespan(app: FastAPI):
     Application lifespan manager to create and shut down the agent.
     """
     logger.info("Application startup: Initializing CognitiveAgent...")
-    app.state.agent = create_agent()
+    app.state.agent = get_runtime().get_agent()
     yield
     # Clean up the agent and its resources
     logger.info("Application shutdown: Cleaning up CognitiveAgent...")
@@ -80,7 +68,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.state.reflection_report_available = False
 
 # Health check endpoint for launcher verification
 @app.get("/health")
@@ -96,9 +83,7 @@ app.include_router(semantic_router)
 app.include_router(agent_router)
 app.include_router(executive_router, prefix="/executive")
 
-# Reflection state (for status/report endpoints)
 reflection_lock = threading.Lock()
-last_reflection_report = None
 
 class ReflectionStartRequest(BaseModel):
     interval: Optional[int] = None  # seconds
@@ -106,7 +91,6 @@ class ReflectionStartRequest(BaseModel):
 @app.post("/reflect")
 def reflect(request: Request):
     """Trigger agent-level metacognitive reflection and return the report."""
-    global last_reflection_report
     with reflection_lock:
         try:
             agent = _get_agent(request)
@@ -118,9 +102,6 @@ def reflect(request: Request):
         if not isinstance(report, dict):
             report = {"status": "ok", "value": str(report)}
         report.setdefault("timestamp", datetime.utcnow().isoformat())
-        last_reflection_report = report
-        request.app.state.last_reflection_report = report
-        request.app.state.reflection_report_available = True
     return {"status": "ok", "report": report}
 
 @app.get("/reflection/status")
@@ -131,14 +112,8 @@ def reflection_status(request: Request):
 
 @app.get("/reflection/report")
 def reflection_report(request: Request):
-    # Defensive: treat None or empty dict as no report (for test isolation)
-    if not getattr(request.app.state, "reflection_report_available", False):
-        raise HTTPException(status_code=404, detail="No reflection report available.")
-    report = getattr(request.app.state, "last_reflection_report", None)
-    if report is None:
-        import sys
-        this_module = sys.modules[__name__]
-        report = getattr(this_module, "last_reflection_report", None)
+    agent = _get_agent(request)
+    report = agent.get_last_reflection_report()
     if report is None or report == {}:
         raise HTTPException(status_code=404, detail="No reflection report available.")
     return {"report": report}
@@ -162,8 +137,6 @@ def reflection_stop(request: Request):
 # TEST-ONLY: Reset reflection state for test isolation
 @app.post("/test/reset")
 def test_reset(request: Request):
-    global last_reflection_report
-    last_reflection_report = None
-    request.app.state.last_reflection_report = None
-    request.app.state.reflection_report_available = False
+    agent = _get_agent(request)
+    agent.clear_reflection_reports()
     return {"status": "reset"}

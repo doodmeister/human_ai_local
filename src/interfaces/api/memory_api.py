@@ -13,7 +13,8 @@ Where {system} is either 'stm' or 'ltm'.
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Any, Dict, Optional, Union
-from datetime import datetime
+
+from src.interfaces.api.dependencies import get_request_agent, get_request_memory_system
 
 router = APIRouter()
 
@@ -49,7 +50,7 @@ class FeedbackRequest(BaseModel):
 @router.post("/memory/proactive-recall")
 def proactive_recall(req: ProactiveRecallRequest, request: Request):
     """Perform proactive recall of relevant memories based on query"""
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     
     try:
         # Use the memory system's proactive_recall method
@@ -82,7 +83,7 @@ def get_system(system: str, agent: Any):
 @router.post("/memory/{system}/store")
 def store_memory(system: str, req: StoreMemoryRequest, request: Request):
     import uuid
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = get_system(system, agent)
     
     if system == "stm":
@@ -133,7 +134,7 @@ def store_memory(system: str, req: StoreMemoryRequest, request: Request):
 
 @router.get("/memory/{system}/retrieve/{memory_id}")
 def retrieve_memory(system: str, memory_id: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = get_system(system, agent)
     memory = memsys.retrieve(memory_id)
     if memory is None:
@@ -142,7 +143,7 @@ def retrieve_memory(system: str, memory_id: str, request: Request):
 
 @router.delete("/memory/{system}/delete/{memory_id}")
 def delete_memory(system: str, memory_id: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = get_system(system, agent)
     if not hasattr(memsys, 'delete'):
         raise HTTPException(status_code=405, detail=f"Delete operation not supported for '{system}' memory system.")
@@ -157,7 +158,7 @@ def delete_memory(system: str, memory_id: str, request: Request):
 
 @router.post("/memory/{system}/search")
 def search_memory(system: str, req: SearchMemoryRequest, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = get_system(system, agent)
     
     # STM search is simple, by content only
@@ -189,7 +190,7 @@ def search_memory(system: str, req: SearchMemoryRequest, request: Request):
 
 @router.post("/memory/{system}/feedback/{memory_id}")
 def add_feedback(system: str, memory_id: str, req: FeedbackRequest, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = get_system(system, agent)
     if system != "ltm":
         raise HTTPException(status_code=400, detail="Feedback is only supported for LTM")
@@ -210,7 +211,7 @@ def add_feedback(system: str, memory_id: str, req: FeedbackRequest, request: Req
 
 @router.get("/memory/{system}/list")
 def list_memories(system: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = get_system(system, agent)
     
     # LTM, Episodic, Semantic (Chroma-based)
@@ -235,44 +236,22 @@ def list_memories(system: str, request: Request):
 async def get_memory_status(request: Request):
     """Get comprehensive memory system status"""
     try:
-        memsys = request.app.state.memory_system
-        
-        status = {
+        memsys = get_request_memory_system(request)
+        status = memsys.get_status()
+        stm_status = status.get("stm", {}) if isinstance(status, dict) else {}
+        ltm_status = status.get("ltm", {}) if isinstance(status, dict) else {}
+        return {
+            **status,
+            "overall_health": "healthy" if status.get("system_active") else "degraded",
             "stm": {
-                "vector_db_count": len(getattr(memsys.stm, 'items', {})) if hasattr(memsys, 'stm') else 0,
-                "capacity": 7,
-                "capacity_utilization": min(1.0, len(getattr(memsys.stm, 'items', {})) / 7) if hasattr(memsys, 'stm') else 0.0,
-                "health": "healthy"
+                **stm_status,
+                "health": stm_status.get("status", "healthy"),
             },
             "ltm": {
-                "memory_count": len(getattr(memsys.ltm, 'memories', {})) if hasattr(memsys, 'ltm') else 0,
-                "total_size": 0,
-                "health": "healthy"
+                **ltm_status,
+                "health": ltm_status.get("status", "healthy"),
             },
-            "episodic": {
-                "total_memories": getattr(memsys.episodic, 'count', 0) if hasattr(memsys, 'episodic') else 0,
-                "recent_memories": 5,
-                "health": "healthy"
-            },
-            "semantic": {
-                "fact_count": getattr(memsys.semantic, 'count', 0) if hasattr(memsys, 'semantic') else 0,
-                "knowledge_domains": 3,
-                "health": "healthy"
-            },
-            "procedural": {
-                "procedure_count": len(getattr(memsys, 'procedures', {})) if hasattr(memsys, 'procedures') else 0,
-                "health": "healthy"
-            },
-            "prospective": {
-                "active_reminders": len(getattr(memsys, 'tasks', {})) if hasattr(memsys, 'tasks') else 0,
-                "health": "healthy"
-            },
-            "overall_health": "healthy",
-            "last_consolidation": datetime.now().isoformat(),
-            "consolidation_frequency": "every_10_minutes"
         }
-        
-        return status
     
     except Exception as e:
         return {

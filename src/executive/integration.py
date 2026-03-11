@@ -12,20 +12,24 @@ Any side effects (e.g., auto-generating reminders) are opt-in.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 import logging
 
 # Component imports
-from src.executive.goal_manager import GoalManager, Goal, GoalStatus, GoalPriority
+from src.executive.goal_manager import GoalManager, Goal, GoalPriority
 from src.executive.goals import HTNGoalManagerAdapter
-from src.executive.decision_engine import DecisionEngine, DecisionOption, DecisionResult
+from src.executive.decision_engine import DecisionEngine, DecisionResult
 from src.executive.planning.goap_planner import GOAPPlanner, Plan, WorldState, get_metrics_registry
 from src.executive.planning.action_library import create_default_action_library
-from src.executive.scheduling import (
-    DynamicScheduler, SchedulingProblem, Schedule,
-    Task, Resource, ResourceType, OptimizationObjective
+from src.executive.scheduling import DynamicScheduler, Schedule
+from src.executive.stages import (
+    ExecutiveDecisionStage,
+    ExecutivePlanningStage,
+    ExecutiveReminderStage,
+    ExecutiveReportingStage,
+    ExecutiveSchedulingStage,
 )
 
 # Type checking imports (Week 16)
@@ -177,6 +181,28 @@ class ExecutiveSystem:
         
         # Dynamic scheduler
         self.scheduler = DynamicScheduler()
+        self.decision_stage = ExecutiveDecisionStage(
+            config=self.config,
+            decision_engine=self.decision_engine,
+            metrics=self.metrics,
+        )
+        self.planning_stage = ExecutivePlanningStage(
+            config=self.config,
+            goap_planner=self.goap_planner,
+            metrics=self.metrics,
+        )
+        self.scheduling_stage = ExecutiveSchedulingStage(
+            config=self.config,
+            scheduler=self.scheduler,
+            metrics=self.metrics,
+        )
+        self.reporting_stage = ExecutiveReportingStage(
+            get_goal_manager=lambda: self.goal_manager,
+            get_execution_contexts=lambda: self.execution_contexts,
+            get_active_schedules=lambda: self.active_schedules,
+            get_outcome_tracker=lambda: self.outcome_tracker,
+        )
+        self.reminder_stage = ExecutiveReminderStage()
         
         # Outcome tracking (Week 16)
         from src.executive.learning.outcome_tracker import OutcomeTracker
@@ -387,35 +413,7 @@ class ExecutiveSystem:
         Returns:
             Decision result
         """
-        # Create decision options for approaching the goal
-        options = [
-            DecisionOption(
-                name="direct_approach",
-                description="Direct approach - tackle goal immediately",
-                data={"approach": "direct", "risk": 0.3}
-            ),
-            DecisionOption(
-                name="incremental_approach",
-                description="Incremental approach - break into smaller steps",
-                data={"approach": "incremental", "risk": 0.2}
-            ),
-            DecisionOption(
-                name="parallel_approach",
-                description="Parallel approach - work on multiple aspects simultaneously",
-                data={"approach": "parallel", "risk": 0.4}
-            )
-        ]
-        
-        # Make decision using selected strategy
-        result = self.decision_engine.make_decision(
-            options=options,
-            criteria=self.decision_engine.criterion_templates.get('task_selection', []),
-            strategy=self.config.decision_strategy,
-            context={"goal_id": goal.id, "goal_priority": goal.priority.value}
-        )
-        
-        self.metrics.inc("executive_decisions_made_total")
-        return result
+        return self.decision_stage.make_goal_decision(goal)
     
     def _create_goal_plan(self, goal: Goal, decision: DecisionResult,
                          initial_state: Optional[WorldState] = None) -> Optional[Plan]:
@@ -430,28 +428,7 @@ class ExecutiveSystem:
         Returns:
             Plan or None if planning failed
         """
-        # Convert goal to GOAP goal state
-        goal_state = self._goal_to_world_state(goal)
-        
-        # Use provided initial state or create default
-        if initial_state is None:
-            initial_state = WorldState()
-        
-        # Plan with GOAP
-        plan = self.goap_planner.plan(
-            initial_state=initial_state,
-            goal_state=goal_state,
-            max_iterations=self.config.planning_max_iterations,
-            plan_context={"goal_id": goal.id, "decision": decision}
-        )
-        
-        if plan:
-            self.metrics.inc("executive_plans_created_total")
-            self.metrics.observe("executive_plan_length", len(plan.steps))
-        else:
-            self.metrics.inc("executive_planning_failures_total")
-        
-        return plan
+        return self.planning_stage.create_goal_plan(goal, decision, initial_state)
     
     def _goal_to_world_state(self, goal: Goal) -> WorldState:
         """
@@ -463,38 +440,7 @@ class ExecutiveSystem:
         Returns:
             WorldState representing goal achievement
         """
-        # Create goal state based on success criteria
-        goal_conditions = {}
-        
-        if goal.success_criteria:
-            for i, criterion in enumerate(goal.success_criteria):
-                # Parse criterion into state variable
-                # Format: "variable=value" or just "variable" (implies True)
-                if "=" in criterion:
-                    var, val = criterion.split("=", 1)
-                    var = var.strip()
-                    val = val.strip()
-                    
-                    # Try to parse value as bool/int/float
-                    if val.lower() == "true":
-                        goal_conditions[var] = True
-                    elif val.lower() == "false":
-                        goal_conditions[var] = False
-                    elif val.isdigit():
-                        goal_conditions[var] = int(val)
-                    else:
-                        try:
-                            goal_conditions[var] = float(val)
-                        except ValueError:
-                            goal_conditions[var] = val
-                else:
-                    goal_conditions[criterion.strip()] = True
-        else:
-            # Default: goal completed
-            goal_conditions[f"goal_{goal.id}_completed"] = True
-        
-        # WorldState takes a dict, not kwargs
-        return WorldState(goal_conditions)
+        return self.planning_stage.goal_to_world_state(goal)
     
     def _create_schedule_from_plan(self, plan: Plan, goal: Goal) -> Optional[Schedule]:
         """
@@ -507,64 +453,11 @@ class ExecutiveSystem:
         Returns:
             Schedule or None if scheduling failed
         """
-        # Convert plan actions to scheduling tasks
-        tasks = []
-        for i, step in enumerate(plan.steps):
-            action = step.action
-            task = Task(
-                id=f"action_{i}_{action.name}",
-                name=action.name,
-                duration=timedelta(hours=1),  # Default 1 hour, could be in action metadata
-                priority=self._goal_priority_to_float(goal.priority),
-                cognitive_load=0.5,  # Default, could be in action metadata
-                dependencies=set([f"action_{i-1}_{plan.steps[i-1].action.name}"] if i > 0 else [])
-            )
-            tasks.append(task)
-        
-        # Create default resources
-        resources = [
-            Resource(
-                id="cognitive",
-                name="Cognitive Capacity",
-                type=ResourceType.COGNITIVE,
-                capacity=1.0
-            )
-        ]
-        
-        # Create scheduling problem
-        horizon_hours = self.config.scheduling_horizon_hours
-        problem = SchedulingProblem(
-            tasks=tasks,
-            resources=resources,
-            objectives=[
-                OptimizationObjective(
-                    name="minimize_makespan",
-                    description="Minimize total schedule duration",
-                    weight=1.0
-                )
-            ],
-            horizon=timedelta(hours=horizon_hours)
-        )
-        
-        # Schedule
-        try:
-            schedule = self.scheduler.create_initial_schedule(problem)
-            self.metrics.inc("executive_schedules_created_total")
-            return schedule
-        except Exception as e:
-            logger.error(f"Scheduling failed: {e}")
-            self.metrics.inc("executive_scheduling_failures_total")
-            return None
+        return self.scheduling_stage.create_schedule_from_plan(plan, goal)
     
     def _goal_priority_to_float(self, priority: GoalPriority) -> float:
         """Convert goal priority to float score."""
-        mapping = {
-            GoalPriority.LOW: 0.3,
-            GoalPriority.MEDIUM: 0.6,
-            GoalPriority.HIGH: 0.9,
-            GoalPriority.CRITICAL: 1.0
-        }
-        return mapping.get(priority, 0.5)
+        return self.scheduling_stage.goal_priority_to_float(priority)
     
     def _create_reminders_from_schedule(
         self, 
@@ -586,80 +479,7 @@ class ExecutiveSystem:
         Returns:
             Number of reminders created
         """
-        try:
-            # Lazy import to avoid circular dependencies
-            from src.memory.prospective.prospective_memory import (
-                create_prospective_memory,
-                get_prospective_memory,
-            )
-            
-            # Get or create prospective memory system
-            try:
-                prospective = get_prospective_memory()
-            except Exception:
-                prospective = create_prospective_memory(use_vector=False)
-            
-            if prospective is None:
-                logger.warning("Prospective memory not available - skipping reminder creation")
-                return 0
-            
-            # Create action name to description mapping from plan
-            action_descriptions = {}
-            for i, step in enumerate(plan.steps):
-                action_name = getattr(step, 'name', str(step))
-                action_descriptions[action_name] = {
-                    'description': getattr(step, 'description', action_name),
-                    'sequence': i + 1,
-                    'total': len(plan.steps)
-                }
-            
-            reminders_created = 0
-            base_time = datetime.now()
-            
-            # Create reminder for each scheduled task
-            for task in schedule.tasks:
-                # Calculate due time from scheduled start
-                if task.scheduled_start is not None:
-                    # scheduled_start is typically in minutes from base time
-                    due_time = base_time + timedelta(minutes=task.scheduled_start)
-                else:
-                    # Fallback: spread tasks evenly
-                    due_time = base_time + timedelta(hours=reminders_created + 1)
-                
-                # Get action description if available
-                action_info = action_descriptions.get(task.id, {})
-                seq = action_info.get('sequence', reminders_created + 1)
-                total = action_info.get('total', len(schedule.tasks))
-                
-                # Create reminder content
-                task_name = getattr(task, 'name', task.id)
-                content = f"[Step {seq}/{total}] {task_name}"
-                
-                # Add reminder
-                reminder = prospective.add_reminder(
-                    content=content,
-                    due_time=due_time,
-                    tags=["auto-generated", "plan-step", f"goal:{goal_id}"],
-                    metadata={
-                        "goal_id": goal_id,
-                        "task_id": task.id,
-                        "sequence": seq,
-                        "total_steps": total,
-                        "auto_generated": True,
-                        "source": "executive_system"
-                    }
-                )
-                
-                if reminder:
-                    reminders_created += 1
-                    logger.debug(f"Created reminder: {content} due at {due_time}")
-            
-            logger.info(f"Created {reminders_created} reminders for goal {goal_id}")
-            return reminders_created
-            
-        except Exception as e:
-            logger.warning(f"Failed to create reminders from schedule: {e}")
-            return 0
+        return self.reminder_stage.create_reminders_from_schedule(goal_id, schedule, plan)
 
     def get_execution_status(self, goal_id: str) -> Optional[ExecutionContext]:
         """Get execution context for a goal."""
@@ -672,29 +492,10 @@ class ExecutiveSystem:
         Returns:
             Dictionary with health indicators
         """
-        active_goals = len([g for g in self.goal_manager.goals.values() 
-                          if g.status == GoalStatus.ACTIVE])
-        
-        executing_contexts = len([c for c in self.execution_contexts.values()
-                                 if c.status == ExecutionStatus.EXECUTING])
-        
-        failed_contexts = len([c for c in self.execution_contexts.values()
-                              if c.status == ExecutionStatus.FAILED])
-        
-        return {
-            "status": "healthy" if failed_contexts == 0 else "degraded",
-            "active_goals": active_goals,
-            "executing_workflows": executing_contexts,
-            "failed_workflows": failed_contexts,
-            "total_contexts": len(self.execution_contexts),
-            "active_schedules": len(self.active_schedules),
-            "components": {
-                "goal_manager": "operational",
-                "decision_engine": "operational",
-                "goap_planner": "operational",
-                "scheduler": "operational"
-            }
-        }
+        return self.reporting_stage.get_system_health(
+            executing_status=ExecutionStatus.EXECUTING,
+            failed_status=ExecutionStatus.FAILED,
+        )
     
     def clear_execution_history(self, goal_id: Optional[str] = None):
         """
@@ -704,12 +505,7 @@ class ExecutiveSystem:
             goal_id: If provided, clear only this goal's history.
                     Otherwise clear all history.
         """
-        if goal_id:
-            self.execution_contexts.pop(goal_id, None)
-            self.active_schedules.pop(goal_id, None)
-        else:
-            self.execution_contexts.clear()
-            self.active_schedules.clear()
+        self.reporting_stage.clear_execution_history(goal_id)
     
     # Outcome tracking methods (Week 16)
     
@@ -770,9 +566,4 @@ class ExecutiveSystem:
         Returns:
             Dict with decision/planning/scheduling accuracy metrics
         """
-        return {
-            "decision_accuracy": self.outcome_tracker.analyze_decision_accuracy(),
-            "planning_accuracy": self.outcome_tracker.analyze_planning_accuracy(),
-            "scheduling_accuracy": self.outcome_tracker.analyze_scheduling_accuracy(),
-            "improvement_trends": self.outcome_tracker.get_improvement_trends(),
-        }
+        return self.reporting_stage.get_learning_metrics()

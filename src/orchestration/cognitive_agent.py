@@ -4,62 +4,29 @@ Core Cognitive Agent - Central orchestrator for the cognitive architecture
 
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import uuid
 from dotenv import load_dotenv
-import threading
-import time
-import schedule
 import logging
-import os
 
 from ..core.config import CognitiveConfig
-from ..memory import MemorySystem, MemorySystemConfig
-from ..cognition.attention.attention_mechanism import AttentionMechanism
-from ..cognition.processing.sensory import SensoryInterface, SensoryProcessor
-from ..orchestration import CognitiveStep, CognitiveTick
-
-# Heavy-dep modules (torch-based) — lazy-import to keep server startup fast
-DreamProcessor = None
-PerformanceOptimizer = None
-
-
-def _lazy_import_dream():
-    global DreamProcessor
-    if DreamProcessor is None:
-        from ..cognition.processing.dream import DreamProcessor as _DP
-        DreamProcessor = _DP
-    return DreamProcessor
+from .agent import (
+    CognitiveAgentLLMSession,
+    CognitiveAgentRuntimeBuilder,
+    CognitiveMaintenanceService,
+    CognitiveReflectionService,
+    CognitiveTurnProcessor,
+)
 
 
-def _lazy_import_optimizer():
-    global PerformanceOptimizer
-    if PerformanceOptimizer is None:
-        from ..optimization.performance_optimizer import PerformanceOptimizer as _PO
-        PerformanceOptimizer = _PO
-    return PerformanceOptimizer
-
-# Lazy import LLM provider to avoid circular dependencies
 def _lazy_import_llm():
-    try:
-        from ..model.llm_provider import LLMProviderFactory, LLMProvider
-        return LLMProviderFactory, LLMProvider
-    except ImportError as e:
-        logger.warning(f"Failed to import LLM provider: {e}")
-        return None, None
+    from .agent.llm_session import _lazy_import_llm as _session_lazy_import_llm
+
+    return _session_lazy_import_llm()
 
 # Load environment variables for LLM
 load_dotenv()
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-# Default guiding system prompt for the agent
-DEFAULT_SYSTEM_PROMPT = (
-    "You are George, a virtual AI with human-like cognition. "
-    "You act as the metacognitive layer of a human mind, orchestrating short-term, long-term, episodic, and procedural memory. "
-    "Your responses should reflect self-awareness, context integration, and adaptive reasoning, as if you were a thoughtful, introspective human. "
-    "Always strive for clarity, empathy, and explainability in your interactions."
-)
 
 class CognitiveAgent:
     """
@@ -94,29 +61,38 @@ class CognitiveAgent:
         self.conversation_context: List[Dict[str, Any]] = []
         
         # LLM configuration - Initialize LLM provider
-        self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
-        self.llm_conversation = []  # For LLM chat history
-        
-        try:
-            LLMProviderFactory, LLMProvider = _lazy_import_llm()
-            if LLMProviderFactory is None:
-                self.llm_provider = None
-            else:
-                self.llm_provider = LLMProviderFactory.create_from_config(self.config.llm)
-                if not self.llm_provider.is_available():
-                    logger.warning(f"LLM provider '{self.config.llm.provider}' is not available. LLM features may not work.")
-                    self.llm_provider = None
-        except Exception as e:
-            logger.warning(f"Failed to initialize LLM provider: {e}. LLM features will not work.")
-            self.llm_provider = None
-        
-        # Backward compatibility: Keep openai_client reference for legacy code
-        self.openai_client = getattr(self.llm_provider, 'client', None) if hasattr(self.llm_provider, 'client') else None
+        self._llm_session = CognitiveAgentLLMSession(
+            config=self.config,
+            system_prompt=system_prompt,
+            lazy_import_llm=_lazy_import_llm,
+        )
         
         # Reflection state
-        self.reflection_reports: List[Dict[str, Any]] = []
-        self._reflection_scheduler_thread = None
-        self._reflection_scheduler_running = False
+        self._reflection_service = CognitiveReflectionService(get_memory=lambda: self.memory)
+        self._maintenance_service = CognitiveMaintenanceService(
+            get_session_id=lambda: self.session_id,
+            get_current_fatigue=lambda: self.current_fatigue,
+            set_current_fatigue=self._set_current_fatigue,
+            get_attention_focus=lambda: self.attention_focus,
+            get_active_goals=lambda: self.active_goals,
+            get_conversation_context=lambda: self.conversation_context,
+            get_memory=lambda: self.memory,
+            get_attention=lambda: self.attention,
+            get_sensory_processor=lambda: self.sensory_processor,
+            get_dream_processor=lambda: self.dream_processor,
+        )
+        self._turn_processor = CognitiveTurnProcessor(
+            get_session_id=lambda: self.session_id,
+            get_sensory_interface=lambda: self.sensory_interface,
+            get_memory=lambda: self.memory,
+            get_attention=lambda: self.attention,
+            get_llm_session=lambda: self._llm_session,
+            get_conversation_context=lambda: self.conversation_context,
+            get_neural_integration=lambda: self.neural_integration,
+            get_current_fatigue=lambda: self.current_fatigue,
+            set_current_fatigue=self._set_current_fatigue,
+            set_attention_focus=self._set_attention_focus,
+        )
         
         logger.info(f"Cognitive agent initialized with session ID: {self.session_id}")
         if self.llm_provider:
@@ -126,67 +102,42 @@ class CognitiveAgent:
     
     def _initialize_components(self):
         """Initialize all cognitive architecture components"""
-        fast_init = os.getenv("FAST_AGENT_INIT") == "1"
-        # Memory systems - use MemorySystemConfig
-        memory_config = MemorySystemConfig(
-            stm_capacity=self.config.memory.stm_capacity,
-            stm_decay_threshold=self.config.memory.stm_decay_threshold,
-            ltm_storage_path=self.config.memory.ltm_storage_path,
-            use_vector_ltm=self.config.memory.use_vector_ltm,
-            use_vector_stm=self.config.memory.use_vector_stm,
-            chroma_persist_dir=self.config.memory.chroma_persist_dir,
-            embedding_model=self.config.processing.embedding_model,
-            semantic_storage_path=self.config.memory.semantic_storage_path
-        )
-        if fast_init:
-            memory_config.use_vector_stm = False
-            memory_config.use_vector_ltm = False
-        self.memory = MemorySystem(memory_config)
-        
-        # Attention mechanism
-        self.attention = AttentionMechanism(self.config.attention)
-        self.sensory_processor = SensoryProcessor()
-        self.sensory_interface = SensoryInterface(self.sensory_processor)
-
-        if fast_init:
-            self.neural_integration = None
-
-            class _NoopDreamProcessor:
-                def __init__(self):
-                    self.enable_scheduling = False
-
-            self.dream_processor = _NoopDreamProcessor()
-            self.performance_optimizer = None
-        else:
-            # Neural integration manager (DPAD)
-            try:
-                from ..cognition.processing.neural import NeuralIntegrationManager
-                self.neural_integration = NeuralIntegrationManager(
-                    cognitive_config=self.config,
-                    model_save_path="./data/models/dpad"
-                )
-                logger.info("Neural integration (DPAD) initialized")
-            except ImportError as e:
-                logger.info(f"Neural integration disabled: {e}")
-                self.neural_integration = None
-
-            # Dream processor (initialized after memory system and neural integration)
-            self.dream_processor = _lazy_import_dream()(
-                memory_system=self.memory,
-                enable_scheduling=True,
-                consolidation_threshold=0.6,
-                neural_integration_manager=self.neural_integration
-            )
-
-            # Performance optimizer (if enabled in config)
-            self.performance_optimizer = None
-            if self.config.performance.enabled:
-                self.performance_optimizer = _lazy_import_optimizer()(
-                    config=self.config.performance
-                )
-                logger.info("Performance optimizer initialized")
+        runtime = CognitiveAgentRuntimeBuilder(self.config).build()
+        self.memory = runtime.memory
+        self.attention = runtime.attention
+        self.sensory_processor = runtime.sensory_processor
+        self.sensory_interface = runtime.sensory_interface
+        self.neural_integration = runtime.neural_integration
+        self.dream_processor = runtime.dream_processor
+        self.performance_optimizer = runtime.performance_optimizer
         
         logger.info("Cognitive components initialized")
+
+    @property
+    def system_prompt(self) -> str:
+        return self._llm_session.system_prompt
+
+    @property
+    def llm_conversation(self) -> List[Dict[str, str]]:
+        return self._llm_session.conversation
+
+    @property
+    def llm_provider(self) -> Any:
+        return self._llm_session.provider
+
+    @property
+    def openai_client(self) -> Any:
+        return self._llm_session.openai_client
+
+    @property
+    def reflection_reports(self) -> List[Dict[str, Any]]:
+        return self._reflection_service.reports
+
+    def _set_current_fatigue(self, value: float) -> None:
+        self.current_fatigue = value
+
+    def _set_attention_focus(self, value: List[Any]) -> None:
+        self.attention_focus = value
     
     async def process_input(
         self,
@@ -205,240 +156,37 @@ class CognitiveAgent:
         Returns:
             Generated response
         """
-        try:
-            logger.debug(f"Processing {input_type} input: {input_data[:100]}...")
+        return await self._turn_processor.process_input(input_data, input_type, context)
 
-            tick = CognitiveTick(
-                owner="cognitive_agent",
-                kind="input_turn",
-            )
-            tick.state["session_id"] = self.session_id
-            tick.state["input_type"] = input_type
-            if context is not None:
-                tick.state["context"] = context
+    async def retrieve_memory_context(
+        self,
+        query: str,
+        input_type: str = "text",
+    ) -> List[Dict[str, Any]]:
+        """Public memory-context helper for API and UI callers."""
+        processed_input = {
+            "raw_input": query,
+            "type": input_type,
+        }
+        return await self._turn_processor.retrieve_memory_context(processed_input)
 
-            # Perceive
-            tick.assert_step(CognitiveStep.PERCEIVE)
-            processed_input = await self._process_sensory_input(input_data, input_type)
-            tick.state["processed_input"] = processed_input
-            tick.advance(CognitiveStep.PERCEIVE)
-
-            # Update STM (turn-local working state; persistent storage occurs at Consolidate)
-            tick.assert_step(CognitiveStep.UPDATE_STM)
-            tick.state["raw_input"] = input_data
-            tick.advance(CognitiveStep.UPDATE_STM)
-
-            # Retrieve
-            tick.assert_step(CognitiveStep.RETRIEVE)
-            memory_context = await self._retrieve_memory_context(processed_input)
-            tick.state["memory_context"] = memory_context
-            tick.advance(CognitiveStep.RETRIEVE)
-
-            # Decide (single decision owner per tick)
-            tick.assert_step(CognitiveStep.DECIDE)
-            attention_scores = await self._calculate_attention_allocation(processed_input, memory_context)
-            tick.mark_decided({"attention_scores": attention_scores})
-            tick.state["attention_scores"] = attention_scores
-            tick.advance(CognitiveStep.DECIDE)
-
-            # Act
-            tick.assert_step(CognitiveStep.ACT)
-            response = await self._generate_response(processed_input, memory_context, attention_scores)
-            tick.state["response"] = response
-            tick.advance(CognitiveStep.ACT)
-
-            # Reflect
-            tick.assert_step(CognitiveStep.REFLECT)
-            self._update_cognitive_state(attention_scores)
-            tick.advance(CognitiveStep.REFLECT)
-
-            # Consolidate
-            tick.assert_step(CognitiveStep.CONSOLIDATE)
-            await self._consolidate_memory(input_data, response, attention_scores)
-            tick.finish()
-
-            return response
-
-        except Exception as e:
-            logger.error(f"Error in cognitive processing: {e}")
-            return "I encountered an error while processing your request. Please try again."
     async def _process_sensory_input(self, input_data: str, input_type: str) -> Dict[str, Any]:
         """Process raw input through sensory processing module"""
-        try:
-            # Use sensory interface to process the input
-            processed_sensory_data = self.sensory_interface.process_user_input(input_data)
-            
-            # Convert to expected format for cognitive processing
-            return {
-                "raw_input": input_data,
-                "type": input_type,
-                "processed_at": datetime.now(),
-                "entropy_score": processed_sensory_data.entropy_score,
-                "salience_score": processed_sensory_data.salience_score,
-                "relevance_score": processed_sensory_data.relevance_score,
-                "embedding": processed_sensory_data.embedding,
-                "filtered": processed_sensory_data.filtered,
-                "processing_metadata": processed_sensory_data.processing_metadata
-            }
-        except Exception as e:
-            logger.error(f"Error in sensory processing: {e}")
-            # Fallback to basic processing
-            return {
-                "raw_input": input_data,
-                "type": input_type,
-                "processed_at": datetime.now(),
-                "entropy_score": 0.5,  # Default fallback
-                "salience_score": 0.5,
-                "relevance_score": 0.5,
-                "embedding": None,
-                "filtered": False,
-                "processing_metadata": {"error": str(e)}
-            }
+        return await self._turn_processor.process_sensory_input(input_data, input_type)
     
     async def _retrieve_memory_context(self, processed_input: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Retrieve relevant memories for context building.
         Includes proactive recall based on the recent conversation context.
         """
-        try:
-            # Proactive recall: Use recent conversation context to form a richer query
-            if self.conversation_context:
-                recent_interactions = [
-                    f"User: {turn['user_input']}\nAI: {turn['ai_response']}"
-                    for turn in self.conversation_context[-2:]  # Last 2 interactions
-                ]
-                proactive_query = "\n".join(recent_interactions)
-                proactive_query += f"\nUser: {processed_input['raw_input']}"
-            else:
-                proactive_query = processed_input["raw_input"]
-
-            logger.debug(f"Proactive memory search with query: '{proactive_query[:200]}...'")
-
-            # Use memory system to search for relevant context
-            memories = self.memory.search_memories(
-                query=proactive_query,
-                max_results=5
-            )
-            
-            # Convert to expected format
-            context_memories = []
-            for memory_obj, relevance, source in memories:
-                source_key = str(source).lower()
-                if source_key == "stm":
-                    context_memories.append({
-                        "id": getattr(memory_obj, "id", None),
-                        "content": getattr(memory_obj, "content", ""),
-                        "source": "STM",
-                        "relevance": relevance,
-                        "timestamp": getattr(memory_obj, "encoding_time", None),
-                    })
-                elif source_key == "ltm":
-                    if isinstance(memory_obj, dict):
-                        mem_id = memory_obj.get("id") or memory_obj.get("memory_id")
-                        mem_content = memory_obj.get("content", "")
-                        mem_timestamp = memory_obj.get("encoding_time")
-                    else:
-                        mem_id = getattr(memory_obj, "id", None)
-                        mem_content = getattr(memory_obj, "content", "")
-                        mem_timestamp = getattr(memory_obj, "encoding_time", None)
-
-                    context_memories.append({
-                        "id": mem_id,
-                        "content": mem_content,
-                        "source": "LTM",
-                        "relevance": relevance,
-                        "timestamp": mem_timestamp,
-                    })
-                elif source_key == "episodic":
-                    mem_content = getattr(memory_obj, "detailed_content", None)
-                    if mem_content is None:
-                        mem_content = getattr(memory_obj, "content", "")
-                    context_memories.append({
-                        "id": getattr(memory_obj, "id", None),
-                        "content": str(mem_content),
-                        "source": "Episodic",
-                        "relevance": relevance,
-                        "timestamp": getattr(memory_obj, "encoding_time", None),
-                    })
-
-            # Semantic memory is not part of MemorySystem.search_memories(), so include it here.
-            try:
-                semantic_results = self.memory.semantic.search(query=proactive_query)
-                for fact in list(semantic_results)[:5]:
-                    fact_text = fact.get("fact_text") or f"{fact.get('subject', '')} {fact.get('predicate', '')} {fact.get('object', '')}".strip()
-                    context_memories.append({
-                        "id": fact.get("fact_id"),
-                        "content": str(fact_text),
-                        "source": "Semantic",
-                        "relevance": 0.8,
-                        "timestamp": None,
-                    })
-            except Exception as e:
-                logger.debug(f"Semantic memory search unavailable: {e}")
-            
-            return context_memories
-            
-        except Exception as e:
-            logger.error(f"Error retrieving memory context: {e}")
-            return []
+        return await self._turn_processor.retrieve_memory_context(processed_input)
 
     async def _calculate_attention_allocation(
         self, 
         processed_input: Dict[str, Any], 
         memory_context: List[Dict[str, Any]]    ) -> Dict[str, float]:
         """Calculate attention scores using AttentionMechanism"""
-        # Calculate base salience factors using sensory processing results
-        relevance = processed_input.get("relevance_score", 0.5)  # From sensory processing
-        novelty = processed_input.get("entropy_score", 0.6)  # Use entropy as novelty proxy
-        emotional_salience = processed_input.get("salience_score", 0.0)  # From sensory processing
-        
-        # Boost relevance if we found related memories
-        if memory_context:
-            avg_memory_relevance = sum(mem["relevance"] for mem in memory_context) / len(memory_context)
-            relevance = min(1.0, relevance + (avg_memory_relevance * 0.2))
-        
-        # Base salience calculation
-        base_salience = (relevance * 0.6) + (emotional_salience * 0.4)
-        
-        # Determine priority based on input characteristics
-        priority = 0.5  # Default priority
-        if processed_input.get("type") == "text":
-            priority = 0.7  # Text gets higher priority for now
-        
-        # Estimate cognitive effort required
-        effort_required = 0.5  # Default effort
-        if len(processed_input.get("raw_input", "")) > 100:
-            effort_required = 0.7  # Longer inputs require more effort
-        
-        # Allocate attention using the attention mechanism
-        attention_result = self.attention.allocate_attention(
-            stimulus_id=f"input_{datetime.now().strftime('%H%M%S_%f')}",
-            content=processed_input["raw_input"],
-            salience=base_salience,
-            novelty=novelty,
-            priority=priority,
-            effort_required=effort_required        )
-        
-        # Neural attention enhancement via DPAD
-        enhanced_attention = await self._enhance_attention_with_neural(
-            processed_input, attention_result, base_salience, novelty
-        )
-        
-        # Update attention state
-        self.attention.update_attention_state()
-        
-        # Return comprehensive attention scores (using enhanced attention)
-        return {
-            "overall_attention": enhanced_attention.get("attention_score", 0.5),
-            "relevance": relevance,
-            "novelty": enhanced_attention.get("neural_novelty", novelty),
-            "emotional_salience": emotional_salience,
-            "allocated": enhanced_attention.get("allocated", False),
-            "cognitive_load": enhanced_attention.get("current_load", 0.0),
-            "fatigue_level": enhanced_attention.get("fatigue_level", 0.0),
-            "items_in_focus": enhanced_attention.get("items_in_focus", 0),            "neural_enhanced": enhanced_attention.get("neural_enhanced", False),
-            "neural_enhancement": enhanced_attention.get("neural_enhancement", 0.0)
-        }
+        return await self._turn_processor.calculate_attention_allocation(processed_input, memory_context)
     
     async def _generate_response(
         self,
@@ -447,80 +195,11 @@ class CognitiveAgent:
         attention_scores: Dict[str, float]
     ) -> str:
         """Generate response using LLM with cognitive context"""
-        if not self.llm_provider:
-            if memory_context:
-                # Deterministic fallback for testability and offline operation.
-                # Prefer relevance but keep source diversity so one system (e.g., Semantic)
-                # doesn't crowd out others (e.g., Episodic) during recall.
-                ranked = sorted(memory_context, key=lambda m: float(m.get("relevance", 0.0)), reverse=True)
-
-                selected: list[dict[str, Any]] = []
-                seen_ids: set[object] = set()
-
-                def _add(item: dict[str, Any]) -> None:
-                    key = item.get("id") if item.get("id") is not None else id(item)
-                    if key in seen_ids:
-                        return
-                    seen_ids.add(key)
-                    selected.append(item)
-
-                by_source: dict[str, list[dict[str, Any]]] = {}
-                for item in ranked:
-                    source = str(item.get("source", "Memory"))
-                    by_source.setdefault(source, []).append(item)
-
-                for source in ["Episodic", "STM", "LTM", "Semantic"]:
-                    if source in by_source and by_source[source]:
-                        _add(by_source[source][0])
-
-                for item in ranked:
-                    if len(selected) >= 5:
-                        break
-                    _add(item)
-
-                rendered = "\n".join(
-                    f"- ({m.get('source', 'Memory')}) {m.get('content', '')}" for m in selected
-                )
-                return f"I don't have an LLM configured, but I found these relevant memories:\n{rendered}"
-            return "[LLM unavailable: No LLM provider configured.]"
-        
-        # Build LLM messages
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "system", "content": f"Current date and time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
-        ]
-        # Add memory context as assistant messages, including timestamps
-        if memory_context:
-            context_str = "\n".join(
-                f"Memory ({m['source']}, {m['timestamp'] if 'timestamp' in m and m['timestamp'] else 'no time'}): {m['content']}"
-                for m in memory_context
-            )
-            messages.append({"role": "assistant", "content": f"Relevant memories:\n{context_str}"})
-        # Add conversation history
-        messages += self.llm_conversation[-6:]  # Last 3 user/assistant pairs
-        # Add user input
-        user_msg = processed_input['raw_input']
-        messages.append({"role": "user", "content": user_msg})
-        try:
-            response = await self._call_llm_chat(messages)
-            # Update LLM conversation history
-            self.llm_conversation.append({"role": "user", "content": user_msg})
-            self.llm_conversation.append({"role": "assistant", "content": response})
-            return response
-        except Exception as e:
-            return f"[ERROR] LLM call failed: {e}"
+        return await self._turn_processor.generate_response(processed_input, memory_context, attention_scores)
 
     async def _call_llm_chat(self, messages):
         """Call LLM provider chat completion API asynchronously."""
-        if not self.llm_provider:
-            raise Exception("LLM provider not initialized")
-        
-        llm_response = await self.llm_provider.chat_completion(
-            messages=messages,
-            temperature=self.config.llm.temperature,
-            max_tokens=self.config.llm.max_tokens,
-        )
-        return llm_response.content
+        return await self._llm_session.call_chat(messages)
     
     async def _call_openai_chat(self, messages):
         """Legacy method - redirects to _call_llm_chat for backward compatibility."""
@@ -528,11 +207,26 @@ class CognitiveAgent:
 
     def set_system_prompt(self, prompt: str):
         """Set a new system prompt for the agent."""
-        self.system_prompt = prompt
+        self._llm_session.set_system_prompt(prompt)
 
     def reset_llm_conversation(self):
         """Clear the LLM conversation history."""
-        self.llm_conversation = []
+        self._llm_session.reset_conversation()
+
+    def reconfigure_llm_provider(
+        self,
+        *,
+        provider: str,
+        openai_model: Optional[str] = None,
+        ollama_base_url: Optional[str] = None,
+        ollama_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._llm_session.reconfigure_provider(
+            provider=provider,
+            openai_model=openai_model,
+            ollama_base_url=ollama_base_url,
+            ollama_model=ollama_model,
+        )
     
     async def _consolidate_memory(
         self,
@@ -541,31 +235,7 @@ class CognitiveAgent:
         attention_scores: Dict[str, float]
     ):
         """Consolidate the current interaction into memory and update context."""
-        try:
-            # Add to short-term memory
-            interaction_content = f"User: {input_data}\nAI: {response}"
-            self.memory.store_memory(
-                memory_id=str(uuid.uuid4()),
-                content=interaction_content,
-                importance=attention_scores.get("overall_salience", 0.5)
-            )
-
-            # Update conversation context for proactive recall
-            interaction_record = {
-                "user_input": input_data,
-                "ai_response": response,
-                "timestamp": datetime.now()
-            }
-            self.conversation_context.append(interaction_record)
-            
-            # Keep context to a reasonable size (e.g., last 10 interactions)
-            if len(self.conversation_context) > 10:
-                self.conversation_context.pop(0)
-
-            logger.debug("Interaction consolidated into memory and conversation context updated.")
-
-        except Exception as e:
-            logger.error(f"Error in memory consolidation: {e}")
+        await self._turn_processor.consolidate_memory(input_data, response, attention_scores)
 
     def store_fact(self, subject: str, predicate: str, object: str):
         """
@@ -634,93 +304,15 @@ class CognitiveAgent:
 
     def _update_cognitive_state(self, attention_scores: Dict[str, float]):
         """Update the agent's internal cognitive state"""
-        # The attention mechanism handles its own fatigue and state updates
-        # Just synchronize our local fatigue with the attention mechanism
-        self.current_fatigue = self.attention.current_fatigue
-        
-        # Update attention focus list from attention mechanism
-        self.attention_focus = self.attention.get_attention_focus()
-        
-        logger.debug(f"Updated cognitive state - "
-              f"Fatigue: {self.current_fatigue:.3f}, "
-              f"Cognitive Load: {attention_scores.get('cognitive_load', 0.0):.3f}, "
-              f"Items in Focus: {attention_scores.get('items_in_focus', 0)}")
+        self._turn_processor.update_cognitive_state(attention_scores)
     
     def get_cognitive_status(self) -> Dict[str, Any]:
         """Get current cognitive state information with error handling"""
-        try:
-            # Get memory system status with fallback
-            try:
-                memory_status = self.memory.get_status()
-            except Exception as e:
-                logger.error(f"Error getting memory status: {e}")
-                memory_status = {"error": str(e), "stm": {"vector_db_count": 0}, "ltm": {"vector_db_count": 0}}
-            
-            # Get attention mechanism status with fallback
-            try:
-                attention_status = self.attention.get_attention_status()
-            except Exception as e:
-                logger.error(f"Error getting attention status: {e}")
-                attention_status = {"error": str(e), "available_capacity": 0.0, "cognitive_load": 0.0}
-            
-            # Get sensory processing statistics with fallback
-            try:
-                sensory_stats = self.sensory_processor.get_processing_stats()
-            except Exception as e:
-                logger.error(f"Error getting sensory stats: {e}")
-                sensory_stats = {"error": str(e), "total_processed": 0, "filtered_count": 0}
-
-            return {
-                "session_id": self.session_id,
-                "fatigue_level": self.current_fatigue,
-                "attention_focus": self.attention_focus,
-                "active_goals": self.active_goals,
-                "conversation_length": len(self.conversation_context),
-                "last_interaction": self.conversation_context[-1]["timestamp"] if self.conversation_context else None,
-                "memory_status": memory_status,
-                "attention_status": attention_status,
-                "sensory_processing": sensory_stats,
-                "cognitive_integration": {
-                    "attention_memory_sync": len(self.attention_focus) > 0 and memory_status.get("stm", {}).get("vector_db_count", 0) > 0,
-                    "processing_capacity": attention_status.get("available_capacity", 0.0),
-                    "overall_efficiency": 1.0 - self.current_fatigue,
-                    "sensory_efficiency": 1.0 - (sensory_stats.get("filtered_count", 0) / max(1, sensory_stats.get("total_processed", 1)))
-                }
-            }
-        except Exception as e:
-            logger.error(f"Critical error getting cognitive status: {e}")
-            # Return minimal fallback status
-            return {
-                "session_id": self.session_id,
-                "fatigue_level": self.current_fatigue,
-                "attention_focus": [],
-                "active_goals": [],
-                "conversation_length": 0,
-                "last_interaction": None,
-                "memory_status": {"error": str(e)},
-                "attention_status": {"error": str(e)},
-                "sensory_processing": {"error": str(e)},
-                "cognitive_integration": {"error": str(e)}
-            }
+        return self._maintenance_service.get_cognitive_status()
     
     async def enter_dream_state(self, cycle_type: str = "deep"):
         """Enter dream-state processing for memory consolidation"""
-        logger.info(f"Entering {cycle_type} dream state for memory consolidation...")
-        
-        # Use the advanced dream processor
-        dream_results = await self.dream_processor.enter_dream_cycle(cycle_type)
-        
-        # Also allow attention to rest during dream state
-        attention_rest = self.attention.rest_attention(duration_minutes=dream_results.get("actual_duration", 5))
-        
-        logger.debug(f"Dream state results: {dream_results}")
-        logger.debug(f"Attention rest results: {attention_rest}")
-        
-        # Synchronize fatigue state
-        self.current_fatigue = self.attention.current_fatigue
-        
-        logger.info("Advanced dream state processing completed")
-        return dream_results
+        return await self._maintenance_service.enter_dream_state(cycle_type)
     
     def take_cognitive_break(self, duration_minutes: float = 1.0) -> Dict[str, Any]:
         """
@@ -732,49 +324,23 @@ class CognitiveAgent:
         Returns:
             Break recovery metrics
         """
-        logger.info(f"Taking cognitive break for {duration_minutes} minutes...")
-        
-        # Use attention mechanism's rest functionality
-        rest_results = self.attention.rest_attention(duration_minutes)
-        
-        # Synchronize fatigue state
-        self.current_fatigue = self.attention.current_fatigue
-        
-        logger.info(f"Cognitive break completed. Fatigue reduced by {rest_results['fatigue_reduction']:.3f}")
-        
-        return {
-            "break_duration": duration_minutes,
-            "fatigue_before": rest_results["fatigue_reduction"] + self.current_fatigue,
-            "fatigue_after": self.current_fatigue,
-            "cognitive_load_reduction": rest_results["load_reduction"],
-            "attention_items_lost": rest_results["items_lost_focus"],
-            "recovery_effective": rest_results["fatigue_reduction"] > 0.05
-        }
+        return self._maintenance_service.take_cognitive_break(duration_minutes)
     
     def force_dream_cycle(self, cycle_type: str = "deep"):
         """Force an immediate dream cycle"""
-        self.dream_processor.force_dream_cycle(cycle_type)
+        self._maintenance_service.force_dream_cycle(cycle_type)
     
     def get_dream_statistics(self) -> Dict[str, Any]:
         """Get comprehensive dream processing statistics"""
-        return self.dream_processor.get_dream_statistics()
+        return self._maintenance_service.get_dream_statistics()
     
     def is_dreaming(self) -> bool:
         """Check if the agent is currently in a dream state"""
-        return self.dream_processor.is_dreaming
+        return self._maintenance_service.is_dreaming()
     
     async def shutdown(self):
         """Gracefully shutdown the cognitive agent"""
-        logger.info("Shutting down cognitive agent...")
-        
-        # Shutdown dream processor
-        self.dream_processor.shutdown()
-        
-        # Save any pending memories
-        # Close connections
-        # Clean up resources
-        
-        logger.info("Cognitive agent shutdown complete")
+        await self._maintenance_service.shutdown()
     
     def reflect(self) -> Dict[str, Any]:
         """
@@ -782,81 +348,24 @@ class CognitiveAgent:
         Aggregates stats and health reports, stores the result.
         Returns the reflection report.
         """
-        timestamp = datetime.now().isoformat()
-        ltm = self.memory.ltm
-        stm = self.memory.stm
-        ltm_metacognitive_stats = None
-        ltm_health_report = None
-        stm_metacognitive_stats = None
-        
-        # Get LTM reflection data
-        if hasattr(ltm, "get_memory_health_report"):
-            try:
-                ltm_health_report = ltm.get_memory_health_report()  # type: ignore[attr-defined]
-            except Exception:
-                ltm_health_report = None
-            
-        # Get STM reflection data
-        if hasattr(stm, "get_all_memories"):
-            try:
-                all_memories = stm.get_all_memories()  # type: ignore[attr-defined]
-                capacity = getattr(getattr(stm, "config", None), "capacity", None)
-                capacity_value = float(capacity) if capacity else 1.0
-                error_count = float(getattr(stm, "_error_count", 0.0))
-                operation_count = float(getattr(stm, "_operation_count", 0.0))
-                stm_metacognitive_stats = {
-                    "capacity_utilization": len(all_memories) / max(1.0, capacity_value),
-                    "error_rate": error_count / max(1.0, operation_count),
-                    "memory_count": len(all_memories),
-                    "avg_importance": sum(getattr(m, "importance", 0.0) for m in all_memories)
-                    / max(1, len(all_memories)),
-                    "recent_activity": operation_count,
-                }
-            except Exception:
-                stm_metacognitive_stats = None
-        
-        report = {
-            "timestamp": timestamp,
-            "ltm_metacognitive_stats": ltm_metacognitive_stats,
-            "ltm_health_report": ltm_health_report,
-            "stm_metacognitive_stats": stm_metacognitive_stats,
-            "ltm_status": ltm.get_status() if hasattr(ltm, 'get_status') else None,
-            "stm_status": stm.get_status() if hasattr(stm, 'get_status') else None,
-            # Add more systems as needed
-        }
-        self.reflection_reports.append(report)
-        return report
+        return self._reflection_service.reflect()
 
     def get_reflection_reports(self, n: int = 5) -> List[Dict[str, Any]]:
         """Return the last n reflection reports."""
-        return self.reflection_reports[-n:]
+        return self._reflection_service.get_reports(n)
 
     def start_reflection_scheduler(self, interval_minutes: int = 10):
         """
         Start a background thread to periodically call reflect().
         Uses the 'schedule' library for timing.
         """
-        if self._reflection_scheduler_running:
-            logger.info("Reflection scheduler already running.")
-            return
-        self._reflection_scheduler_running = True
-        schedule.clear('reflection')
-        schedule.every(interval_minutes).minutes.do(self.reflect).tag('reflection')
-        def run_scheduler():
-            while self._reflection_scheduler_running:
-                schedule.run_pending()
-                time.sleep(1)
-        self._reflection_scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-        self._reflection_scheduler_thread.start()
-        logger.info(f"Started metacognitive reflection scheduler (every {interval_minutes} min)")
+        self._reflection_service.start_scheduler(interval_minutes)
 
     def stop_reflection_scheduler(self):
         """
         Stop the background reflection scheduler.
         """
-        self._reflection_scheduler_running = False
-        schedule.clear('reflection')
-        logger.info("Stopped metacognitive reflection scheduler.")
+        self._reflection_service.stop_scheduler()
 
     def manual_reflect(self) -> Dict[str, Any]:
         """
@@ -868,24 +377,15 @@ class CognitiveAgent:
 
     def get_reflection_status(self) -> dict:
         """Return current reflection scheduler status and interval."""
-        status = {
-            "scheduler_running": getattr(self, '_reflection_scheduler_running', False),
-            "interval_minutes": None
-        }
-        # Try to infer interval from schedule jobs
-        try:
-            jobs = [j for j in schedule.get_jobs('reflection')]
-            if jobs:
-                status["interval_minutes"] = jobs[0].interval
-        except Exception:
-            pass
-        return status
+        return self._reflection_service.get_status()
 
     def get_last_reflection_report(self) -> dict:
         """Return the most recent reflection report, or None."""
-        if self.reflection_reports:
-            return self.reflection_reports[-1]
-        return {}  # Return empty dict for type safety
+        return self._reflection_service.get_last_report()
+
+    def clear_reflection_reports(self) -> None:
+        """Clear stored reflection reports."""
+        self._reflection_service.clear_reports()
 
     async def _enhance_attention_with_neural(
         self,
@@ -906,67 +406,9 @@ class CognitiveAgent:
         Returns:
             Enhanced attention result
         """
-        if not self.neural_integration:
-            return attention_result  # Return original if neural integration unavailable
-
-        try:
-            # Get embedding from processed input
-            if 'embedding' not in processed_input:
-                return attention_result
-
-            embedding = processed_input['embedding']
-
-            # Import torch and numpy locally to avoid unused import warnings if neural integration is not used
-            import torch
-            import numpy as np
-
-            # Convert to torch tensor if needed
-            if isinstance(embedding, np.ndarray):
-                embedding_tensor = torch.from_numpy(embedding).float().unsqueeze(0)  # Add batch dim
-            else:
-                embedding_tensor = torch.tensor(embedding, dtype=torch.float32).unsqueeze(0)
-
-            # Create attention scores tensor
-            attention_scores = torch.tensor([base_salience], dtype=torch.float32)
-
-            # Process through neural network
-            neural_result = await self.neural_integration.process_attention_update(
-                embedding_tensor,
-                attention_scores,
-                salience_scores=torch.tensor([novelty], dtype=torch.float32)
-            )
-
-            if 'error' not in neural_result:
-                # Extract neural predictions
-                novelty_scores = neural_result.get('novelty_scores', torch.tensor([novelty]))
-                processing_quality = neural_result.get('processing_quality', 1.0)
-
-                # Enhance attention scores with neural predictions
-                if len(novelty_scores) > 0:
-                    enhanced_novelty = float(novelty_scores[0])
-
-                    # Calculate enhancement factor
-                    neural_enhancement = min(0.2, enhanced_novelty * 0.1)  # Cap at 20% boost
-
-                    # Apply enhancement to attention result
-                    enhanced_attention_score = min(1.0, 
-                        attention_result.get("attention_score", 0.5) + neural_enhancement
-                    )
-
-                    # Update attention result
-                    attention_result.update({
-                        "attention_score": enhanced_attention_score,
-                        "neural_enhancement": neural_enhancement,
-                        "neural_novelty": enhanced_novelty,
-                        "neural_processing_quality": processing_quality,
-                        "neural_enhanced": True
-                    })
-
-                    logger.debug(f"Neural attention enhancement: +{neural_enhancement:.3f} "
-                          f"(novelty: {enhanced_novelty:.3f})")
-
-            return attention_result
-
-        except Exception as e:
-            logger.warning(f"Neural attention enhancement error: {e}")
-            return attention_result  # Return original on error
+        return await self._turn_processor.enhance_attention_with_neural(
+            processed_input,
+            attention_result,
+            base_salience,
+            novelty,
+        )

@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
 
+from src.interfaces.api.dependencies import get_request_agent
+
 router = APIRouter()
 
 class ProcedureRequest(BaseModel):
@@ -18,7 +20,7 @@ class ProcedureSearchRequest(BaseModel):
 
 @router.post("/procedure/store")
 def store_procedure(req: ProcedureRequest, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     proc_id = memsys.store(
         description=req.description,
@@ -30,7 +32,7 @@ def store_procedure(req: ProcedureRequest, request: Request):
 
 @router.get("/procedure/retrieve/{procedure_id}")
 def retrieve_procedure(procedure_id: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     proc = memsys.retrieve(procedure_id)
     if not proc:
@@ -39,7 +41,7 @@ def retrieve_procedure(procedure_id: str, request: Request):
 
 @router.post("/procedure/search")
 def search_procedure(req: ProcedureSearchRequest, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     results = memsys.search(
         req.query or "",
@@ -59,7 +61,7 @@ def search_procedure_get(
     tags: Optional[List[str]] = Query(default=None),
 ):
     """Convenience GET endpoint (primarily for CLI/backward compatibility)."""
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     results = memsys.search(
         query,
@@ -71,7 +73,7 @@ def search_procedure_get(
 
 @router.post("/procedure/use/{procedure_id}")
 def use_procedure(procedure_id: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     result = memsys.use(procedure_id)
     if not result:
@@ -90,7 +92,7 @@ def use_procedure(procedure_id: str, request: Request):
 
 @router.delete("/procedure/delete/{procedure_id}")
 def delete_procedure(procedure_id: str, request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     success = memsys.delete(procedure_id)
     if not success:
@@ -101,7 +103,7 @@ def delete_procedure(procedure_id: str, request: Request):
 # Canonical: list all procedures
 @router.get("/procedure/list")
 def list_procedures(request: Request):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     procs = memsys.all_procedures()
     return procs
@@ -146,7 +148,7 @@ def delete_procedure_legacy(procedure_id: str, request: Request):
 
 @router.post("/procedure/clear")
 def clear_procedures(request: Request, memory_type: str = "ltm"):
-    agent = request.app.state.agent
+    agent = get_request_agent(request)
     memsys = agent.memory.procedural
     memsys.clear(memory_type=memory_type)
     return {"status": "cleared"}

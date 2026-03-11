@@ -1,11 +1,11 @@
-# George Startup Guide for Git Bash Users
+# George Startup Guide
 
 ## 🚀 Quick Start Options
 
 ### Option 1: Single Entrypoint (Recommended)
 ```bash
-# Starts API + Streamlit UI
-python main.py ui
+# Starts API + Chainlit UI
+python main.py chainlit --with-backend
 ```
 
 ### Option 2: API Only
@@ -19,8 +19,8 @@ API will be available at: http://localhost:8000
 # Terminal 1 (or background): Start API server
 python main.py api
 
-# Wait a few seconds, then start frontend
-venv/Scripts/python.exe -m streamlit run scripts/george_streamlit_chat.py --server.port 8501
+# Terminal 2: Start frontend
+python main.py chainlit
 ```
 
 ## 🛠️ Troubleshooting
@@ -34,7 +34,8 @@ venv/Scripts/python.exe -m streamlit run scripts/george_streamlit_chat.py --serv
 ```bash
 # Try these alternatives:
 python main.py api
-python -m streamlit run scripts/george_streamlit_chat.py --server.port 8501
+python main.py chainlit
+python main.py ui
 ```
 
 ### If virtual environment isn't found:
@@ -50,9 +51,11 @@ venv/Scripts/activate.bat     # Command Prompt
 # Kill existing processes:
 pkill -f "uvicorn"
 pkill -f "streamlit"
+pkill -f "chainlit"
 
 # Or use different ports:
-python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvicorn.run(app, port=8001)"
+python main.py api --port 8001
+python main.py chainlit --port 8502
 ```
 
 ## 📋 What Should Happen
@@ -61,14 +64,14 @@ python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvi
    - Health check: http://localhost:8000/health
    - Documentation: http://localhost:8000/docs
 
-2. **Streamlit Interface starts** on http://localhost:8501
-   - Minimal chat interface with memory context visibility
+2. **Chainlit Interface starts** on http://localhost:8501
+   - Conversational UI backed by the canonical FastAPI runtime
 
 ## 🔌 API base URL tip
 
 When running Streamlit, set the API base to the server root (no `/api` prefix), e.g. `http://localhost:8000`.
 
-The simple dev server (`scripts/legacy/george_api_simple.py`) supports unprefixed endpoints (like `/agent/chat`).
+The canonical backend is `python main.py api`.
 
 3. **Initialization takes 10-60 seconds**
    - First time: Downloads models, creates databases
@@ -77,7 +80,8 @@ The simple dev server (`scripts/legacy/george_api_simple.py`) supports unprefixe
 ## 🔧 Services Overview
 
 - **Backend (API Server)**: George's cognitive architecture
-- **Frontend (Streamlit)**: Interactive web interface
+- **Frontend (Chainlit)**: Current interactive chat interface
+- **Frontend (Streamlit)**: Legacy interface
 - **Both needed**: Frontend talks to backend via REST API
 
 ## 💡 Pro Tips

@@ -22,7 +22,6 @@ Version: 2.0.0
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -37,6 +36,17 @@ from .ltm import VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .prospective.prospective_memory import ProspectiveMemorySystem
 from .procedural.procedural_memory import ProceduralMemory
+from .services import (
+    MemoryConsolidationService,
+    MemoryContextService,
+    MemoryFactService,
+    MemoryProspectiveService,
+    MemoryRecallService,
+    MemoryRetrievalService,
+    MemoryStatusService,
+    MemoryStorageRouter,
+)
+from .runtime import MemorySubsystemInitializer
 
 if TYPE_CHECKING:
     from .episodic.episodic_memory import EpisodicSearchResult
@@ -221,6 +231,70 @@ class MemorySystem:
         self._operation_counts: Dict[str, int] = {}
         self._error_counts: Dict[str, int] = {}
         self._start_time = datetime.now()
+        self._status_service = MemoryStatusService(
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            get_config=lambda: self._config,
+            get_start_time=lambda: self._start_time,
+            get_last_consolidation=lambda: self._last_consolidation,
+            get_session_memories_count=lambda: len(self._session_memories),
+            get_operation_counts=lambda: self._operation_counts.copy(),
+            get_error_counts=lambda: self._error_counts.copy(),
+            is_active=self.is_initialized,
+            clear_session_memories=self._clear_session_memories,
+        )
+        self._fact_service = MemoryFactService(get_semantic=lambda: self.semantic)
+        self._retrieval_service = MemoryRetrievalService(
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            get_episodic=lambda: self.episodic,
+            get_config=lambda: self._config,
+            increment_operation=self._increment_operation_count,
+            increment_error=self._increment_error_count,
+        )
+        self._context_service = MemoryContextService(
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            get_config=lambda: self._config,
+        )
+        self._consolidation_service = MemoryConsolidationService(
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            get_config=lambda: self._config,
+            get_last_consolidation=lambda: self._last_consolidation,
+            set_last_consolidation=self._set_last_consolidation,
+            get_executor=lambda: self._executor,
+            get_consolidation_lock=lambda: self._consolidation_lock,
+        )
+        self._prospective_service = MemoryProspectiveService(
+            get_config=lambda: self._config,
+            get_last_process=lambda: self._last_prospective_process,
+            set_last_process=self._set_last_prospective_process,
+            get_executor=lambda: self._executor,
+            get_prospective=lambda: self.prospective,
+            get_ltm=lambda: self.ltm,
+        )
+        self._recall_service = MemoryRecallService(
+            is_initialized=self.is_initialized,
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            get_episodic=lambda: self.episodic,
+            get_semantic=lambda: self.semantic,
+            use_vector_ltm=lambda: self._config.use_vector_ltm,
+        )
+        self._storage_router = MemoryStorageRouter(
+            get_config=lambda: self._config,
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            create_episodic_memory=self.create_episodic_memory,
+            append_session_memory=self._append_session_memory,
+            increment_operation=self._increment_operation_count,
+            increment_error=self._increment_error_count,
+            should_consolidate=self._should_consolidate,
+            schedule_consolidation=self._schedule_consolidation,
+            should_process_prospective=self._should_process_prospective,
+            schedule_prospective_processing=self._schedule_prospective_processing,
+        )
 
         # Initialize core systems
         try:
@@ -234,71 +308,13 @@ class MemorySystem:
     def _initialize_systems(self) -> None:
         """Initialize all memory subsystems."""
         try:
-            # Initialize STM - always use VectorShortTermMemory
-            stm_config = STMConfiguration(
-                chroma_persist_dir=self._config.chroma_persist_dir,
-                embedding_model=self._config.embedding_model,
-                capacity=self._config.stm_capacity,
-                enable_gpu=getattr(self._config, 'enable_gpu', True),
-                lazy_embeddings=self._config.lazy_embeddings
-            )
-            self._stm = VectorShortTermMemory(stm_config)
-            
-            # Initialize LTM
-            if self._config.use_vector_ltm:
-                self._ltm = VectorLongTermMemory(
-                    chroma_persist_dir=self._config.chroma_persist_dir,
-                    embedding_model=self._config.embedding_model,
-                    lazy_embeddings=self._config.lazy_embeddings
-                )
-            else:
-                raise MemorySystemError("LTM initialization failed: VectorLTM must be used")
-            
-            # Initialize Episodic Memory
-            self._episodic = EpisodicMemorySystem(
-                chroma_persist_dir=self._config.chroma_persist_dir,
-                embedding_model=self._config.embedding_model,
-                lazy_embeddings=self._config.lazy_embeddings
-            )
-            
-            # Initialize Semantic Memory (using ChromaDB)
-            if os.environ.get("DISABLE_SEMANTIC_MEMORY") == "1":
-                self._semantic = None
-                logger.info("Semantic memory disabled via DISABLE_SEMANTIC_MEMORY")
-            else:
-                try:
-                    from .semantic.semantic_memory import SemanticMemorySystem as _SemanticMemorySystem
-                    self._semantic = _SemanticMemorySystem(
-                        chroma_persist_dir=self._config.chroma_persist_dir or "data/memory_stores/chroma_semantic",
-                        embedding_model=self._config.embedding_model,
-                        lazy_embeddings=self._config.lazy_embeddings
-                    )
-                except Exception as e:
-                    self._semantic = None
-                    logger.warning(f"Semantic memory unavailable; continuing without it: {e}")
-            
-            # Initialize Prospective Memory
-            try:
-                if getattr(self._config, 'use_vector_prospective', False):
-                    from src.memory.prospective.prospective_memory import ProspectiveMemoryVectorStore
-                    self._prospective = ProspectiveMemoryVectorStore(
-                        chroma_persist_dir=self._config.chroma_persist_dir,
-                        embedding_model=self._config.embedding_model
-                    )
-                    logger.info("Prospective memory backend: vector store (ChromaDB)")
-                else:
-                    from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
-                    self._prospective = get_inmemory_prospective_memory()
-                    logger.info("Prospective memory backend: in-memory singleton")
-            except Exception as e:
-                logger.warning(f"Prospective memory init fallback to in-memory due to error: {e}")
-                from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
-                self._prospective = get_inmemory_prospective_memory()
-                logger.info("Prospective memory backend: in-memory singleton (fallback)")
-            
-            # Initialize Procedural Memory
-            self._procedural = ProceduralMemory(stm=self._stm, ltm=self._ltm)
-            
+            bundle = MemorySubsystemInitializer(self._config).initialize()
+            self._stm = bundle.stm
+            self._ltm = bundle.ltm
+            self._episodic = bundle.episodic
+            self._semantic = bundle.semantic
+            self._prospective = bundle.prospective
+            self._procedural = bundle.procedural
         except Exception as e:
             logger.error(f"Error initializing memory systems: {e}")
             raise
@@ -456,73 +472,19 @@ class MemorySystem:
         
         try:
             with self._operation_lock:
-                # Track for session
-                session_entry = {
-                    'memory_id': memory_id,
-                    'timestamp': start_time,
-                    'importance': importance,
-                    'storage_location': None,
-                    'memory_type': memory_type
-                }
-                
-                # Create episodic memory for significant events
-                if importance > 0.6:
-                    try:
-                        self._create_episodic_memory_for_storage(
-                            memory_id=memory_id,
-                            content=content,
-                            importance=importance,
-                            emotional_valence=emotional_valence,
-                            force_ltm=force_ltm
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to create episodic memory for {memory_id}: {e}")
-                
-                # Determine storage location based on cognitive principles
-                storage_system = self._determine_storage_system(
-                    importance, emotional_valence, force_ltm
+                return self._storage_router.store_memory(
+                    result_factory=MemoryOperationResult,
+                    memory_id=memory_id,
+                    content=content,
+                    importance=importance,
+                    attention_score=attention_score,
+                    emotional_valence=emotional_valence,
+                    memory_type=memory_type,
+                    tags=tags,
+                    associations=associations,
+                    force_ltm=force_ltm,
+                    operation_time=start_time,
                 )
-                
-                # Store in appropriate system
-                success = False
-                if storage_system == 'LTM':
-                    success = self._store_in_ltm(
-                        memory_id, content, memory_type, importance, tags, associations
-                    )
-                    session_entry['storage_location'] = 'LTM'
-                else:
-                    success = self._store_in_stm(
-                        memory_id, content, importance, attention_score, emotional_valence
-                    )
-                    session_entry['storage_location'] = 'STM'
-                
-                if success:
-                    self._session_memories.append(session_entry)
-                    self._operation_counts['store'] = self._operation_counts.get('store', 0) + 1
-                    
-                    # Schedule consolidation check if needed
-                    if self._should_consolidate():
-                        self._schedule_consolidation()
-                    
-                    # Process prospective memories if enabled
-                    if (self._config.auto_process_prospective and 
-                        self._should_process_prospective()):
-                        self._schedule_prospective_processing()
-                    
-                    return MemoryOperationResult(
-                        success=True,
-                        memory_id=memory_id,
-                        operation_time=start_time,
-                        system_used=storage_system
-                    )
-                else:
-                    self._error_counts['store'] = self._error_counts.get('store', 0) + 1
-                    return MemoryOperationResult(
-                        success=False,
-                        memory_id=memory_id,
-                        error_message=f"Failed to store in {storage_system}",
-                        operation_time=start_time
-                    )
                     
         except Exception as e:
             logger.error(f"Error storing memory {memory_id}: {e}")
@@ -541,11 +503,7 @@ class MemorySystem:
         force_ltm: bool
     ) -> str:
         """Determine which storage system to use based on memory characteristics."""
-        if (force_ltm or 
-            importance >= self._config.consolidation_threshold_importance or 
-            abs(emotional_valence) >= self._config.consolidation_threshold_emotional):
-            return 'LTM'
-        return 'STM'
+        return self._storage_router.determine_storage_system(importance, emotional_valence, force_ltm)
     
     def _store_in_ltm(
         self, 
@@ -557,18 +515,14 @@ class MemorySystem:
         associations: List[str]
     ) -> bool:
         """Store memory in LTM with error handling."""
-        try:
-            return self.ltm.store(
-                memory_id=memory_id,
-                content=content,
-                memory_type=memory_type,
-                importance=importance,
-                tags=tags,
-                associations=associations
-            )
-        except Exception as e:
-            logger.error(f"Failed to store {memory_id} in LTM: {e}")
-            return False
+        return self._storage_router.store_in_ltm(
+            memory_id=memory_id,
+            content=content,
+            memory_type=memory_type,
+            importance=importance,
+            tags=tags,
+            associations=associations,
+        )
     
     def _store_in_stm(
         self, 
@@ -579,17 +533,13 @@ class MemorySystem:
         emotional_valence: float
     ) -> bool:
         """Store memory in STM with error handling."""
-        try:
-            return self.stm.store(
-                memory_id=memory_id,
-                content=content,
-                importance=importance,
-                attention_score=attention_score,
-                emotional_valence=emotional_valence
-            )
-        except Exception as e:
-            logger.error(f"Failed to store {memory_id} in STM: {e}")
-            return False
+        return self._storage_router.store_in_stm(
+            memory_id=memory_id,
+            content=content,
+            importance=importance,
+            attention_score=attention_score,
+            emotional_valence=emotional_valence,
+        )
     
     def _create_episodic_memory_for_storage(
         self, 
@@ -600,47 +550,25 @@ class MemorySystem:
         force_ltm: bool
     ) -> Optional[str]:
         """Create corresponding episodic memory for significant storage events."""
-        try:
-            return self.create_episodic_memory(
-                summary=str(content)[:128],
-                detailed_content=str(content),
-                importance=importance,
-                emotional_valence=emotional_valence,
-                stm_ids=[memory_id] if not force_ltm else [],
-                ltm_ids=[memory_id] if force_ltm else []
-            )
-        except Exception as e:
-            logger.warning(f"Failed to create episodic memory for {memory_id}: {e}")
-            return None
+        return self._storage_router.create_episodic_memory_for_storage(
+            memory_id=memory_id,
+            content=content,
+            importance=importance,
+            emotional_valence=emotional_valence,
+            force_ltm=force_ltm,
+        )
     
     def _schedule_consolidation(self) -> None:
         """Schedule memory consolidation in a background thread."""
-        def consolidation_task():
-            try:
-                with self._consolidation_lock:
-                    self.consolidate_memories()
-            except Exception as e:
-                logger.error(f"Background consolidation failed: {e}")
-        
-        self._executor.submit(consolidation_task)
+        self._consolidation_service.schedule_consolidation(self.consolidate_memories)
     
     def _should_process_prospective(self) -> bool:
         """Check if prospective memory processing should occur."""
-        time_elapsed = (datetime.now() - self._last_prospective_process).total_seconds()
-        return time_elapsed >= self._config.prospective_process_interval
+        return self._prospective_service.should_process()
     
     def _schedule_prospective_processing(self) -> None:
         """Schedule prospective memory processing in a background thread."""
-        def prospective_task():
-            try:
-                processed = self.prospective.process_due_reminders(ltm_system=self.ltm)
-                if processed > 0:
-                    logger.info(f"Processed {processed} due prospective reminders")
-                self._last_prospective_process = datetime.now()
-            except Exception as e:
-                logger.error(f"Background prospective processing failed: {e}")
-        
-        self._executor.submit(prospective_task)
+        self._prospective_service.schedule_processing()
     
     def retrieve_memory(self, memory_id: str) -> Optional[Any]:
         """
@@ -667,45 +595,19 @@ class MemorySystem:
         
         memory_id = memory_id.strip()
         
-        try:
-            # Check STM first (faster access)
-            try:
-                memory = self.stm.retrieve(memory_id)
-                if memory is not None:
-                    self._operation_counts['retrieve_stm'] = self._operation_counts.get('retrieve_stm', 0) + 1
-                    return memory
-            except Exception as e:
-                logger.warning(f"Error retrieving from STM for {memory_id}: {e}")
-            
-            # Check LTM
-            try:
-                memory = self.ltm.retrieve(memory_id)
-                if memory is not None:
-                    self._operation_counts['retrieve_ltm'] = self._operation_counts.get('retrieve_ltm', 0) + 1
-                    return memory
-            except Exception as e:
-                logger.warning(f"Error retrieving from LTM for {memory_id}: {e}")
-            
-            # Not found in either system
-            self._operation_counts['retrieve_miss'] = self._operation_counts.get('retrieve_miss', 0) + 1
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error retrieving memory {memory_id}: {e}")
-            self._error_counts['retrieve'] = self._error_counts.get('retrieve', 0) + 1
-            return None
+        return self._retrieval_service.retrieve_memory(memory_id)
     
     def store_fact(self, subject: str, predicate: str, object_val: Any) -> str:
         """Stores a new fact in the semantic memory system."""
-        return self.semantic.store_fact(subject, predicate, object_val)
+        return self._fact_service.store_fact(subject, predicate, object_val)
 
     def find_facts(self, subject: Optional[str] = None, predicate: Optional[str] = None, object_val: Optional[Any] = None) -> List[Dict[str, Any]]:
         """Finds facts in the semantic memory system."""
-        return self.semantic.find_facts(subject, predicate, object_val)
+        return self._fact_service.find_facts(subject, predicate, object_val)
 
     def delete_fact(self, subject: str, predicate: str, object_val: Any) -> bool:
         """Deletes a fact from the semantic memory system."""
-        return self.semantic.delete_fact(subject, predicate, object_val)
+        return self._fact_service.delete_fact(subject, predicate, object_val)
     
     def search_memories(
         self,
@@ -730,69 +632,14 @@ class MemorySystem:
         Returns:
             List of (memory_object, relevance_score, source_system) tuples
         """
-        results = []
-        
-        try:
-            if search_stm:
-                stm_results = self.stm.search(query, max_results=max_results//2)
-                logger.debug(f"STM search for '{query}' returned: {stm_results}")
-                for memory, score in stm_results:
-                    results.append((memory, score, 'STM'))
-            
-            if search_ltm:
-                if self._config.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
-                    # Vector LTM
-                    ltm_results = self.ltm.search_semantic(
-                        query=query,
-                        memory_types=memory_types,
-                        max_results=max_results//2
-                    )
-                    logger.debug(f"LTM search for '{query}' returned: {ltm_results}")
-                    for memory in ltm_results:
-                        results.append((memory, memory.get('similarity_score', 0.0), 'LTM'))
-                else:
-                    # Legacy LTM or fallback if method exists
-                    ltm_results = getattr(self.ltm, 'search_by_content', lambda **kwargs: [])(
-                        query=query,
-                        memory_types=memory_types,
-                        max_results=max_results//2
-                    )
-                    logger.debug(f"LTM search for '{query}' returned: {ltm_results}")
-                    for memory, score in ltm_results:
-                        results.append((memory, score, 'LTM'))
-
-            if search_episodic:
-                try:
-                    episodic_results = self.episodic.search_memories(query=query, limit=max_results)
-                    logger.debug(f"Episodic search for '{query}' returned: {episodic_results}")
-                    for result in episodic_results:
-                        results.append((result.memory, result.relevance, 'Episodic'))
-                except Exception as e:
-                    logger.error(f"Error searching episodic memory for query '{query}': {e}")
-
-        except Exception as e:
-            logger.error(f"Error searching memories for query '{query}': {e}")
-
-        # Combine and sort results
-        # Deduplicate based on content to avoid redundancy from different systems
-        seen_content = set()
-        unique_results = []
-        for mem, score, source in sorted(results, key=lambda item: item[1], reverse=True):
-            content_repr = ""
-            if source == 'Episodic':
-                # mem is an EpisodicMemory object
-                content_repr = repr(mem.detailed_content)
-            elif isinstance(mem, dict):
-                content_repr = repr(mem.get('content'))
-            elif hasattr(mem, 'content'):
-                # Assumes an object with a .content attribute
-                content_repr = repr(mem.content)
-            
-            if content_repr and content_repr not in seen_content:
-                unique_results.append((mem, score, source))
-                seen_content.add(content_repr)
-
-        return unique_results[:max_results]
+        return self._retrieval_service.search_memories(
+            query=query,
+            search_stm=search_stm,
+            search_ltm=search_ltm,
+            search_episodic=search_episodic,
+            memory_types=memory_types,
+            max_results=max_results,
+        )
     
     def consolidate_memories(self, force: bool = False) -> Dict[str, Any]:
         """
@@ -804,95 +651,7 @@ class MemorySystem:
         Returns:
             Dict with consolidation statistics
         """
-        if not force and not self._should_consolidate():
-            return {'status': 'skipped', 'reason': 'not due'}
-        
-        stats = {
-            'start_time': datetime.now(),
-            'consolidated_count': 0,
-            'failed_count': 0,
-            'errors': []
-        }
-        
-        try:
-            # Get memories ready for consolidation
-            stm_items = {}
-            if hasattr(self.stm, 'get_all_memories'):
-                # Vector STM
-                stm_memories = getattr(self.stm, 'get_all_memories')()
-                stm_items = {mem.id: mem for mem in stm_memories}
-            else:
-                # Legacy STM
-                stm_items = getattr(self.stm, 'items', {})
-            
-            for memory_id, memory_item in stm_items.items():
-                try:
-                    # Determine if memory should be consolidated
-                    importance = getattr(memory_item, 'importance', 0.0)
-                    emotional_valence = getattr(memory_item, 'emotional_valence', 0.0)
-                    age_minutes = (datetime.now() - memory_item.encoding_time).total_seconds() / 60
-
-                    # Phase 7: utility-based learning law.
-                    # Benefit: importance, emotional salience, and time-in-STM (age) as proxies for retrieval utility.
-                    # Cost: small fixed write cost.
-                    try:
-                        from src.learning.learning_law import clamp01, utility_score
-                    except Exception:  # pragma: no cover
-                        def clamp01(x: Any) -> float:  # type: ignore[no-redef]
-                            try:
-                                return float(x)
-                            except (TypeError, ValueError):
-                                return 0.0
-
-                        def utility_score(*, benefit: Any, cost: Any, benefit_weight: float = 1.0, cost_weight: float = 1.0) -> float:  # type: ignore[no-redef]
-                            return (benefit_weight * clamp01(benefit)) - (cost_weight * clamp01(cost))
-
-                    benefit = clamp01(max(
-                        float(importance or 0.0),
-                        float(abs(emotional_valence) or 0.0),
-                        min(1.0, float(age_minutes) / 30.0),
-                    ))
-                    u = utility_score(benefit=benefit, cost=0.10)
-                    # Threshold chosen to preserve prior behavior (importance>=0.6 etc.).
-                    should_consolidate = u >= 0.50
-                    
-                    if should_consolidate:
-                        # Move to LTM
-                        success = self.ltm.store(
-                            memory_id=memory_id,
-                            content=memory_item.content,
-                            memory_type='episodic',
-                            importance=importance,
-                            tags=[],
-                            associations=getattr(memory_item, 'associations', [])
-                        )
-                        
-                        if success:
-                            if hasattr(self.stm, 'remove_item'):
-                                getattr(self.stm, 'remove_item')(memory_id)
-                            else:
-                                # Legacy STM - use delete
-                                getattr(self.stm, 'delete', lambda x: None)(memory_id)
-                            stats['consolidated_count'] += 1
-                        else:
-                            stats['failed_count'] += 1
-                            
-                except Exception as e:
-                    stats['errors'].append(f"Error consolidating {memory_id}: {e}")
-                    stats['failed_count'] += 1
-                    logger.error(f"Consolidation error for {memory_id}: {e}")
-            
-            self.last_consolidation = datetime.now()
-            stats['end_time'] = datetime.now()
-            stats['duration_seconds'] = (stats['end_time'] - stats['start_time']).total_seconds()
-            
-            logger.info(f"Consolidation completed: {stats['consolidated_count']} memories moved to LTM")
-            
-        except Exception as e:
-            stats['errors'].append(f"Consolidation process error: {e}")
-            logger.error(f"Consolidation process error: {e}")
-        
-        return stats
+        return self._consolidation_service.consolidate_memories(force=force)
     
     def dream_state_consolidation(
         self,
@@ -916,41 +675,34 @@ class MemorySystem:
     
     def get_status(self) -> Dict[str, Any]:
         """Get comprehensive memory system status with performance metrics."""
-        try:
-            uptime = (datetime.now() - self._start_time).total_seconds()
-            
-            return {
-                'stm': self.stm.get_status() if hasattr(self.stm, 'get_status') else {'status': 'unknown'},
-                'ltm': self.ltm.get_status() if hasattr(self.ltm, 'get_status') else {'status': 'unknown'},
-                'last_consolidation': self._last_consolidation,
-                'session_memories_count': len(self._session_memories),
-                'consolidation_interval': self._config.consolidation_interval,
-                'use_vector_stm': self._config.use_vector_stm,
-                'use_vector_ltm': self._config.use_vector_ltm,
-                'system_active': self.is_initialized(),
-                'uptime_seconds': uptime,
-                'operation_counts': self._operation_counts.copy(),
-                'error_counts': self._error_counts.copy(),
-                'config': {
-                    'stm_capacity': self._config.stm_capacity,
-                    'max_concurrent_operations': self._config.max_concurrent_operations,
-                    'auto_process_prospective': self._config.auto_process_prospective
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error getting system status: {e}")
-            return {'error': str(e), 'system_active': False}
+        return self._status_service.get_status()
     
     def reset_session(self) -> None:
         """Reset session-specific memory tracking"""
         with self._operation_lock:
-            self._session_memories = []
-            logger.info("Memory system session reset")
+            self._status_service.reset_session()
+
+    def _clear_session_memories(self) -> None:
+        self._session_memories = []
+
+    def _increment_operation_count(self, key: str) -> None:
+        self._operation_counts[key] = self._operation_counts.get(key, 0) + 1
+
+    def _increment_error_count(self, key: str) -> None:
+        self._error_counts[key] = self._error_counts.get(key, 0) + 1
+
+    def _append_session_memory(self, entry: Dict[str, Any]) -> None:
+        self._session_memories.append(entry)
     
     def _should_consolidate(self) -> bool:
         """Check if automatic consolidation should occur"""
-        time_elapsed = (datetime.now() - self._last_consolidation).total_seconds()
-        return time_elapsed >= self._config.consolidation_interval
+        return self._consolidation_service.should_consolidate()
+
+    def _set_last_consolidation(self, value: datetime) -> None:
+        self._last_consolidation = value
+
+    def _set_last_prospective_process(self, value: datetime) -> None:
+        self._last_prospective_process = value
     
     def search_stm_semantic(
         self,
@@ -971,27 +723,12 @@ class MemorySystem:
         Returns:
             List of (memory_item, relevance_score) tuples
         """
-        if self._config.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
-            # Use vector STM semantic search
-            vector_results = self.stm.search_semantic(
-                query=query,
-                max_results=max_results,
-                min_similarity=min_similarity
-            )
-            return [(result.item, result.relevance_score) for result in vector_results]
-        else:
-            # Fallback to regular STM search
-            results = self.stm.search(query=query, max_results=max_results)
-            # Ensure return type is List[Tuple[Any, float]]
-            out = []
-            for r in results:
-                if isinstance(r, tuple) and len(r) == 2:
-                    out.append((r[0], r[1]))
-                elif isinstance(r, dict):
-                    out.append((r, 1.0))
-                else:
-                    out.append((r, 1.0))
-            return out
+        return self._retrieval_service.search_stm_semantic(
+            query=query,
+            max_results=max_results,
+            min_similarity=min_similarity,
+            min_activation=min_activation,
+        )
     
     def get_context_for_query(
         self,
@@ -1012,41 +749,12 @@ class MemorySystem:
         Returns:
             Dictionary with 'stm' and 'ltm' context lists
         """
-        context = {"stm": [], "ltm": []}
-        
-        try:
-            # Get STM context
-            if self._config.use_vector_stm and isinstance(self.stm, VectorShortTermMemory):
-                stm_results = self.stm.get_context_for_query(
-                    query=query,
-                    max_context_items=max_stm_context,
-                    min_relevance=min_relevance
-                )
-                context["stm"] = [result.item for result in stm_results]
-            else:
-                # Fallback for regular STM
-                stm_results = self.stm.search(query=query, max_results=max_stm_context)
-                context["stm"] = [item for item, score in stm_results if score >= min_relevance]
-            
-            # Get LTM context
-            if self._config.use_vector_ltm and isinstance(self.ltm, VectorLongTermMemory):
-                ltm_results = self.ltm.search_semantic(
-                    query=query,
-                    max_results=max_ltm_context,
-                    min_similarity=min_relevance
-                )
-                context["ltm"] = [result for result in ltm_results]
-            else:
-                # Fallback for regular LTM
-                ltm_results = getattr(self.ltm, 'search_by_content', lambda **kwargs: [])(query=query, max_results=max_ltm_context)
-                context["ltm"] = [record for record, score in ltm_results if score >= min_relevance]
-            
-            logger.debug(f"Retrieved context: {len(context['stm'])} STM + {len(context['ltm'])} LTM items")
-            return context
-            
-        except Exception as e:
-            logger.error(f"Error getting context for query: {e}")
-            return {"stm": [], "ltm": []}
+        return self._context_service.get_context_for_query(
+            query=query,
+            max_stm_context=max_stm_context,
+            max_ltm_context=max_ltm_context,
+            min_relevance=min_relevance,
+        )
     
     # Episodic Memory Methods
     def create_episodic_memory(
@@ -1225,74 +933,11 @@ class MemorySystem:
         Perform a hierarchical search across all memory systems in a specific order.
         Order: STM -> LTM -> Episodic -> Semantic
         """
-        all_results = []
-
-        # 1. Search STM
-        try:
-            stm_results = self.stm.search(query, max_results=max_per_system)
-            for memory, score in stm_results:
-                all_results.append((memory, score, 'STM'))
-        except Exception as e:
-            logger.error(f"Error searching STM for query '{query}': {e}")
-
-        # 2. Search LTM
-        try:
-            if self._config.use_vector_ltm:
-                ltm_results = getattr(self.ltm, 'search_semantic', lambda **kwargs: [])(query=query, max_results=max_per_system)
-                for memory in ltm_results:
-                    score = memory.get('similarity_score', 0.0)
-                    all_results.append((memory, score, 'LTM'))
-            else:
-                ltm_results = getattr(self.ltm, 'search_by_content', lambda **kwargs: [])(query=query, max_results=max_per_system)
-                for memory, score in ltm_results:
-                    all_results.append((memory, score, 'LTM'))
-        except Exception as e:
-            logger.error(f"Error searching LTM for query '{query}': {e}")
-
-        # 3. Search Episodic Memory
-        try:
-            episodic_results = self.episodic.search_memories(query=query, limit=max_per_system)
-            for result in episodic_results:
-                all_results.append((result.memory, result.relevance, 'Episodic'))
-        except Exception as e:
-            logger.error(f"Error searching Episodic Memory for query '{query}': {e}")
-
-        # 4. Search Semantic Memory
-        try:
-            # Semantic search is different, it looks for facts.
-            # We can create a composite query or just use the raw query.
-            # For simplicity, we search for the query in subject, predicate, or object.
-            # This part might need more sophisticated logic depending on requirements.
-            subject_matches = self.semantic.find_facts(subject=query)
-            object_matches = self.semantic.find_facts(object_val=query)
-            # A simple scoring mechanism for semantic results
-            for fact in subject_matches:
-                all_results.append((fact, 0.9, 'Semantic')) # High relevance for direct match
-            for fact in object_matches:
-                all_results.append((fact, 0.8, 'Semantic'))
-        except Exception as e:
-            logger.error(f"Error searching Semantic Memory for query '{query}': {e}")
-
-        # Deduplicate and sort results
-        seen_content = set()
-        unique_results = []
-        # Sort by relevance score, descending
-        for mem, score, source in sorted(all_results, key=lambda item: item[1], reverse=True):
-            content_repr = ""
-            if source == 'Episodic':
-                content_repr = repr(mem.detailed_content)
-            elif source == 'Semantic':
-                content_repr = repr(mem) # Fact is a dict
-            elif isinstance(mem, dict):
-                content_repr = repr(mem.get('content'))
-            elif hasattr(mem, 'content'):
-                content_repr = repr(mem.content)
-
-            if content_repr and content_repr not in seen_content:
-                unique_results.append((mem, score, source))
-                seen_content.add(content_repr)
-
-        return unique_results[:max_results]
+        return self._recall_service.hierarchical_search(
+            query=query,
+            max_results=max_results,
+            max_per_system=max_per_system,
+        )
 
     def proactive_recall(
         self,
@@ -1322,211 +967,43 @@ class MemorySystem:
         Returns:
             Dictionary containing recalled memories with metadata
         """
-        if not self.is_initialized():
-            logger.warning("Memory system not initialized for proactive recall")
-            return {"recalled_memories": [], "summary": "Memory system unavailable"}
-        
-        try:
-            # Perform hierarchical search
-            search_results = self.hierarchical_search(
-                query=query,
-                max_results=max_results * 2,  # Get more for filtering
-                max_per_system=max_results // 2
-            )
-            
-            # Filter and prioritize results
-            recalled_memories = []
-            for memory, score, source in search_results:
-                if score >= min_relevance:
-                    # Enhance with additional metadata
-                    enhanced_memory = {
-                        "content": self._extract_memory_content(memory, source),
-                        "score": score,
-                        "source": source,
-                        "timestamp": self._extract_timestamp(memory, source),
-                        "importance": self._extract_importance(memory, source),
-                        "emotional_valence": self._extract_emotional_valence(memory, source),
-                        "tags": self._extract_tags(memory, source)
-                    }
-                    recalled_memories.append(enhanced_memory)
-                    
-                    if len(recalled_memories) >= max_results:
-                        break
-            
-            # Generate summary if we have results
-            summary = ""
-            if recalled_memories:
-                summary = self._generate_recall_summary(recalled_memories, query, use_ai_summary, openai_client)
-            
-            return {
-                "recalled_memories": recalled_memories,
-                "summary": summary,
-                "query": query,
-                "total_found": len(recalled_memories)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in proactive recall: {e}")
-            return {"recalled_memories": [], "summary": f"Recall failed: {str(e)}"}
+        return self._recall_service.proactive_recall(
+            query=query,
+            max_results=max_results,
+            min_relevance=min_relevance,
+            context_window=context_window,
+            use_ai_summary=use_ai_summary,
+            openai_client=openai_client,
+        )
 
     def _extract_memory_content(self, memory: Any, source: str) -> str:
         """Extract readable content from memory object."""
-        try:
-            if source == 'Episodic':
-                return memory.detailed_content or memory.summary or str(memory)
-            elif source == 'Semantic':
-                if isinstance(memory, dict):
-                    return f"{memory.get('subject', '')} {memory.get('predicate', '')} {memory.get('object', '')}"
-                return str(memory)
-            elif isinstance(memory, dict):
-                return memory.get('content', str(memory))
-            elif hasattr(memory, 'content'):
-                return memory.content
-            else:
-                return str(memory)
-        except Exception:
-            return str(memory)
+        return self._recall_service.extract_memory_content(memory, source)
 
     def _extract_timestamp(self, memory: Any, source: str) -> Optional[datetime]:
         """Extract timestamp from memory object."""
-        try:
-            if source == 'Episodic':
-                return memory.timestamp
-            elif isinstance(memory, dict):
-                ts = memory.get('timestamp')
-                if isinstance(ts, str):
-                    return datetime.fromisoformat(ts)
-                return ts
-            elif hasattr(memory, 'timestamp'):
-                return memory.timestamp
-        except Exception:
-            pass
-        return None
+        return self._recall_service.extract_timestamp(memory, source)
 
     def _extract_importance(self, memory: Any, source: str) -> float:
         """Extract importance score from memory object."""
-        try:
-            if source == 'Episodic':
-                return memory.importance
-            elif isinstance(memory, dict):
-                return memory.get('importance', 0.5)
-            elif hasattr(memory, 'importance'):
-                return memory.importance
-        except Exception:
-            pass
-        return 0.5
+        return self._recall_service.extract_importance(memory, source)
 
     def _extract_emotional_valence(self, memory: Any, source: str) -> float:
         """Extract emotional valence from memory object."""
-        try:
-            if source == 'Episodic':
-                return memory.emotional_valence
-            elif isinstance(memory, dict):
-                return memory.get('emotional_valence', 0.0)
-            elif hasattr(memory, 'emotional_valence'):
-                return memory.emotional_valence
-        except Exception:
-            pass
-        return 0.0
+        return self._recall_service.extract_emotional_valence(memory, source)
 
     def _extract_tags(self, memory: Any, source: str) -> List[str]:
         """Extract tags from memory object."""
-        try:
-            if source == 'Episodic':
-                return memory.tags or []
-            elif isinstance(memory, dict):
-                return memory.get('tags', [])
-            elif hasattr(memory, 'tags'):
-                return memory.tags
-        except Exception:
-            pass
-        return []
+        return self._recall_service.extract_tags(memory, source)
 
     def _generate_recall_summary(self, memories: List[Dict], query: str, use_ai: bool = False, openai_client = None) -> str:
         """Generate a concise summary of recalled memories."""
-        if not memories:
-            return "No relevant memories recalled."
-        
-        # If AI summarization is requested and client is available
-        if use_ai and openai_client:
-            try:
-                return self._generate_ai_summary(memories, query, openai_client)
-            except Exception as e:
-                logger.warning(f"AI summarization failed: {e}, falling back to basic summary")
-        
-        # Basic statistical summary
-        return self._generate_basic_summary(memories)
+        return self._recall_service.generate_recall_summary(memories, query, use_ai, openai_client)
 
     def _generate_basic_summary(self, memories: List[Dict]) -> str:
         """Generate a basic statistical summary of recalled memories."""
-        # Count by source
-        source_counts = {}
-        total_importance = 0
-        recent_count = 0
-        
-        for memory in memories:
-            source = memory.get('source', 'Unknown')
-            source_counts[source] = source_counts.get(source, 0) + 1
-            total_importance += memory.get('importance', 0.5)
-            
-            # Count recent memories (within last hour)
-            timestamp = memory.get('timestamp')
-            if timestamp and isinstance(timestamp, datetime):
-                if (datetime.now() - timestamp).total_seconds() < 3600:
-                    recent_count += 1
-        
-        avg_importance = total_importance / len(memories)
-        
-        summary_parts = []
-        summary_parts.append(f"Recalled {len(memories)} relevant memories")
-        
-        if source_counts:
-            source_str = ", ".join([f"{count} from {source}" for source, count in source_counts.items()])
-            summary_parts.append(f"from {source_str}")
-        
-        if recent_count > 0:
-            summary_parts.append(f"including {recent_count} recent items")
-        
-        if avg_importance > 0.7:
-            summary_parts.append("with high importance")
-        elif avg_importance > 0.4:
-            summary_parts.append("with moderate importance")
-        
-        return ". ".join(summary_parts) + "."
+        return self._recall_service.generate_basic_summary(memories)
 
     def _generate_ai_summary(self, memories: List[Dict], query: str, openai_client) -> str:
         """Generate an AI-powered summary of recalled memories using GPT-4.1."""
-        # Prepare context for AI summarization
-        memory_texts = []
-        for i, memory in enumerate(memories[:5]):  # Limit to top 5 for token efficiency
-            content = memory.get('content', '')[:200]  # Truncate for brevity
-            source = memory.get('source', 'Unknown')
-            importance = memory.get('importance', 0.5)
-            memory_texts.append(f"{i+1}. [{source}] {content} (importance: {importance:.1f})")
-        
-        memories_text = "\n".join(memory_texts)
-        
-        prompt = f"""
-        Based on the user's query: "{query}"
-        
-        Here are the most relevant recalled memories:
-        {memories_text}
-        
-        Please provide a concise, natural summary (2-3 sentences) of what these memories suggest about the user's context or interests. Focus on patterns, themes, or key insights rather than listing individual items.
-        """
-        
-        try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4.1-nano",  # Use the configured model
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that summarizes memory recall results concisely and insightfully."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=150
-            )
-            summary = response.choices[0].message.content.strip()
-            return summary if summary else self._generate_basic_summary(memories)
-        except Exception as e:
-            logger.error(f"AI summary generation failed: {e}")
-            return self._generate_basic_summary(memories)
+        return self._recall_service.generate_ai_summary(memories, query, openai_client)

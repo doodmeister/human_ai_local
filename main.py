@@ -81,22 +81,9 @@ async def _run_chat() -> int:
 
 def _build_api_app():
     _ensure_src_on_path()
+    from src.orchestration.runtime import create_api_app
 
-    from scripts.legacy.george_api_simple import app
-    from src.interfaces.api.chat_endpoints import router as chat_router
-    from src.interfaces.api.executive_api import router as executive_router
-    from src.interfaces.api.memory_api import router as memory_router
-    from src.interfaces.api.semantic_api import router as semantic_router
-    from src.interfaces.api.prospective_api import router as prospective_router
-    from src.interfaces.api.procedural_api import router as procedural_router
-
-    app.include_router(chat_router)
-    app.include_router(executive_router, prefix="/executive", tags=["executive"])
-    app.include_router(memory_router, tags=["memory"])
-    app.include_router(semantic_router, tags=["semantic"])
-    app.include_router(prospective_router, tags=["prospective"])
-    app.include_router(procedural_router, tags=["procedural"])
-    return app
+    return create_api_app()
 
 
 def _run_api(*, host: str, port: int, reload: bool) -> int:

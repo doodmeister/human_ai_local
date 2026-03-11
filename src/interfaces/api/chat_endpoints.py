@@ -98,17 +98,7 @@ async def chat_performance_status():
 async def chat_metacog_status():
     """Return last metacognitive snapshot (if any)."""
     chat_svc = get_chat_service()
-    snap = getattr(chat_svc, "_last_metacog_snapshot", None)
-    if not snap:
-        return {"available": False}
-    history = []
-    try:
-        hist = getattr(chat_svc, "_metacog_history", None)
-        if hist is not None:
-            history = list(hist)[-10:]
-    except Exception:
-        history = []
-    return {"available": True, "snapshot": snap, "history_tail": history}
+    return chat_svc.get_metacog_status(history_limit=10)
 
 
 @router.get("/chat/consolidation/status")
@@ -208,13 +198,7 @@ async def start_dream_cycle(dream_req: DreamRequest):
             if cons is None:
                 return {"error": "consolidator_not_available", "dream_results": None}
             
-            # Manual promotion pass
-            promoted_count = 0
-            for turn_id, stats in list(cons._turn_stats.items()):
-                if stats.get("stm_id") and not stats.get("ltm_id"):
-                    cons._maybe_promote(turn_id, stats)
-                    if stats.get("ltm_id"):
-                        promoted_count += 1
+            promoted_count = cons.run_promotion_pass()
             
             return {
                 "dream_results": {
@@ -243,32 +227,16 @@ async def update_llm_config(config: LLMConfigUpdate):
         agent = get_agent()
         if agent is None:
             return {"status": "error", "message": "Agent not available"}
-        
-        # Update the config
-        agent.config.llm.provider = config.provider
-        if config.openai_model:
-            agent.config.llm.openai_model = config.openai_model
-        if config.ollama_base_url:
-            agent.config.llm.ollama_base_url = config.ollama_base_url
-        if config.ollama_model:
-            agent.config.llm.ollama_model = config.ollama_model
-        
-        # Reinitialize the LLM provider
-        from src.orchestration.llm_provider import LLMProviderFactory
         try:
-            new_provider = LLMProviderFactory.create_from_config(agent.config.llm)
-            if not new_provider.is_available():
-                return {
-                    "status": "warning",
-                    "message": f"Provider '{config.provider}' configured but not available. Check configuration."
-                }
-            agent.llm_provider = new_provider
-            agent.openai_client = getattr(new_provider, 'client', None) if hasattr(new_provider, 'client') else None
-            
-            model_name = config.openai_model if config.provider == "openai" else config.ollama_model
+            result = agent.reconfigure_llm_provider(
+                provider=config.provider,
+                openai_model=config.openai_model,
+                ollama_base_url=config.ollama_base_url,
+                ollama_model=config.ollama_model,
+            )
             return {
                 "status": "ok",
-                "message": f"LLM provider updated to {config.provider} ({model_name})"
+                "message": f"LLM provider updated to {result['provider']} ({result['model']})"
             }
         except Exception as e:
             return {"status": "error", "message": f"Failed to initialize provider: {str(e)}"}

@@ -1,6 +1,16 @@
 # Documentation Index
 
+## Current Sources Of Truth
+
+- `../README.md`: current quick start, runtime entrypoints, and test lanes
+- `../phase3.md`: current architecture refactor plan and execution status
+- `UI_DEVELOPER_API_QUICKSTART.md`: current UI-facing executive API quick reference
+
+Most files under `archive/` are historical snapshots, not the current architecture contract.
+
 ## 📚 Executive System Documentation
+
+These week and phase summaries are historical implementation records.
 
 ### Week 15: System Integration (Latest)
 - **[Week 15 Completion Summary](archive/WEEK_15_COMPLETION_SUMMARY.md)** - Comprehensive documentation
@@ -106,14 +116,14 @@
 ## 🚀 Quick Start Guides
 
 ### For Developers
-1. Start with [Week 15 Quick Reference](archive/WEEK_15_QUICK_REFERENCE.md)
-2. Read [Week 15 Completion Summary](archive/WEEK_15_COMPLETION_SUMMARY.md) for details
-3. Review [Executive Refactoring Plan](archive/executive_refactoring_plan.md) for context
+1. Start with [../README.md](../README.md)
+2. Review [../phase3.md](../phase3.md) for the current architecture and refactor status
+3. Use archived week summaries only for historical context
 
 ### For AI Assistants
 1. Read [AI Instructions](ai.instructions.md) first
-2. Check [Executive Refactoring Plan](archive/executive_refactoring_plan.md) for current status
-3. Reference week-specific docs as needed
+2. Read [../phase3.md](../phase3.md) for current architectural status
+3. Treat archive docs as historical material unless explicitly needed
 
 ### For Users
 1. See main [README](../README.md) for overview
@@ -163,16 +173,13 @@ docs/
 
 ## 🔄 Documentation Status
 
-### ✅ Complete & Up-to-Date
-- Week 15 (System Integration)
-- Week 14 (Dynamic Scheduling)
-- Week 12 (CP-SAT Scheduling)
-- Phase 2 (GOAP Planning)
-- Phase 1 (Enhanced Decisions)
+### Current
+- `README.md` and `phase3.md` are the primary current-state references.
+- `archive/` contains historical phase and week summaries.
 
-### 📝 Needs Update
-- Metacognition features (pre-Week 11)
-- Chat interface planning (superseded)
+### Historical / Superseded
+- Many week-based summaries describe earlier project states.
+- Planning documents under `archive/planning/` are not the current execution contract.
 
 ### 🔜 Coming Soon
 - Week 16: Learning Infrastructure
@@ -190,4 +197,4 @@ For questions about:
 
 ---
 
-Last updated: January 22, 2026
+Last updated: March 11, 2026

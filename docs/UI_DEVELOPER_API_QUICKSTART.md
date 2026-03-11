@@ -1,15 +1,14 @@
 # Quick Reference: ExecutiveSystem API for UI Developers
 
-**Audience**: Streamlit UI developers building visualization components  
+**Audience**: UI developers building visualization components  
 **Backend**: All endpoints operational, fully tested  
 **Base URL**: `http://localhost:8000` (then use `/executive/...` paths)
 
-This doc works with both backends:
+Canonical backend:
 
-- Main server: `python main.py api`
-- Simple server: `python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvicorn.run(app, port=8001)"`
+- `python main.py api`
 
-Both expose unprefixed endpoints like `/executive/*` (no `/api` needed).
+Use unprefixed endpoints like `/executive/*` (no `/api` prefix).
 
 ---
 

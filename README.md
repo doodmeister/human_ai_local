@@ -46,6 +46,20 @@ Complete cognitive framework with:
 - **Reminders**: `/agent/reminders/*` - Prospective memory management
 - **Executive**: `/executive/*` - Goal management and execution pipeline
 
+## Current Architecture
+
+The canonical runtime path is now:
+
+- `main.py` for user-facing entrypoints
+- `src/orchestration/runtime/bootstrap.py` for FastAPI app creation
+- `src/orchestration/runtime/app_container.py` for shared runtime composition
+- `src/orchestration/cognitive_agent.py` as the public cognitive facade
+- `src/orchestration/chat/chat_service.py` as the public chat facade
+- `src/memory/memory_system.py` as the public memory facade
+- `src/executive/integration.py` as the public executive orchestration surface
+
+The current architectural refactor plan and status are tracked in `phase3.md`.
+
 ---
 
 ## 🚀 Quick Start
@@ -81,7 +95,7 @@ python main.py chainlit --with-backend
 ```bash
 python main.py api
 ```
-Access at http://localhost:8000 (docs at /docs)
+Access at http://127.0.0.1:8000 (docs at /docs)
 
 **Option 3: Streamlit UI** (legacy)
 ```bash
@@ -89,31 +103,20 @@ python main.py ui
 ```
 Access at http://localhost:8501
 
-### API compatibility (main vs simple server)
+### API compatibility
 
-There are two API servers in this repo:
-
-- **Main server** (`python main.py api`): canonical API surface (preferred).
-- **Simple server** (`python -c "import uvicorn; from scripts.legacy.george_api_simple import app; uvicorn.run(app, port=8001)"`): lightweight dev server.
-
-Both servers support the same *unprefixed* endpoint paths (e.g. `/agent/chat`, `/agent/reminders`, `/executive/goals`, `/memory/stm/search`).
+`python main.py api` is the canonical API startup path.
 
 Notes:
 
-- Prefer unprefixed routes (e.g. `/agent/chat`) as the canonical API surface.
-- Legacy `/api/*` aliases were removed on 2026-02-06.
-
-- If you're pointing the Streamlit UI at a backend, set `GEORGE_API_BASE_URL` to the server root (e.g. `http://localhost:8000` or `http://localhost:8001`).
-- Prefer `/agent/reminders*` for reminders and `/procedure/*` for procedural memory.
+- Prefer unprefixed routes such as `/agent/chat`, `/memory/...`, and `/executive/...`.
+- Legacy `/api/*` aliases are removed.
+- If you're pointing a UI at the backend, set `GEORGE_API_BASE_URL` to the server root, for example `http://127.0.0.1:8000`.
 
 For a quick endpoint smoke check, run:
 ```bash
 python scripts/smoke_api_compat.py --base http://localhost:8000
 ```
-
-## Deprecation policy & timeline
-
-Legacy `/api/*` aliases have been removed. Use canonical routes such as `/agent/chat`, `/agent/reminders*`, `/procedure/*`, `/memory/*`, `/executive/*`.
 
 ---
 
@@ -129,11 +132,10 @@ GET    /agent/chat/metacog/status     # Metacognition status
 
 ### Memory Endpoints
 ```
-POST   /agent/memory/store            # Store to STM
-POST   /agent/memory/ltm/store        # Store directly to LTM
-GET    /agent/memory/retrieve         # Retrieve from STM
-GET    /agent/memory/ltm/retrieve     # Retrieve from LTM
-GET    /agent/memory/health           # Memory system health
+POST   /memory/{system}/store         # Store memory in STM/LTM/Episodic
+GET    /memory/{system}/retrieve/{id} # Retrieve by ID
+POST   /memory/{system}/search        # Search by query
+GET    /status                        # Memory system status
 ```
 
 ### Reminder Endpoints (Prospective Memory)
@@ -171,17 +173,12 @@ GET    /executive/system/health              # Full health metrics
 
 ### Example 1: Chat with Memory
 ```python
-from src.chat.factory import build_chat_service
+from src.orchestration.chat.factory import build_chat_service
 
 service = build_chat_service()
 
-# First conversation
-service.chat("My favorite color is blue", session_id="user1")
-# → Stored in STM, may promote to LTM
-
-# Later conversation
-response = service.chat("What's my favorite color?", session_id="user1")
-# → Retrieved from LTM: "Your favorite color is blue"
+result = service.process_user_message("My favorite color is blue", session_id="user1")
+response = service.process_user_message("What's my favorite color?", session_id="user1")
 ```
 
 ### Example 2: Execute a Goal
@@ -249,15 +246,20 @@ USE_VECTOR_PROSPECTIVE=0  # Set to 1 for semantic reminders
 ## 🧪 Testing
 
 ```bash
-# Default fast suite
-pytest -q
+# Default fast contract lane
+python -m pytest -q
 
-# Curated contract suite only
-pytest tests/contracts -q
+# Explicit contract lane
+python -m pytest tests/contracts -q
 
-# Non-default smoke coverage
-pytest tests/smoke -q
+# Non-default broader suite
+python -m pytest tests -q -c /dev/null
 
+# Lint source and tests
+python -m ruff check src tests
+
+
+The default `pytest -q` target is intentionally scoped to `tests/contracts` via `pytest.ini`.
 # Non-default persistence coverage
 pytest tests/persistence -q
 
