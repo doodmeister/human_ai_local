@@ -52,7 +52,7 @@ The canonical runtime path is now:
 
 - `main.py` for user-facing entrypoints
 - `src/orchestration/runtime/bootstrap.py` for FastAPI app creation
-- `src/orchestration/runtime/app_container.py` for shared runtime composition
+- `src/orchestration/runtime/app_container.py` for shared CLI/API runtime composition
 - `src/orchestration/cognitive_agent.py` as the public cognitive facade
 - `src/orchestration/chat/chat_service.py` as the public chat facade
 - `src/memory/memory_system.py` as the public memory facade
@@ -246,20 +246,17 @@ USE_VECTOR_PROSPECTIVE=0  # Set to 1 for semantic reminders
 ## 🧪 Testing
 
 ```bash
-# Default fast contract lane
+# Default maintained suite
 python -m pytest -q
 
-# Explicit contract lane
-python -m pytest tests/contracts -q
-
-# Non-default broader suite
-python -m pytest tests -q -c /dev/null
+# Target a focused maintained area or file
+python -m pytest tests/executive -q
+python -m pytest tests/unit -q
+python -m pytest tests/test_chat_factory_integration.py -q
+python -m pytest tests/test_memory_system_init_prospective.py -q
 
 # Lint source and tests
 python -m ruff check src tests
-
-# Non-default persistence coverage
-python -m pytest tests/persistence -q
 
 # Focused specialized memory validation
 python -m pytest tests/test_enhanced_ltm_comprehensive.py -q
@@ -270,17 +267,16 @@ python -m pytest archived_tests/manual_legacy/integration -q
 python -m pytest archived_tests/manual_legacy/scenarios -q
 ```
 
-The default `pytest -q` target is intentionally scoped to `tests/contracts` via `pytest.ini`.
+The default `pytest -q` target is the maintained `tests/` suite via `pytest.ini`.
 
-Current test tiers:
+Current test layout:
 
-- `tests/contracts/`: default fast suite for core contracts. This is what `pytest -q` runs.
-- `tests/smoke/`: broader orchestration checks that should stay out of the default fast loop.
-- `tests/persistence/`: storage and reload behavior checks.
-- `tests/test_enhanced_ltm_comprehensive.py` and `tests/test_episodic_memory_integration.py`: focused specialized memory validation outside the default loop.
-- `archived_tests/manual_legacy/`: historical manual-only suites retained for migration or archaeology, but removed from the active `tests/` tree.
+- `tests/`: the maintained default suite discovered by `pytest -q`, including top-level regression files and maintained subdirectories.
+- `tests/executive/` and `tests/unit/`: convenient targeted subdirectory runs when working on those areas.
+- Specific top-level files under `tests/`: the most precise way to run targeted validations during refactors.
+- `archived_tests/manual_legacy/`: intentionally opt-in legacy coverage outside the default loop.
 
-The default suite is intentionally small and fast. It covers intent classification, context assembly, chat service behavior, memory routing, and canonical API contracts without pulling in the full legacy test surface.
+The maintained suite currently lives directly under `tests/`. It is broader than the earlier planned contract-only lane, and archived manual legacy coverage remains opt-in under `archived_tests/manual_legacy/`.
 
 ---
 
@@ -312,7 +308,7 @@ human_ai_local/
 │   ├── attention/         # Attention mechanism
 │   ├── interfaces/        # API endpoints
 │   └── core/              # Configuration
-├── tests/                 # Active contract, smoke, persistence, and focused specialized tests
+├── tests/                 # Maintained default pytest suite and targeted subdirectories
 ├── archived_tests/        # Historical manual-only legacy tests
 ├── scripts/
 │   ├── chainlit_app/      # Chainlit chat UI (recommended)

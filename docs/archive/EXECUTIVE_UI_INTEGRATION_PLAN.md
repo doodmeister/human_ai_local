@@ -776,7 +776,7 @@ def render_system_health_dashboard(base_url: str) -> None:
 **Priority**: P1  
 **Effort**: 4 hours
 
-- Update `docs/ui_showcase.md` with new features
+- Update `docs/archive/ui_showcase.md` with new features
 - Add inline help text for complex fields
 - Create video walkthrough (optional)
 - Update README with executive function examples

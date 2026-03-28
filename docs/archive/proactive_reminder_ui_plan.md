@@ -33,4 +33,4 @@
 ## Validation Checklist
 - Manual test: create reminders via chat, verify they appear in both announcement panel and sidebar.
 - Regression: run `pytest tests/test_chat_service_integration.py -k reminder -q` to ensure backend contract stays stable.
-- UX feedback: capture screenshots/gifs once implemented and link them in `docs/ui_showcase.md` (to be created).
+- UX feedback: capture screenshots/gifs once implemented and link them in `docs/archive/ui_showcase.md`.

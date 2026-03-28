@@ -31,14 +31,15 @@ def _ensure_src_on_path() -> None:
 
 async def _run_chat() -> int:
     _ensure_src_on_path()
-    from src.core import CognitiveAgent, CognitiveConfig
+    from src.core import CognitiveConfig
+    from src.orchestration.runtime import get_runtime
     from src.utils import setup_logging
 
     logger = setup_logging(level="INFO")
     logger.info("Starting Human-AI Cognition Framework CLI")
 
     config = CognitiveConfig.from_env()
-    agent = CognitiveAgent(config)
+    agent = get_runtime().get_agent(config=config)
 
     try:
         print("\n" + "=" * 60)

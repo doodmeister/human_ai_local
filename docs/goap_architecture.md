@@ -1,5 +1,9 @@
 # GOAP Planning Architecture
 
+This is the primary GOAP design document.
+
+Use `goap_quick_reference.md` for API snippets, common planning patterns, and debugging commands.
+
 ## Overview
 
 The Goal-Oriented Action Planning (GOAP) system implements an A* search-based planner for finding optimal action sequences to achieve goals. This document describes the architecture, design decisions, and technical details.

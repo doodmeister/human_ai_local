@@ -388,6 +388,6 @@ except Exception as e:
 ## Further Reading
 
 - **Tests**: `tests/test_executive_goap_planner.py` (40 comprehensive tests)
-- **Examples**: `docs/goap_usage_examples.md` (detailed usage patterns)
+- **Primary guide**: `docs/goap_architecture.md` (design, algorithms, and implementation details)
 - **API**: `src/executive/planning/` (source code with docstrings)
 - **Theory**: Orkin 2006, "Three States and a Plan: The A.I. of F.E.A.R."

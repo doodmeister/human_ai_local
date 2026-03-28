@@ -1,6 +1,6 @@
 # Phase 3 Refactor Plan
 
-Last updated: 2026-03-11
+Last updated: 2026-03-28
 
 ## Purpose
 
@@ -39,27 +39,26 @@ The sections in this review capture the baseline state observed before the Phase
 
 ## Current Test Lanes
 
-These lanes should be treated as the official Phase 3 verification model until a later refactor changes them.
+These lanes reflect the current repository truth after Phase 3 reconciliation.
 
-### Lane: `contracts`
+### Lane: `default`
 
-- Scope: `tests/contracts`
+- Scope: `tests/`
 - Current default via `pytest.ini`
-- Purpose: fast behavior and payload contract checks for the refactor workstream
+- Purpose: maintained regression coverage for the repository's active test suite
 - Command: `python -m pytest -q`
 
-### Lane: `integration`
+### Lane: `targeted`
 
-- Scope: non-default broader integration and subsystem verification outside `tests/contracts`
-- Purpose: validate behavior across module boundaries once extraction slices land
-- Command: `python -m pytest tests -q -c /dev/null`
-- Note: this should eventually become an explicit maintained lane instead of an implied catch-all
+- Scope: explicit files or populated subdirectories under `tests/`
+- Purpose: focused validation while refactoring a subsystem or endpoint
+- Commands: `python -m pytest tests/executive -q`, `python -m pytest tests/unit -q`, or a specific file under `tests/`
 
-### Lane: `full`
+### Lane: `legacy-manual`
 
-- Scope: all intended test assets, including slower and specialized suites
-- Purpose: pre-merge or milestone verification once the suite organization is reconciled
-- Command: to be formalized after test inventory cleanup
+- Scope: `archived_tests/manual_legacy/`
+- Purpose: intentional validation of older or historical paths outside the maintained default suite
+- Command: invoke the relevant subdirectory under `archived_tests/manual_legacy/`
 
 ## Current Startup Paths
 
@@ -73,7 +72,7 @@ These were the startup paths before Phase 3 extraction.
 
 1. CLI path:
    - `main.py chat`
-   - directly constructs `CognitiveAgent`
+   - now resolves the shared agent through `src/orchestration/runtime/app_container.py`
 
 2. API path:
    - `main.py api`
@@ -588,14 +587,14 @@ Phase 3 is complete when:
 - API routers do not rely on private service internals.
 - The executive integration layer has explicit stage modules.
 - README, roadmap, and test commands describe the same current system.
-- The default fast suite is documented as a deliberate lane, not mistaken for the whole suite.
+- The default maintained suite is documented truthfully, without claiming a curated contract-only lane that does not exist.
 
 ## Concrete Refactor Plan
 
 ## Phase 3A: Baseline and Safety Net
 
 - [x] Create a current architecture inventory doc section in this file as modules move.
-- [x] Define test lanes explicitly: `contracts`, `integration`, `full`.
+- [x] Define the supported verification lanes explicitly in docs and config.
 - [x] Add characterization tests for current `ChatService` response payload shape.
 - [x] Add characterization tests for current `MemorySystem` routing and status behaviors.
 - [x] Add characterization tests for current `CognitiveAgent` status and reflection behaviors.
@@ -613,7 +612,7 @@ Phase 3 is complete when:
 - [x] Move singleton ownership out of interface helpers into the runtime container.
 - [x] Refactor `src/orchestration/chat/api_runtime.py` to delegate to the container.
 - [x] Refactor `src/orchestration/chat/factory.py` to delegate to the container.
-- [x] Update `main.py` to build app/runtime through the container.
+- [x] Update `main.py` to route both CLI and API startup through the container-backed runtime path.
 - [x] Remove dependency on `scripts.legacy.george_api_simple` for the canonical API startup path.
 
 ### Exit criteria
@@ -717,13 +716,13 @@ Phase 3 is complete when:
 - [x] Update README imports and architecture references to current module paths.
 - [x] Write one authoritative “current architecture” section and archive conflicting status docs.
 - [x] Document the supported pytest lanes and what each one guarantees.
-- [x] Ensure task names and docs match the intended verification workflow.
+- [x] Ensure task names, `pytest.ini`, and docs match the current verification workflow.
 - [x] Record the final extracted architecture in this file.
 
 ### Final extracted architecture
 
 - `main.py` remains the single user-facing entrypoint for `chat`, `api`, `ui`, and `chainlit` modes.
-- `src/orchestration/runtime/` is the canonical composition root for shared runtime construction and FastAPI app bootstrap.
+- `src/orchestration/runtime/` is the canonical composition root for shared CLI/API runtime construction and FastAPI app bootstrap.
 - `src/orchestration/cognitive_agent.py` is now a stable facade over dedicated runtime, LLM-session, reflection, maintenance, and turn-processing collaborators.
 - `src/orchestration/chat/chat_service.py` is now a stable facade over dedicated response, status, context, intent-routing, turn-pipeline, and turn-support collaborators.
 - `src/memory/memory_system.py` is now a stable facade over dedicated status, fact, retrieval, context, consolidation, prospective, recall, and initialization services.
@@ -797,6 +796,7 @@ Mitigation:
 - [x] Extract MemorySystem proactive recall and summarization behind `src/memory/services/recall_service.py`.
 - [x] Normalize canonical API routers onto shared request dependency helpers and remove remaining router access to private runtime state.
 - [x] Remove unmounted legacy executive API variants so the mounted interface surface is canonical.
+- [x] Route `main.py chat` through the shared runtime container so CLI and API startup use the same composition root.
 - [x] Reconcile primary startup, architecture, and test-lane docs with the extracted runtime and current verification model.
 
 ## Notes for Execution

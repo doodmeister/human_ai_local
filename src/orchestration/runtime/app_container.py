@@ -26,9 +26,17 @@ class AppRuntime:
         self._chat_service: Any | None = None
         self._prospective = get_inmemory_prospective_memory()
 
-    def get_agent(self) -> Any:
+    def get_agent(
+        self,
+        *,
+        config: Optional[Any] = None,
+        system_prompt: Optional[str] = None,
+    ) -> Any:
         if self._agent_instance is None:
-            self._agent_instance = create_agent()
+            self._agent_instance = create_agent(
+                config=config,
+                system_prompt=system_prompt,
+            )
         return self._agent_instance
 
     def has_agent(self) -> bool:

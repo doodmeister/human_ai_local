@@ -17,8 +17,9 @@ Use these first:
 
 ```bash
 python -m pytest -q
-python -m pytest tests/smoke -q
-python -m pytest tests/persistence -q
+python -m pytest tests/executive -q
+python -m pytest tests/unit -q
+python -m pytest tests/test_chat_factory_integration.py -q
 python -m pytest tests/test_enhanced_ltm_comprehensive.py -q
 python -m pytest tests/test_episodic_memory_integration.py -q
 ```
@@ -31,4 +32,4 @@ python -m pytest archived_tests/manual_legacy/scenarios -q
 python -m pytest archived_tests/manual_legacy/unit -q
 ```
 
-If an archived test becomes important again, migrate it back into an active tier rather than growing new legacy-only coverage under `tests/`.
+If an archived test becomes important again, migrate it back into the maintained `tests/` suite rather than growing new legacy-only coverage under `tests/`.
