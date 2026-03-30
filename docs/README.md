@@ -21,6 +21,7 @@ Use the files in this directory for the current architecture contract. Use `arch
 - `goap_architecture.md`: primary GOAP design guide
 - `goap_quick_reference.md`: GOAP API and usage cheat sheet
 - `stm_decay_adaptive_activation.md`: current STM decay modes and activation-weight behavior
+- `../scripts/generate_memory_scorecard.py`: deterministic memory quality scorecard generator for retrieval and longitudinal eval fixtures
 
 ## Recommended Reading Order
 

@@ -7,6 +7,16 @@ from .metrics import (
     score_longitudinal,
     score_retrieval,
 )
+from .scorecard import (
+    MemoryQualityScorecard,
+    ScorecardGate,
+    ScorecardGateResult,
+    default_scorecard_gates,
+    evaluate_scorecard_gates,
+    generate_memory_quality_scorecard,
+    summarize_longitudinal_results,
+    summarize_retrieval_results,
+)
 from .scenarios import (
     FactExpectation,
     FactSeed,
@@ -30,12 +40,18 @@ __all__ = [
     "LongitudinalPhase",
     "LongitudinalScenario",
     "LongitudinalScenarioResult",
+    "MemoryQualityScorecard",
     "RetrievalMetrics",
     "RetrievalScenario",
     "RetrievalScenarioResult",
+    "ScorecardGate",
+    "ScorecardGateResult",
     "build_baseline_scenarios",
     "build_longitudinal_scenarios",
+    "default_scorecard_gates",
+    "evaluate_scorecard_gates",
     "expected_coverage",
+    "generate_memory_quality_scorecard",
     "irrelevant_context_rate",
     "precision_at_k",
     "run_longitudinal_scenario",
@@ -44,4 +60,6 @@ __all__ = [
     "run_retrieval_scenario",
     "score_longitudinal",
     "score_retrieval",
+    "summarize_longitudinal_results",
+    "summarize_retrieval_results",
 ]

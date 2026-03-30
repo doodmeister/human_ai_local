@@ -290,6 +290,12 @@ Exit criteria:
 - create longitudinal evaluation scenarios
 - document metrics and add regression gates for core scenarios
 
+Current status:
+
+- deterministic restart-aware longitudinal scenarios now live in `src/evals/scenarios/longitudinal_memory.py`
+- the initial suite scores restart continuity, contradiction repair, false-memory count, and over-recall rate in end-to-end tests
+- deterministic scorecard generation now lives in `src/evals/scorecard.py` with a developer entrypoint at `scripts/generate_memory_scorecard.py`
+
 ## Priority Backlog
 
 1. Canonical memory schema and normalization layer
