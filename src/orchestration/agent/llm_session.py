@@ -4,6 +4,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ..policy import PromptBlock, build_prompt_blocks
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +61,34 @@ class CognitiveAgentLLMSession:
             logger.warning("Failed to initialize LLM provider: %s. LLM features will not work.", exc)
             return None
 
-    def build_messages(self, *, memory_context: List[Dict[str, Any]], user_input: str) -> List[Dict[str, str]]:
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "system", "content": f"Current date and time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"},
-        ]
-        if memory_context:
-            context_str = "\n".join(
-                f"Memory ({m['source']}, {m['timestamp'] if 'timestamp' in m and m['timestamp'] else 'no time'}): {m['content']}"
-                for m in memory_context
-            )
-            messages.append({"role": "assistant", "content": f"Relevant memories:\n{context_str}"})
+    def build_prompt_blocks(
+        self,
+        *,
+        memory_context: List[Dict[str, Any]],
+        response_policy: Optional[Dict[str, Any]] = None,
+        current_time: Optional[datetime] = None,
+    ) -> List[PromptBlock]:
+        return build_prompt_blocks(
+            system_prompt=self.system_prompt,
+            response_policy=response_policy,
+            memory_context=memory_context,
+            current_time=current_time,
+        )
+
+    def build_messages(
+        self,
+        *,
+        memory_context: List[Dict[str, Any]],
+        user_input: str,
+        response_policy: Optional[Dict[str, Any]] = None,
+        current_time: Optional[datetime] = None,
+    ) -> List[Dict[str, str]]:
+        prompt_blocks = self.build_prompt_blocks(
+            memory_context=memory_context,
+            response_policy=response_policy,
+            current_time=current_time,
+        )
+        messages = [block.to_message() for block in prompt_blocks]
         messages += self.conversation[-6:]
         messages.append({"role": "user", "content": user_input})
         return messages
@@ -85,12 +104,22 @@ class CognitiveAgentLLMSession:
         )
         return llm_response.content
 
-    async def generate_response(self, *, processed_input: Dict[str, Any], memory_context: List[Dict[str, Any]]) -> str:
+    async def generate_response(
+        self,
+        *,
+        processed_input: Dict[str, Any],
+        memory_context: List[Dict[str, Any]],
+        response_policy: Optional[Dict[str, Any]] = None,
+    ) -> str:
         if not self.provider:
             return self.render_fallback_response(memory_context)
 
         user_message = processed_input["raw_input"]
-        messages = self.build_messages(memory_context=memory_context, user_input=user_message)
+        messages = self.build_messages(
+            memory_context=memory_context,
+            user_input=user_message,
+            response_policy=response_policy or processed_input.get("response_policy"),
+        )
         try:
             response = await self.call_chat(messages)
             self.conversation.append({"role": "user", "content": user_message})

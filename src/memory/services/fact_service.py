@@ -7,8 +7,8 @@ class MemoryFactService:
     def __init__(self, *, get_semantic: Callable[[], Any]) -> None:
         self._get_semantic = get_semantic
 
-    def store_fact(self, subject: str, predicate: str, object_val: Any) -> str:
-        return self._get_semantic().store_fact(subject, predicate, object_val)
+    def store_fact(self, subject: str, predicate: str, object_val: Any, **kwargs: Any) -> str:
+        return self._get_semantic().store_fact(subject, predicate, object_val, **kwargs)
 
     def find_facts(
         self,

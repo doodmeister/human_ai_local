@@ -1,6 +1,6 @@
 # World-Class Memory And Personality Architecture
 
-Last updated: 2026-03-28
+Last updated: 2026-03-29
 
 ## Purpose
 
@@ -410,6 +410,12 @@ Suggested message structure:
 6. current user message
 
 Generation should be constrained by policy rather than assuming the LLM will infer personality from raw memory snippets.
+
+Current implementation note:
+
+- prompt assembly now uses bounded source blocks for role, policy, working-self state, and retrieved memory context
+- policy blocks are optional when no response-policy snapshot is available, but the message shape remains inspectable
+- retrieved memory is rendered as context, not instruction text, to reduce prompt leakage from flat memory dumps
 
 ## 12. Reconsolidation And Revision
 

@@ -11,6 +11,7 @@ It complements:
 - `../README.md` for current runtime and developer workflow
 - `../phase3.md` for architecture-consolidation status
 - `memory_personality_architecture.md` for the target design
+- `memory_personality_implementation_tickets.md` for phase-by-phase build tickets
 
 ## North Star
 

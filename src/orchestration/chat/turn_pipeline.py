@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.learning.learning_law import clamp01, utility_score
-from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from src.orchestration import CognitiveStep, CognitiveTick
 
 from .emotion_salience import estimate_salience_and_valence
@@ -86,7 +85,6 @@ class ChatTurnPipeline:
         salience, valence = estimate_salience_and_valence(message)
         importance = service._estimate_importance(message, salience, valence)
 
-        drive_conflicts = []
         service._cognitive_layers.process_turn(
             session=sess,
             tick=tick,
@@ -276,19 +274,29 @@ class ChatTurnPipeline:
                         raise RuntimeError("semantic promotion utility <= 0")
 
                     sem = getattr(service.context_builder, "semantic", None)
-                    if sem is not None and hasattr(sem, "store_fact"):
+                    if sem is not None and hasattr(sem, "store_fact") and cm.subject and cm.predicate:
                         promo_meta = {k: meta[k] for k in ("memory_type", "subject", "predicate", "object", "frequency") if k in meta}
                         promo_meta.update(
                             {
                                 "promotion_reason": "frequency_threshold",
                                 "promotion_freq": freq,
                                 "promotion_utility": float(u01),
-                                "source": "chat_capture",
+                                "source": "explicit_user_correction" if meta.get("contradiction") else "user_assertion",
+                                "confidence": min(0.95, 0.68 + (0.06 * freq) + (0.10 * u01)),
+                                "importance": max(0.55, min(1.0, importance)),
                             }
                         )
                         try:
-                            sem.store_fact(content=cm.content, metadata=promo_meta)
-                            meta["promoted_semantic"] = True
+                            fact_id = sem.store_fact(
+                                subject=cm.subject,
+                                predicate=cm.predicate,
+                                object_val=cm.obj,
+                                content=cm.content,
+                                metadata=promo_meta,
+                            )
+                            meta["promoted_semantic"] = bool(fact_id)
+                            if fact_id:
+                                meta["semantic_fact_id"] = fact_id
                             metrics_registry.inc("captured_memory_semantic_promotions_total")
                         except Exception:
                             pass
@@ -393,7 +401,7 @@ class ChatTurnPipeline:
         proactive_upcoming_surface: list[Any] = []
         proactive_summary: Optional[str] = None
         try:
-            pm = get_inmemory_prospective_memory()
+            pm = service._get_prospective_memory()
             injected_key = "_prospective_injected_ids"
             injected_ids = getattr(sess, injected_key, set())
             if not isinstance(injected_ids, set):
@@ -710,6 +718,12 @@ class ChatTurnPipeline:
             narr = tick.state.get("narrative")
             if narr is not None and not narr.is_empty:
                 payload["narrative"] = narr.to_dict()
+        except Exception:
+            pass
+        try:
+            response_policy = tick.state.get("response_policy")
+            if response_policy is not None:
+                payload["response_policy"] = response_policy.to_dict()
         except Exception:
             pass
         if attach_metacog and service._last_metacog_snapshot:

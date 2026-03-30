@@ -1134,40 +1134,20 @@ class VectorShortTermMemory:
                 "error_rate": self._error_count / max(1, self._operation_count)
             }
             
-            # Get collection statistics
+            # Prefer lightweight collection counts on the status path.
             try:
                 with self.chroma_manager.get_collection() as collection:
+                    count_fn = getattr(collection, "count", None)
+                    if callable(count_fn):
+                        try:
+                            status["vector_db_count"] = int(count_fn())
+                            return status
+                        except Exception:
+                            pass
+
                     result = collection.get()
-                    
-                    if result.get('ids'):
-                        count = len(result['ids'])
-                        status["vector_db_count"] = count
-                        
-                        if count > 0:
-                            # Calculate statistics
-                            activations = []
-                            importances = []
-                            attentions = []
-                            
-                            for i, metadata in enumerate(result.get('metadatas', [])):
-                                if metadata:
-                                    activations.append(self._calculate_activation(metadata))
-                                    importances.append(MetadataValidator.validate_numeric_field(metadata.get('importance', 0.5), 'importance'))
-                                    attentions.append(MetadataValidator.validate_numeric_field(metadata.get('attention_score', 0.0), 'attention_score'))
-                            
-                            if activations:
-                                status["avg_activation"] = sum(activations) / len(activations)
-                                status["min_activation"] = min(activations)
-                                status["max_activation"] = max(activations)
-                            
-                            if importances:
-                                status["avg_importance"] = sum(importances) / len(importances)
-                                
-                            if attentions:
-                                status["avg_attention"] = sum(attentions) / len(attentions)
-                    else:
-                        status["vector_db_count"] = 0
-                        
+                    ids = result.get('ids') or []
+                    status["vector_db_count"] = len(ids)
             except Exception as e:
                 status["vector_db_error"] = str(e)
             

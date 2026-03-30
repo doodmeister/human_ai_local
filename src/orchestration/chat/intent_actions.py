@@ -4,8 +4,6 @@ from datetime import timedelta
 import logging
 from typing import Any, Callable, Optional
 
-from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
-
 from .memory_query_interface import create_memory_query_interface
 
 
@@ -17,11 +15,13 @@ class ChatIntentActions:
         self,
         memory_query_parser: Any,
         get_consolidator: Callable[[], Any],
+        get_prospective_memory: Callable[[], Any],
         format_due_phrase: Callable[[Any], str],
         resolve_reminder_due_time: Callable[[Any], Any],
     ) -> None:
         self._memory_query_parser = memory_query_parser
         self._get_consolidator = get_consolidator
+        self._get_prospective_memory = get_prospective_memory
         self._format_due_phrase = format_due_phrase
         self._resolve_reminder_due_time = resolve_reminder_due_time
         self._memory_query_interface = None
@@ -56,7 +56,7 @@ class ChatIntentActions:
     def handle_reminder_request(self, intent: Any, session_id: str) -> Optional[str]:
         del session_id
         try:
-            pm = get_inmemory_prospective_memory()
+            pm = self._get_prospective_memory()
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.error("Prospective memory unavailable: %s", exc, exc_info=True)
             return None

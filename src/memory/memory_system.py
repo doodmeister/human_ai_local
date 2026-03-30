@@ -31,7 +31,7 @@ from typing import (
     Protocol, runtime_checkable
 )
 
-from .stm import VectorShortTermMemory, STMConfiguration
+from .stm import VectorShortTermMemory
 from .ltm import VectorLongTermMemory
 from .episodic import EpisodicMemorySystem
 from .prospective.prospective_memory import ProspectiveMemorySystem
@@ -597,9 +597,9 @@ class MemorySystem:
         
         return self._retrieval_service.retrieve_memory(memory_id)
     
-    def store_fact(self, subject: str, predicate: str, object_val: Any) -> str:
+    def store_fact(self, subject: str, predicate: str, object_val: Any, **kwargs: Any) -> str:
         """Stores a new fact in the semantic memory system."""
-        return self._fact_service.store_fact(subject, predicate, object_val)
+        return self._fact_service.store_fact(subject, predicate, object_val, **kwargs)
 
     def find_facts(self, subject: Optional[str] = None, predicate: Optional[str] = None, object_val: Optional[Any] = None) -> List[Dict[str, Any]]:
         """Finds facts in the semantic memory system."""
@@ -967,14 +967,49 @@ class MemorySystem:
         Returns:
             Dictionary containing recalled memories with metadata
         """
-        return self._recall_service.proactive_recall(
-            query=query,
-            max_results=max_results,
-            min_relevance=min_relevance,
-            context_window=context_window,
-            use_ai_summary=use_ai_summary,
-            openai_client=openai_client,
-        )
+        del context_window
+        if not self.is_initialized():
+            logger.warning("Memory system not initialized for proactive recall")
+            return {"recalled_memories": [], "summary": "Memory system unavailable"}
+
+        try:
+            search_results = self.hierarchical_search(
+                query=query,
+                max_results=max_results * 2,
+                max_per_system=max_results // 2,
+            )
+
+            recalled_memories = []
+            for memory, score, source in search_results:
+                if score < min_relevance:
+                    continue
+                recalled_memories.append(
+                    {
+                        "content": self._extract_memory_content(memory, source),
+                        "score": score,
+                        "source": source,
+                        "timestamp": self._extract_timestamp(memory, source),
+                        "importance": self._extract_importance(memory, source),
+                        "emotional_valence": self._extract_emotional_valence(memory, source),
+                        "tags": self._extract_tags(memory, source),
+                    }
+                )
+                if len(recalled_memories) >= max_results:
+                    break
+
+            summary = ""
+            if recalled_memories:
+                summary = self._generate_recall_summary(recalled_memories, query, use_ai_summary, openai_client)
+
+            return {
+                "recalled_memories": recalled_memories,
+                "summary": summary,
+                "query": query,
+                "total_found": len(recalled_memories),
+            }
+        except Exception as exc:
+            logger.error("Error in proactive recall: %s", exc)
+            return {"recalled_memories": [], "summary": f"Recall failed: {str(exc)}"}
 
     def _extract_memory_content(self, memory: Any, source: str) -> str:
         """Extract readable content from memory object."""

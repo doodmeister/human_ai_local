@@ -10,6 +10,8 @@ Use the files in this directory for the current architecture contract. Use `arch
 - `../phase3.md`: current architecture refactor plan and execution status
 - `memory_personality_roadmap.md`: current roadmap for memory and personality work
 - `memory_personality_architecture.md`: target architecture for memory, identity, and personality
+- `memory_personality_implementation_tickets.md`: phased implementation tickets for building the roadmap
+- `memory_personality_issue_backlog.md`: issue-style backlog for tracking the implementation work
 - `UI_DEVELOPER_API_QUICKSTART.md`: current UI-facing executive API quick reference
 - `ai.instructions.md`: supplementary background for assistants working in the repo
 - `cognitive_theory.md`: current cognition model and canonical turn loop
@@ -27,12 +29,16 @@ Use the files in this directory for the current architecture contract. Use `arch
 2. `../phase3.md`
 3. `memory_personality_roadmap.md`
 4. `memory_personality_architecture.md`
+5. `memory_personality_implementation_tickets.md`
+6. `memory_personality_issue_backlog.md`
 
 ### For assistants
 1. `ai.instructions.md`
 2. `../README.md`
 3. `../phase3.md`
 4. `memory_personality_architecture.md`
+5. `memory_personality_implementation_tickets.md`
+6. `memory_personality_issue_backlog.md`
 
 ### For GOAP work
 1. `goap_architecture.md`
@@ -70,6 +76,8 @@ docs/
   executive_telemetry.md
   goap_architecture.md
   goap_quick_reference.md
+  memory_personality_implementation_tickets.md
+  memory_personality_issue_backlog.md
   memory_personality_architecture.md
   memory_personality_roadmap.md
   memory_taxonomy.md

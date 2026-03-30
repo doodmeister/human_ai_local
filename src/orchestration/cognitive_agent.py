@@ -121,6 +121,10 @@ class CognitiveAgent:
     def llm_conversation(self) -> List[Dict[str, str]]:
         return self._llm_session.conversation
 
+    @llm_conversation.setter
+    def llm_conversation(self, value: List[Dict[str, str]]) -> None:
+        self._llm_session.conversation = list(value)
+
     @property
     def llm_provider(self) -> Any:
         return self._llm_session.provider
@@ -132,6 +136,10 @@ class CognitiveAgent:
     @property
     def reflection_reports(self) -> List[Dict[str, Any]]:
         return self._reflection_service.reports
+
+    @property
+    def _reflection_scheduler_running(self) -> bool:
+        return bool(self._reflection_service.get_status().get("scheduler_running", False))
 
     def _set_current_fatigue(self, value: float) -> None:
         self.current_fatigue = value
@@ -341,6 +349,7 @@ class CognitiveAgent:
     async def shutdown(self):
         """Gracefully shutdown the cognitive agent"""
         await self._maintenance_service.shutdown()
+        self.stop_reflection_scheduler()
     
     def reflect(self) -> Dict[str, Any]:
         """

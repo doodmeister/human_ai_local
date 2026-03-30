@@ -747,8 +747,12 @@ class VectorLongTermMemory(BaseMemorySystem):
         }
         if self.collection:
             try:
-                collection_info = self.collection.get()
-                status["vector_db_count"] = len(collection_info['ids']) if collection_info['ids'] else 0
+                count_fn = getattr(self.collection, "count", None)
+                if callable(count_fn):
+                    status["vector_db_count"] = int(count_fn())
+                else:
+                    collection_info = self.collection.get()
+                    status["vector_db_count"] = len(collection_info['ids']) if collection_info['ids'] else 0
             except Exception as e:
                 status["vector_db_error"] = str(e)
         return status

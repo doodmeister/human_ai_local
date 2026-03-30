@@ -21,6 +21,9 @@ from .constants import (
     RANK_BASE_EXECUTIVE,
 )
 from .metrics import metrics_registry
+from src.memory.autobiographical import AutobiographicalGraphBuilder
+from src.memory.schema import CanonicalMemoryItem, canonical_item_to_context_payload, normalize_memory_results
+from src.memory.retrieval import MemoryReranker, RetrievalPlan, RetrievalPlanner
 
 
 class ContextBuilder:
@@ -52,6 +55,9 @@ class ContextBuilder:
         self.attention = attention
         self.executive = executive
         self.prospective = prospective
+        self._retrieval_planner = RetrievalPlanner()
+        self._memory_reranker = MemoryReranker()
+        self._autobiographical_graph_builder = AutobiographicalGraphBuilder()
         self._last_stage_stats: Dict[str, Any] = {}
 
     # Public API
@@ -81,23 +87,45 @@ class ContextBuilder:
         )
 
         # 2. Memory stages
+        retrieval_plan: Optional[RetrievalPlan] = None
+        relationship_memory = self._current_relationship_memory()
         if include_memory:
-            fallback_used |= self._stage_with_fallback(
-                name="stm_semantic",
-                retrieval=lambda: self._retrieve_stm(query),
-                sink=items,
-                trace=trace,
+            retrieval_plan = self._retrieval_planner.plan(query, relationship_memory=relationship_memory)
+            trace.add_stage(
+                PipelineStageResult(
+                    name="retrieval_plan",
+                    candidates_in=len(items),
+                    candidates_out=len(items),
+                    latency_ms=0.0,
+                    rationale=retrieval_plan.intent,
+                    metadata=retrieval_plan.to_dict(),
+                )
             )
-            fallback_used |= self._stage_with_fallback(
-                name="ltm_semantic",
-                retrieval=lambda: self._retrieve_ltm(query),
-                sink=items,
-                trace=trace,
-            )
-            fallback_used |= self._stage_with_fallback(
-                name="episodic_anchors",
-                retrieval=lambda: self._retrieve_episodic(query),
-                sink=items,
+            if retrieval_plan.search_stm:
+                fallback_used |= self._stage_with_fallback(
+                    name="stm_semantic",
+                    retrieval=lambda: self._retrieve_stm(query, retrieval_plan),
+                    sink=items,
+                    trace=trace,
+                )
+            if retrieval_plan.search_ltm:
+                fallback_used |= self._stage_with_fallback(
+                    name="ltm_semantic",
+                    retrieval=lambda: self._retrieve_ltm(query, retrieval_plan),
+                    sink=items,
+                    trace=trace,
+                )
+            if retrieval_plan.search_episodic:
+                fallback_used |= self._stage_with_fallback(
+                    name="episodic_anchors",
+                    retrieval=lambda: self._retrieve_episodic(query, retrieval_plan),
+                    sink=items,
+                    trace=trace,
+                )
+            self._rerank_memory_context_items(
+                items,
+                retrieval_plan=retrieval_plan,
+                relationship_memory=relationship_memory,
                 trace=trace,
             )
 
@@ -306,11 +334,16 @@ class ContextBuilder:
 
     # --- Retrieval helpers with threshold filtering ---
 
-    def _retrieve_stm(self, query: Optional[str]) -> List[ContextItem]:
+    def _retrieve_stm(self, query: Optional[str], retrieval_plan: Optional[RetrievalPlan] = None) -> List[ContextItem]:
         if not self.stm or not query:
             return []
         try:
-            raw = self._timed_search(self.stm, query, "stm")
+            raw = self._timed_search(
+                self.stm,
+                query,
+                "stm",
+                max_results=retrieval_plan.limit_for("stm", 5) if retrieval_plan else None,
+            )
             items = self._wrap_memory_results(raw, "stm", "activation")
             threshold = self.cfg.get("stm_activation_min", 0.15)
             kept, filtered = [], 0
@@ -326,11 +359,16 @@ class ContextBuilder:
             metrics_registry.inc("stm_semantic_errors_total")
             return self._fallback_word_overlap(query, source="stm_fallback", note=str(e))
 
-    def _retrieve_ltm(self, query: Optional[str]) -> List[ContextItem]:
+    def _retrieve_ltm(self, query: Optional[str], retrieval_plan: Optional[RetrievalPlan] = None) -> List[ContextItem]:
         if not self.ltm or not query:
             return []
         try:
-            raw = self._timed_search(self.ltm, query, "ltm")
+            raw = self._timed_search(
+                self.ltm,
+                query,
+                "ltm",
+                max_results=retrieval_plan.limit_for("ltm", 5) if retrieval_plan else None,
+            )
             items = self._wrap_memory_results(raw, "ltm", "strength")
             threshold = self.cfg.get("ltm_similarity_threshold", 0.62)
             kept, filtered = [], 0
@@ -346,11 +384,16 @@ class ContextBuilder:
             metrics_registry.inc("ltm_semantic_errors_total")
             return self._fallback_word_overlap(query, source="ltm_fallback", note=str(e))
 
-    def _retrieve_episodic(self, query: Optional[str]) -> List[ContextItem]:
+    def _retrieve_episodic(self, query: Optional[str], retrieval_plan: Optional[RetrievalPlan] = None) -> List[ContextItem]:
         if not self.episodic or not query:
             return []
         try:
-            raw = self._timed_search(self.episodic, query, "episodic")
+            raw = self._timed_search(
+                self.episodic,
+                query,
+                "episodic",
+                max_results=retrieval_plan.limit_for("episodic", 5) if retrieval_plan else None,
+            )
             items = self._wrap_memory_results(raw, "episodic", "importance")
             # no threshold filtering yet; record stats
             self._last_stage_stats = {"kept": len(items), "filtered": 0, "threshold": None}
@@ -359,13 +402,27 @@ class ContextBuilder:
             metrics_registry.inc("episodic_anchors_errors_total")
             return self._fallback_word_overlap(query, source="episodic_fallback", note=str(e))
 
-    def _timed_search(self, memory_obj: Any, query: str, label: str):
+    def _timed_search(self, memory_obj: Any, query: str, label: str, max_results: Optional[int] = None):
         result_container = {}
         exc_container = {}
         def _run():
             try:
-                # Expect memory_obj.search(query=...) returns list[dict]
-                result = memory_obj.search(query=query)  # type: ignore
+                # Search signatures vary across memory stores; try richer kwargs first.
+                result = None
+                if max_results is not None:
+                    attempts = [
+                        {"query": query, "max_results": max_results, "limit": max_results},
+                        {"query": query, "limit": max_results},
+                        {"query": query, "max_results": max_results},
+                    ]
+                    for kwargs in attempts:
+                        try:
+                            result = memory_obj.search(**kwargs)  # type: ignore[arg-type]
+                            break
+                        except TypeError:
+                            continue
+                if result is None:
+                    result = memory_obj.search(query=query)  # type: ignore
                 result_container["res"] = self._normalize_memory_results(result)
             except Exception as e:  # pragma: no cover
                 exc_container["exc"] = e
@@ -380,140 +437,91 @@ class ContextBuilder:
 
     # --- Normalization helper to adapt various memory search return formats ---
     def _normalize_memory_results(self, raw: Any) -> List[Dict[str, Any]]:
-        """Normalize diverse memory search outputs into list[dict].
+        """Normalize diverse memory search outputs through canonical memory adapters."""
+        canonical_items = normalize_memory_results(raw)
+        canonical_items = self._memory_reranker.rerank(canonical_items)
+        return [canonical_item_to_context_payload(item) for item in canonical_items if item.content]
 
-        Supported input shapes:
-          - list[dict] (already in target shape)
-          - list[Tuple[MemoryItem, float]]
-          - list[VectorMemoryResult]
-          - None / other -> []
-        Dict schema produced (subset may be used downstream):
-          {id, content, activation, similarity, recency, salience}
-        """
-        if not raw:
-            return []
-        now = datetime.now()
-        if isinstance(raw, list) and (len(raw) == 0 or isinstance(raw[0], dict)):
-            # Map generic dict results (LTM/Episodic) to unified schema
-            out: List[Dict[str, Any]] = []
-            for i, d in enumerate(raw):  # type: ignore
-                if not isinstance(d, dict):
-                    continue
-                content = d.get('content') or d.get('text') or d.get('summary') or ''
-                if not content:
-                    continue
-                # Similarity mapping
-                similarity = d.get('similarity')
-                if similarity is None:
-                    similarity = d.get('similarity_score')
-                try:
-                    similarity = float(similarity) if similarity is not None else 0.0
-                except Exception:
-                    similarity = 0.0
-                # Activation candidates
-                act = d.get('activation')
-                if act is None:
-                    imp = d.get('importance')
-                    conf = d.get('confidence')
-                    try:
-                        if imp is not None or conf is not None:
-                            imp_v = float(imp) if imp is not None else 0.5
-                            conf_v = float(conf) if conf is not None else 0.5
-                            act = max(0.0, min(1.0, imp_v * 0.6 + conf_v * 0.4))
-                        else:
-                            act = 0.0
-                    except Exception:
-                        act = 0.0
-                # Recency estimation
-                recency = 0.0
-                ts_raw = d.get('last_access') or d.get('encoding_time') or d.get('timestamp')
-                if isinstance(ts_raw, str):
-                    try:
-                        dt = datetime.fromisoformat(ts_raw)
-                        age_hours = (now - dt).total_seconds() / 3600.0
-                        recency = max(0.0, 1.0 - age_hours / 24.0)  # simple 24h decay
-                    except Exception:
-                        recency = 0.0
-                salience = 0.0
-                for k_sal in ('salience','vividness','emotional_valence'):
-                    if k_sal in d:
-                        try:
-                            sv = abs(float(d[k_sal]))
-                            salience = max(salience, min(1.0, sv))
-                        except Exception:
-                            pass
-                out.append({
-                    'id': d.get('id', f'dict-{i}'),
-                    'content': content,
-                    'activation': float(act) if act is not None else 0.0,
-                    'similarity': similarity,
-                    'recency': recency,
-                    'salience': salience,
-                })
-            return out
+    def _current_relationship_memory(self) -> Any | None:
+        session = getattr(self, "_current_session", None)
+        if session is None:
+            return None
+        return getattr(session, "_relationship_memory_snapshot", None)
 
-        normalized: List[Dict[str, Any]] = []
+    def _rerank_memory_context_items(
+        self,
+        items: List[ContextItem],
+        *,
+        retrieval_plan: RetrievalPlan,
+        relationship_memory: Any | None,
+        trace: ProvenanceTrace,
+    ) -> None:
+        memory_sources = {"stm", "ltm", "episodic"}
+        prefix_items = [item for item in items if item.source_system not in memory_sources]
+        memory_items = [item for item in items if item.source_system in memory_sources]
+        if len(memory_items) < 2:
+            return
 
-        def compute_activation(item: Any) -> Dict[str, float]:
+        t0 = time.time()
+        canonical_items: list[CanonicalMemoryItem] = []
+        lookup: dict[str, ContextItem] = {}
+        for context_item in memory_items:
+            raw_payload = context_item.metadata.get("raw", {})
+            canonical_payload = raw_payload.get("canonical") if isinstance(raw_payload, dict) else None
+            if not isinstance(canonical_payload, dict):
+                continue
             try:
-                enc = getattr(item, 'encoding_time', None)
-                if not isinstance(enc, datetime):
-                    enc = now
-                age_hours = (now - enc).total_seconds() / 3600.0
-                decay_rate = float(getattr(item, 'decay_rate', 0.1) or 0.1)
-                recency = max(0.0, 1.0 - age_hours * decay_rate)
-                access_count = int(getattr(item, 'access_count', 0) or 0)
-                frequency = min(1.0, access_count / 10.0)
-                importance = float(getattr(item, 'importance', 0.5) or 0.5)
-                attention_score = float(getattr(item, 'attention_score', 0.0) or 0.0)
-                salience = (importance + attention_score) / 2.0
-                activation = (recency * 0.4) + (frequency * 0.3) + (salience * 0.3)
-                return {'activation': max(0.0, min(1.0, activation)), 'recency': recency, 'salience': salience}
+                canonical_item = CanonicalMemoryItem.from_dict(canonical_payload)
             except Exception:
-                return {'activation': 0.0, 'recency': 0.0, 'salience': 0.0}
+                continue
+            canonical_items.append(canonical_item)
+            lookup[canonical_item.memory_id] = context_item
 
-        # VectorMemoryResult pattern
-        if isinstance(raw, list) and raw and hasattr(raw[0], 'item') and hasattr(raw[0], 'similarity_score'):
-            for r in raw:  # type: ignore
-                try:
-                    item = getattr(r, 'item', None)
-                    if not item:
-                        continue
-                    meta = compute_activation(item)
-                    normalized.append({
-                        'id': getattr(item, 'id', ''),
-                        'content': getattr(item, 'content', ''),
-                        'activation': meta['activation'],
-                        'similarity': float(getattr(r, 'similarity_score', 0.0) or 0.0),
-                        'recency': meta['recency'],
-                        'salience': meta['salience'],
-                    })
-                except Exception:
-                    continue
-            return normalized
+        if len(canonical_items) < 2:
+            return
 
-        # Tuple (MemoryItem, score)
-        if isinstance(raw, list) and raw and isinstance(raw[0], tuple):
-            for tup in raw:
-                try:
-                    if len(tup) < 1:
-                        continue
-                    item = tup[0]
-                    similarity = float(tup[1]) if len(tup) > 1 else 0.0
-                    meta = compute_activation(item)
-                    normalized.append({
-                        'id': getattr(item, 'id', ''),
-                        'content': getattr(item, 'content', ''),
-                        'activation': meta['activation'],
-                        'similarity': similarity,
-                        'recency': meta['recency'],
-                        'salience': meta['salience'],
-                    })
-                except Exception:
-                    continue
-            return normalized
+        autobiographical_graph = self._autobiographical_graph_builder.build(canonical_items)
+        reranked = self._memory_reranker.rerank(
+            canonical_items,
+            relationship_memory=relationship_memory,
+            retrieval_plan=retrieval_plan,
+            autobiographical_graph=autobiographical_graph,
+        )
 
-        return []
+        reordered: list[ContextItem] = []
+        for canonical_item in reranked:
+            context_item = lookup.get(canonical_item.memory_id)
+            if context_item is None:
+                continue
+            signals = dict(canonical_item.metadata.get("rerank_signals", {}))
+            context_item.scores["importance"] = float(canonical_item.importance or 0.0)
+            if signals.get("relationship", 0.0) > 0.0:
+                context_item.scores["relationship"] = float(signals["relationship"])
+            if signals.get("continuity", 0.0) > 0.0:
+                context_item.scores["continuity"] = float(signals["continuity"])
+            context_item.metadata["rerank_factors"] = dict(canonical_item.metadata.get("rerank_factors", {}))
+            context_item.metadata["rerank_signals"] = signals
+            context_item.metadata["rerank_score"] = canonical_item.metadata.get("rerank_score")
+            reordered.append(context_item)
+
+        if len(reordered) != len(memory_items):
+            return
+
+        items[:] = prefix_items + reordered
+        trace.add_stage(
+            PipelineStageResult(
+                name="memory_rerank",
+                candidates_in=len(memory_items),
+                candidates_out=len(reordered),
+                latency_ms=(time.time() - t0) * 1000.0,
+                rationale="relationship_aware_cross_store_rerank",
+                metadata={
+                    "intent": retrieval_plan.intent,
+                    "relationship_target": retrieval_plan.relationship_target,
+                    "chapter_count": len(autobiographical_graph.chapters),
+                },
+            )
+        )
 
     def _wrap_memory_results(
         self,
@@ -835,12 +843,7 @@ class ContextBuilder:
 
             # If not found via session, try to read from a module-level singleton
             if drive_state is None:
-                try:
-                    from src.orchestration.chat.factory import _lazy_import
-                    # We can't easily get it without ChatService reference; skip gracefully
-                    return items
-                except Exception:
-                    return items
+                return items
 
             # Build drive processor for context generation helpers
             drive_processor = DriveProcessor()
@@ -890,7 +893,7 @@ class ContextBuilder:
         items: List[ContextItem] = []
 
         try:
-            from src.cognition.felt_sense import Mood, MoodLabeler
+            from src.cognition.felt_sense import MoodLabeler
 
             session = getattr(self, "_current_session", None)
             mood = None
@@ -1166,12 +1169,13 @@ class ContextBuilder:
     def _select_recent_turns(self, session: ConversationSession) -> List[ContextItem]:
         turns = session.recent_turns(self.cfg["max_recent_turns"])
         items: List[ContextItem] = []
+        now_ts = int(time.time())
         for t in turns:
             # Skip the most recent assistant reply (we only want prior context + user turns)
             if t.role not in ("user", "system"):
                 continue
             scores = {
-                "recency": 1.0 - (time.time() - t.timestamp) / 3600.0,  # crude hour decay
+                "recency": round(max(0.0, 1.0 - (now_ts - t.timestamp) / 3600.0), 4),
             }
             # Inject emotional salience factors if present on the TurnRecord
             sal = getattr(t, "salience", None)

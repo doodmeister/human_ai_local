@@ -9,6 +9,8 @@ WEIGHTS: Dict[str, float] = {
     "activation": 0.25,
     "salience": 0.15,
     "importance": 0.05,
+    "relationship": 0.22,
+    "continuity": 0.12,
     "overlap": 0.20,   # only applies to fallback items
     "focus": 0.40,     # attention focus forces high composite
     "state": 0.00,     # executive mode informational

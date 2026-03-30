@@ -33,10 +33,71 @@ class CognitiveMaintenanceService:
         self._get_sensory_processor = get_sensory_processor
         self._get_dream_processor = get_dream_processor
 
+    def _should_use_lightweight_memory_status(
+        self,
+        memory: Any,
+        conversation_context: List[Dict[str, Any]],
+        attention_focus: List[Any],
+        active_goals: List[Any],
+    ) -> bool:
+        if conversation_context or attention_focus or active_goals:
+            return False
+
+        session_memories = getattr(memory, "_session_memories", None)
+        if isinstance(session_memories, list) and session_memories:
+            return False
+
+        return True
+
+    def _build_lightweight_memory_status(self, memory: Any) -> Dict[str, Any]:
+        config = getattr(memory, "config", None)
+        session_memories = getattr(memory, "_session_memories", None)
+        session_memories_count = len(session_memories) if isinstance(session_memories, list) else 0
+
+        status: Dict[str, Any] = {
+            "stm": {"vector_db_count": 0},
+            "ltm": {"vector_db_count": 0},
+            "session_memories_count": session_memories_count,
+            "system_active": True,
+            "uptime_seconds": 0.0,
+            "operation_counts": {},
+            "error_counts": {},
+        }
+
+        if config is not None:
+            status.update(
+                {
+                    "consolidation_interval": getattr(config, "consolidation_interval", None),
+                    "use_vector_stm": getattr(config, "use_vector_stm", None),
+                    "use_vector_ltm": getattr(config, "use_vector_ltm", None),
+                    "config": {
+                        "stm_capacity": getattr(config, "stm_capacity", None),
+                        "max_concurrent_operations": getattr(config, "max_concurrent_operations", None),
+                        "auto_process_prospective": getattr(config, "auto_process_prospective", None),
+                    },
+                }
+            )
+
+        return status
+
     def get_cognitive_status(self) -> Dict[str, Any]:
         try:
+            current_fatigue = self._get_current_fatigue()
+            attention_focus = self._get_attention_focus()
+            active_goals = self._get_active_goals()
+            conversation_context = self._get_conversation_context()
+
             try:
-                memory_status = self._get_memory().get_status()
+                memory = self._get_memory()
+                if self._should_use_lightweight_memory_status(
+                    memory,
+                    conversation_context,
+                    attention_focus,
+                    active_goals,
+                ):
+                    memory_status = self._build_lightweight_memory_status(memory)
+                else:
+                    memory_status = memory.get_status()
             except Exception as exc:
                 logger.error("Error getting memory status: %s", exc)
                 memory_status = {"error": str(exc), "stm": {"vector_db_count": 0}, "ltm": {"vector_db_count": 0}}
@@ -53,15 +114,11 @@ class CognitiveMaintenanceService:
                 logger.error("Error getting sensory stats: %s", exc)
                 sensory_stats = {"error": str(exc), "total_processed": 0, "filtered_count": 0}
 
-            current_fatigue = self._get_current_fatigue()
-            attention_focus = self._get_attention_focus()
-            conversation_context = self._get_conversation_context()
-
             return {
                 "session_id": self._get_session_id(),
                 "fatigue_level": current_fatigue,
                 "attention_focus": attention_focus,
-                "active_goals": self._get_active_goals(),
+                "active_goals": active_goals,
                 "conversation_length": len(conversation_context),
                 "last_interaction": conversation_context[-1]["timestamp"] if conversation_context else None,
                 "memory_status": memory_status,

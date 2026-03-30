@@ -23,6 +23,8 @@ class ChatCognitiveLayerRuntime:
 
         self._relational_field = None
         self._relational_processor = None
+        self._relationship_memory_store = None
+        self._relationship_memory_updater = None
 
         self._pattern_field = None
         self._pattern_detector = None
@@ -35,6 +37,9 @@ class ChatCognitiveLayerRuntime:
         self._narrative = None
         self._narrative_constructor = None
         self._narrative_turn_counter = 0
+
+        self._policy_composer = None
+        self._response_policy = None
 
     def get_drive_system(self):
         if self._drive_state is None:
@@ -89,6 +94,14 @@ class ChatCognitiveLayerRuntime:
             return None
         return self._relational_field.to_dict()
 
+    def get_relationship_memory_system(self):
+        if self._relationship_memory_store is None:
+            from src.memory.relationship import RelationshipMemoryStore, RelationshipMemoryUpdater
+
+            self._relationship_memory_store = RelationshipMemoryStore()
+            self._relationship_memory_updater = RelationshipMemoryUpdater()
+        return self._relationship_memory_store, self._relationship_memory_updater
+
     def get_pattern_system(self):
         if self._pattern_field is None:
             from src.cognition.patterns import PatternConfig, PatternDetector, PatternField
@@ -139,6 +152,41 @@ class ChatCognitiveLayerRuntime:
         if self._narrative is None:
             return None
         return self._narrative.to_dict()
+
+    def get_response_policy_state(self) -> Optional[Dict[str, Any]]:
+        if self._response_policy is None:
+            return None
+        return self._response_policy.to_dict()
+
+    def get_policy_composer(self):
+        if self._policy_composer is None:
+            from src.orchestration.policy import PolicyComposer
+
+            self._policy_composer = PolicyComposer()
+        return self._policy_composer
+
+    @staticmethod
+    def _snapshot_to_mapping(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if hasattr(value, "to_dict"):
+            maybe_mapping = value.to_dict()
+            if isinstance(maybe_mapping, dict):
+                return dict(maybe_mapping)
+        return {}
+
+    def _update_response_policy(self, session: Any, tick: Any) -> None:
+        relationship_snapshot = tick.state.get("relationship_memory") or getattr(session, "_relationship_memory_snapshot", None)
+        composer = self.get_policy_composer()
+        self._response_policy = composer.compose(
+            drive_state=self.get_drive_state(),
+            mood_state=self.get_mood_state(),
+            relationship_state=self._snapshot_to_mapping(relationship_snapshot),
+            self_model_state=self.get_self_model_state(),
+            narrative_state=self.get_narrative_state(),
+        )
+        tick.state["response_policy"] = self._response_policy
+        setattr(session, "_response_policy_snapshot", self._response_policy)
 
     def process_turn(
         self,
@@ -211,6 +259,19 @@ class ChatCognitiveLayerRuntime:
             )
             tick.state["relational_model"] = relational_model
             setattr(session, "_relational_model_snapshot", relational_model)
+
+            relationship_store, relationship_updater = self.get_relationship_memory_system()
+            relationship_memory = relationship_updater.update_from_turn(
+                store=relationship_store,
+                interlocutor_id=person_id,
+                display_name=getattr(relational_model, "person_name", ""),
+                message=message,
+                valence=valence,
+                salience=salience,
+                relational_model=relational_model,
+            )
+            tick.state["relationship_memory"] = relationship_memory
+            setattr(session, "_relationship_memory_snapshot", relationship_memory)
         except Exception as exc:
             logger.debug("Relational processing skipped: %s", exc)
 
@@ -271,3 +332,8 @@ class ChatCognitiveLayerRuntime:
                 setattr(session, "_narrative_snapshot", self._narrative)
         except Exception as exc:
             logger.debug("Narrative construction skipped: %s", exc)
+
+        try:
+            self._update_response_policy(session, tick)
+        except Exception as exc:
+            logger.debug("Response policy update skipped: %s", exc)

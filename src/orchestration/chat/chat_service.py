@@ -28,6 +28,7 @@ from .status_service import ChatStatusService
 from .turn_pipeline import ChatTurnPipeline
 from .turn_support import ChatTurnSupport
 from .turn_context import ChatTurnContextBuilder
+from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from src.orchestration.cognitive_layers import ChatCognitiveLayerRuntime
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ class ChatService:
         self._intent_actions = ChatIntentActions(
             memory_query_parser=self._memory_query_parser,
             get_consolidator=lambda: self.consolidator,
+            get_prospective_memory=self._get_prospective_memory,
             format_due_phrase=self._format_due_phrase,
             resolve_reminder_due_time=self._resolve_reminder_due_time,
         )
@@ -365,6 +367,10 @@ class ChatService:
         """Return a friendly phrase for reminder due times."""
         return self._status_service.format_due_phrase(due_time)
 
+    def _get_prospective_memory(self) -> Any:
+        """Compatibility seam for reminder flows and tests."""
+        return get_inmemory_prospective_memory()
+
     def _format_proactive_reminder_summary(
         self,
         due_reminders: List[Any],
@@ -456,6 +462,10 @@ class ChatService:
     def get_narrative_state(self) -> Optional[Dict[str, Any]]:
         """Public accessor for narrative (for API/telemetry)."""
         return self._cognitive_layers.get_narrative_state()
+
+    def get_response_policy_state(self) -> Optional[Dict[str, Any]]:
+        """Public accessor for current response policy (for API/telemetry)."""
+        return self._cognitive_layers.get_response_policy_state()
 
     def _handle_memory_query(self, message: str, session_id: str) -> Optional[str]:
         return self._intent_actions.handle_memory_query(message, session_id)
