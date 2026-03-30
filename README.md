@@ -118,6 +118,17 @@ For a quick endpoint smoke check, run:
 python scripts/smoke_api_compat.py --base http://localhost:8000
 ```
 
+### Memory and personality quality gate
+
+For the deterministic memory/personality regression scorecard, run:
+```bash
+python scripts/generate_memory_scorecard.py --fail-on-gate
+```
+
+This summarizes retrieval quality, longitudinal continuity, contradiction repair, false-memory resistance, and policy-behavior stability, and exits nonzero if any configured gate fails.
+
+The same deterministic gate now runs in GitHub Actions on pull requests and pushes to `main` via `.github/workflows/memory-quality-gate.yml`.
+
 ---
 
 ## 📡 API Reference

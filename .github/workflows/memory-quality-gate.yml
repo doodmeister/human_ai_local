@@ -1,0 +1,36 @@
+name: Memory Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  memory-quality-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run focused quality-gate tests
+        run: |
+          python -m pytest -q \
+            tests/test_policy_behavior_eval_harness.py \
+            tests/test_eval_scorecard.py \
+            tests/test_longitudinal_eval_harness.py \
+            tests/test_retrieval_eval_baseline.py
+
+      - name: Run deterministic scorecard gate
+        run: python scripts/generate_memory_scorecard.py --fail-on-gate --no-telemetry

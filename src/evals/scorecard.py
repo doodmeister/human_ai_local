@@ -5,8 +5,10 @@ from typing import Any, Iterable, Literal, Mapping
 
 from src.evals.scenarios import (
     LongitudinalScenarioResult,
+    PolicyBehaviorScenarioResult,
     RetrievalScenarioResult,
     run_baseline_suite,
+    run_behavior_suite,
     run_longitudinal_suite,
 )
 
@@ -35,6 +37,7 @@ class ScorecardGateResult:
 class MemoryQualityScorecard:
     retrieval_summary: dict[str, float]
     longitudinal_summary: dict[str, float]
+    behavior_summary: dict[str, float]
     gates: tuple[ScorecardGateResult, ...]
     gate_failures: tuple[str, ...]
     telemetry_snapshot: dict[str, Any] | None = None
@@ -43,6 +46,7 @@ class MemoryQualityScorecard:
         return {
             "retrieval_summary": dict(self.retrieval_summary),
             "longitudinal_summary": dict(self.longitudinal_summary),
+            "behavior_summary": dict(self.behavior_summary),
             "gates": [asdict(gate) for gate in self.gates],
             "gate_failures": list(self.gate_failures),
             "telemetry_snapshot": dict(self.telemetry_snapshot) if isinstance(self.telemetry_snapshot, dict) else None,
@@ -58,6 +62,9 @@ def default_scorecard_gates() -> tuple[ScorecardGate, ...]:
         ScorecardGate(metric_key="longitudinal_contradiction_repair_score_avg", comparator="min", threshold=1.0),
         ScorecardGate(metric_key="longitudinal_over_recall_rate_avg", comparator="max", threshold=0.0),
         ScorecardGate(metric_key="longitudinal_false_memory_count_total", comparator="max", threshold=0.0),
+        ScorecardGate(metric_key="behavior_alignment_score_avg", comparator="min", threshold=1.0),
+        ScorecardGate(metric_key="behavior_traceability_score_avg", comparator="min", threshold=1.0),
+        ScorecardGate(metric_key="behavior_stability_score_avg", comparator="min", threshold=1.0),
     )
 
 
@@ -105,6 +112,29 @@ def summarize_longitudinal_results(results: Iterable[LongitudinalScenarioResult]
     }
 
 
+def summarize_behavior_results(results: Iterable[PolicyBehaviorScenarioResult]) -> dict[str, float]:
+    result_list = list(results)
+    count = len(result_list)
+    if count == 0:
+        return {
+            "behavior_scenario_count": 0.0,
+            "behavior_alignment_score_avg": 0.0,
+            "behavior_traceability_score_avg": 0.0,
+            "behavior_stability_score_avg": 0.0,
+            "behavior_checked_expectation_count_total": 0.0,
+        }
+
+    return {
+        "behavior_scenario_count": float(count),
+        "behavior_alignment_score_avg": sum(result.metrics.alignment_score for result in result_list) / count,
+        "behavior_traceability_score_avg": sum(result.metrics.traceability_score for result in result_list) / count,
+        "behavior_stability_score_avg": sum(result.metrics.stability_score for result in result_list) / count,
+        "behavior_checked_expectation_count_total": float(
+            sum(result.metrics.checked_expectation_count for result in result_list)
+        ),
+    }
+
+
 def evaluate_scorecard_gates(
     metrics: Mapping[str, float],
     gates: Iterable[ScorecardGate] | None = None,
@@ -130,20 +160,24 @@ def generate_memory_quality_scorecard(
     *,
     retrieval_results: Iterable[RetrievalScenarioResult] | None = None,
     longitudinal_results: Iterable[LongitudinalScenarioResult] | None = None,
+    behavior_results: Iterable[PolicyBehaviorScenarioResult] | None = None,
     telemetry_snapshot: dict[str, Any] | None = None,
     gates: Iterable[ScorecardGate] | None = None,
 ) -> MemoryQualityScorecard:
     retrieval_result_list = list(retrieval_results) if retrieval_results is not None else run_baseline_suite()
     longitudinal_result_list = list(longitudinal_results) if longitudinal_results is not None else run_longitudinal_suite()
+    behavior_result_list = list(behavior_results) if behavior_results is not None else run_behavior_suite()
 
     retrieval_summary = summarize_retrieval_results(retrieval_result_list)
     longitudinal_summary = summarize_longitudinal_results(longitudinal_result_list)
-    merged_metrics = {**retrieval_summary, **longitudinal_summary}
+    behavior_summary = summarize_behavior_results(behavior_result_list)
+    merged_metrics = {**retrieval_summary, **longitudinal_summary, **behavior_summary}
     gate_results = evaluate_scorecard_gates(merged_metrics, gates=gates)
     gate_failures = tuple(result.metric_key for result in gate_results if result.status == "fail")
     return MemoryQualityScorecard(
         retrieval_summary=retrieval_summary,
         longitudinal_summary=longitudinal_summary,
+        behavior_summary=behavior_summary,
         gates=gate_results,
         gate_failures=gate_failures,
         telemetry_snapshot=telemetry_snapshot,
