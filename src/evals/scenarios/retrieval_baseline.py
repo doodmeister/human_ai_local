@@ -1,16 +1,35 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Iterable
+import logging
+from math import sqrt
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Iterable, Mapping
 
 from src.evals.metrics import RetrievalMetrics, score_retrieval
+from src.memory.memory_system import MemorySystem, MemorySystemConfig
 from src.orchestration.chat.context_builder import ContextBuilder
 from src.orchestration.chat.conversation_session import SessionManager
 from src.orchestration.chat.models import TurnRecord
 
 
 _MEMORY_SOURCE_SYSTEMS = {"stm", "ltm", "episodic"}
+_RUNTIME_EMBEDDING_TERMS = (
+    "editor",
+    "favorite",
+    "vscode",
+    "schema",
+    "canonical",
+    "discussion",
+    "bash",
+    "windows",
+    "coffee",
+    "tea",
+    "roadmap",
+)
 
 
 class _StaticSearchMemory:
@@ -25,6 +44,137 @@ class _StaticSearchMemory:
         return list(self._results[:cap])
 
 
+def _runtime_embedding(text: str) -> list[float]:
+    lowered = text.lower()
+    vector = [float(lowered.count(term)) for term in _RUNTIME_EMBEDDING_TERMS]
+    magnitude = sqrt(sum(value * value for value in vector))
+    if magnitude <= 0.0:
+        return [0.0 for _ in vector]
+    return [value / magnitude for value in vector]
+
+
+@contextmanager
+def _suppress_runtime_logs() -> Any:
+    previous_disable = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        logging.disable(previous_disable)
+
+
+def _patch_runtime_memory(memory: MemorySystem) -> None:
+    memory.semantic._ensure_embedding_model = lambda: True
+    memory.semantic._generate_embedding = _runtime_embedding
+    memory.ltm._ensure_embedding_model = lambda: True
+    memory.ltm._generate_embedding = _runtime_embedding
+    memory.episodic._ensure_embedding_model = lambda: True
+    memory.episodic._generate_embedding = _runtime_embedding
+
+
+def _configure_runtime_episodic_storage(memory: MemorySystem, persist_dir: str) -> None:
+    episodic_storage_path = Path(persist_dir) / "episodic_json"
+    episodic_storage_path.mkdir(parents=True, exist_ok=True)
+    memory.episodic.storage_path = episodic_storage_path
+    memory.episodic._memory_cache = {}
+    memory.episodic._load_from_json_backup()
+
+
+def _build_runtime_memory(persist_dir: str) -> MemorySystem:
+    with _suppress_runtime_logs():
+        memory = MemorySystem(MemorySystemConfig(chroma_persist_dir=persist_dir))
+    _patch_runtime_memory(memory)
+    _configure_runtime_episodic_storage(memory, persist_dir)
+    return memory
+
+
+class _RuntimeRetrievalHarness:
+    def __init__(
+        self,
+        *,
+        temp_dir_handle: TemporaryDirectory[str] | None = None,
+        persist_dir: str | None = None,
+        episode_aliases: Mapping[str, str] | None = None,
+    ) -> None:
+        self._temp_dir_handle = temp_dir_handle or TemporaryDirectory(
+            prefix="retrieval_runtime_",
+            ignore_cleanup_errors=True,
+        )
+        self._persist_dir = persist_dir or self._temp_dir_handle.name
+        self._episode_aliases = dict(episode_aliases or {})
+        self.memory = _build_runtime_memory(self._persist_dir)
+
+    def seed(self, scenario: "RetrievalScenario") -> None:
+        with _suppress_runtime_logs():
+            for result in scenario.ltm_results:
+                content = str(result.get("fact_text") or result.get("content") or result.get("summary") or "")
+                if not content:
+                    continue
+                self.memory.ltm.store(
+                    memory_id=str(result.get("id") or f"ltm-{len(self._episode_aliases)}"),
+                    content=content,
+                    memory_type=str(result.get("memory_type") or "semantic"),
+                    importance=float(result.get("importance", 0.5) or 0.5),
+                    emotional_valence=float(result.get("emotional_valence", 0.0) or 0.0),
+                    source=str(result.get("source") or "retrieval_eval"),
+                    tags=list(result.get("tags", ())),
+                    associations=list(result.get("associations", ())),
+                )
+
+            for result in scenario.episodic_results:
+                alias = str(result.get("id") or f"episode-{len(self._episode_aliases) + 1}")
+                episode_id = self.memory.create_episodic_memory(
+                    summary=str(result.get("summary") or alias),
+                    detailed_content=str(result.get("detailed_content") or result.get("content") or ""),
+                    participants=list(result.get("participants", ())),
+                    importance=float(result.get("importance", 0.5) or 0.5),
+                    emotional_valence=float(result.get("emotional_valence", 0.0) or 0.0),
+                    life_period=str(result.get("life_period") or "retrieval_eval"),
+                )
+                if episode_id:
+                    self._episode_aliases[str(episode_id)] = alias
+
+    def restart(self) -> "_RuntimeRetrievalHarness":
+        with _suppress_runtime_logs():
+            self.memory.shutdown()
+        return _RuntimeRetrievalHarness(
+            temp_dir_handle=self._temp_dir_handle,
+            persist_dir=self._persist_dir,
+            episode_aliases=self._episode_aliases,
+        )
+
+    def prepare_for_query(self, scenario: "RetrievalScenario") -> None:
+        if scenario.disable_episodic_vector_search:
+            self.memory.episodic.collection = None
+            original_search = self.memory.episodic.search
+
+            def _search_with_eval_threshold(query: str | None = None, **kwargs: Any):
+                kwargs.setdefault("min_relevance", 0.0)
+                return original_search(query=query, **kwargs)
+
+            self.memory.episodic.search = _search_with_eval_threshold
+            with _suppress_runtime_logs():
+                self.memory.episodic.search(query=scenario.query, limit=max(len(scenario.expected_ids), 1))
+
+    def close(self) -> None:
+        with _suppress_runtime_logs():
+            episodic = getattr(self.memory, "_episodic", None)
+            if episodic is not None and hasattr(episodic, "shutdown"):
+                episodic.shutdown()
+            ltm = getattr(self.memory, "_ltm", None)
+            chroma_client = getattr(ltm, "chroma_client", None)
+            if chroma_client is not None and hasattr(chroma_client, "clear_system_cache"):
+                chroma_client.clear_system_cache()
+            self.memory.shutdown()
+        try:
+            self._temp_dir_handle.cleanup()
+        except Exception:
+            pass
+
+    def alias_for(self, source_id: str) -> str:
+        return self._episode_aliases.get(source_id, source_id)
+
+
 @dataclass(slots=True)
 class RetrievalScenario:
     scenario_id: str
@@ -37,6 +187,10 @@ class RetrievalScenario:
     stm_results: tuple[Any, ...] = ()
     ltm_results: tuple[dict[str, Any], ...] = ()
     episodic_results: tuple[dict[str, Any], ...] = ()
+    runner: str = "fixture"
+    restart_before_query: bool = False
+    disable_episodic_vector_search: bool = False
+    chat_config: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +201,7 @@ class RetrievalScenarioResult:
     missing_expected_ids: tuple[str, ...]
     unexpected_ids: tuple[str, ...]
     metrics: RetrievalMetrics
+    runner: str = "fixture"
 
 
 def build_baseline_scenarios() -> list[RetrievalScenario]:
@@ -152,27 +307,112 @@ def build_baseline_scenarios() -> list[RetrievalScenario]:
                 },
             ),
         ),
+        RetrievalScenario(
+            scenario_id="runtime_fact_recall_favorite_editor",
+            query="What do you know about the user's favorite editor?",
+            expected_intent="factual",
+            expected_ids=("fact-editor",),
+            session_turns=("We were talking about development tools.",),
+            ltm_results=(
+                {
+                    "id": "fact-editor",
+                    "fact_text": "The user's favorite editor is VS Code.",
+                    "importance": 0.8,
+                    "source": "user_assertion",
+                },
+                {
+                    "id": "fact-shell",
+                    "fact_text": "The user uses bash on Windows.",
+                    "importance": 0.6,
+                    "source": "user_assertion",
+                },
+            ),
+            runner="runtime",
+            restart_before_query=True,
+        ),
+        RetrievalScenario(
+            scenario_id="runtime_episodic_recall_schema_discussion",
+            query="When did we discuss the canonical schema?",
+            expected_intent="episodic",
+            expected_ids=("episode-schema",),
+            session_turns=("I want to revisit our design work.",),
+            episodic_results=(
+                {
+                    "id": "episode-schema",
+                    "summary": "Canonical schema discussion",
+                    "detailed_content": "Yesterday afternoon we discussed the canonical memory schema and its field validation rules.",
+                    "importance": 0.82,
+                    "life_period": "phase_1_foundations",
+                    "participants": ("user", "assistant"),
+                },
+            ),
+            runner="runtime",
+            restart_before_query=True,
+            disable_episodic_vector_search=True,
+            chat_config={"timeouts": {"retrieval_ms": 4000}},
+        ),
     ]
 
 
-def run_retrieval_scenario(scenario: RetrievalScenario) -> RetrievalScenarioResult:
+def _collect_retrieved_ids(
+    built: Any,
+    *,
+    alias_lookup: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    return tuple(
+        alias_lookup.get(item.source_id, item.source_id) if alias_lookup else item.source_id
+        for item in built.items
+        if item.source_system in _MEMORY_SOURCE_SYSTEMS
+    )
+
+
+def _build_fixture_context(scenario: RetrievalScenario) -> tuple[Any, tuple[str, ...]]:
     session = SessionManager().create_or_get(scenario.scenario_id)
     session_turns = scenario.session_turns or (scenario.query,)
     for content in session_turns:
         session.add_turn(TurnRecord(role="user", content=content))
 
     builder = ContextBuilder(
+        chat_config=dict(scenario.chat_config or {}),
         stm=_StaticSearchMemory(scenario.stm_results) if scenario.stm_results else None,
         ltm=_StaticSearchMemory(scenario.ltm_results) if scenario.ltm_results else None,
         episodic=_StaticSearchMemory(scenario.episodic_results) if scenario.episodic_results else None,
     )
     built = builder.build(session, query=scenario.query, include_trace=True)
+    return built, _collect_retrieved_ids(built)
 
-    retrieved_ids = tuple(
-        item.source_id
-        for item in built.items
-        if item.source_system in _MEMORY_SOURCE_SYSTEMS
-    )
+
+def _build_runtime_context(scenario: RetrievalScenario) -> tuple[Any, tuple[str, ...]]:
+    harness = _RuntimeRetrievalHarness()
+    try:
+        harness.seed(scenario)
+        if scenario.restart_before_query:
+            harness = harness.restart()
+        harness.prepare_for_query(scenario)
+
+        session = SessionManager().create_or_get(scenario.scenario_id)
+        session_turns = scenario.session_turns or (scenario.query,)
+        for content in session_turns:
+            session.add_turn(TurnRecord(role="user", content=content))
+
+        builder = ContextBuilder(
+            chat_config=dict(scenario.chat_config or {}),
+            ltm=harness.memory.ltm if scenario.ltm_results else None,
+            episodic=harness.memory.episodic if scenario.episodic_results else None,
+        )
+        with _suppress_runtime_logs():
+            built = builder.build(session, query=scenario.query, include_trace=True)
+        return built, _collect_retrieved_ids(built, alias_lookup=harness._episode_aliases)
+    finally:
+        harness.close()
+
+
+def run_retrieval_scenario(scenario: RetrievalScenario) -> RetrievalScenarioResult:
+    if scenario.runner == "runtime":
+        built, retrieved_ids = _build_runtime_context(scenario)
+    else:
+        built, retrieved_ids = _build_fixture_context(scenario)
+
     metrics = score_retrieval(retrieved_ids, scenario.expected_ids)
     retrieval_stage = next((stage for stage in built.trace.pipeline_stages if stage.name == "retrieval_plan"), None)
     intent = ""
@@ -188,6 +428,7 @@ def run_retrieval_scenario(scenario: RetrievalScenario) -> RetrievalScenarioResu
         missing_expected_ids=missing_expected_ids,
         unexpected_ids=unexpected_ids,
         metrics=metrics,
+        runner=scenario.runner,
     )
 
 

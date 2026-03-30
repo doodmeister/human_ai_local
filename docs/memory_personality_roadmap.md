@@ -294,8 +294,11 @@ Current status:
 
 - deterministic restart-aware longitudinal scenarios now live in `src/evals/scenarios/longitudinal_memory.py`
 - the initial suite scores restart continuity, contradiction repair, false-memory count, and over-recall rate in end-to-end tests
+- the retrieval baseline now includes persisted runtime roundtrips for both vector LTM fact recall and episodic restart recall, alongside the fast fixture-backed scenarios
 - deterministic scorecard generation now lives in `src/evals/scorecard.py` with a developer entrypoint at `scripts/generate_memory_scorecard.py`
 - the scorecard now also summarizes policy behavior alignment, traceability, and replay stability using deterministic policy fixtures
+- the behavior suite now includes a stubbed `CognitiveAgent.process_input()` runtime path so policy injection is checked at the live agent boundary as well as the LLM-session boundary
+- the longitudinal suite now includes persisted `MemorySystem` roundtrips for restart continuity and contradiction repair, alongside the fixture-backed fast baseline scenarios
 
 ## Priority Backlog
 

@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+import logging
+import os
 import re
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+from tempfile import TemporaryDirectory
 from typing import Any
+from unittest.mock import AsyncMock
+import uuid
 
 from src.evals.metrics import BehaviorMetrics, score_behavior
 from src.model.llm_provider import LLMResponse
+from src.orchestration.cognitive_agent import CognitiveAgent
 from src.orchestration.agent.llm_session import CognitiveAgentLLMSession
 from src.orchestration.policy import PolicyVector, ResponsePolicy
 
@@ -120,6 +127,7 @@ class PolicyBehaviorScenario:
     scenario_id: str
     user_input: str
     response_policy: dict[str, Any]
+    runner: str = "session"
     expected_present: tuple[str, ...] = ()
     expected_absent: tuple[str, ...] = ()
     expected_policy_values: dict[str, float] = field(default_factory=dict)
@@ -130,10 +138,80 @@ class PolicyBehaviorScenario:
 @dataclass(frozen=True, slots=True)
 class PolicyBehaviorScenarioResult:
     scenario_id: str
+    runner: str
     response: str
     replay_response: str | None
     observed_policy_values: dict[str, float]
     metrics: BehaviorMetrics
+
+
+class StubCognitiveLayers:
+    def __init__(self, policy: ResponsePolicy) -> None:
+        self._policy = policy
+        self.calls: list[dict[str, object]] = []
+
+    def process_turn(self, *, session, tick, message: str, salience: float, valence: float, global_turn_counter: int) -> None:
+        self.calls.append(
+            {
+                "session": session,
+                "message": message,
+                "salience": salience,
+                "valence": valence,
+                "global_turn_counter": global_turn_counter,
+            }
+        )
+        tick.state["response_policy"] = self._policy
+        setattr(session, "_response_policy_snapshot", self._policy)
+
+    def get_response_policy_state(self):
+        return self._policy.to_dict()
+
+
+def _response_policy_from_dict(policy: dict[str, Any]) -> ResponsePolicy:
+    stable = PolicyVector(**dict(policy.get("stable_traits", {})))
+    dynamic = PolicyVector(**dict(policy.get("dynamic_state", {})))
+    effective = PolicyVector(**dict(policy.get("effective", {})))
+    return ResponsePolicy(
+        stable_traits=stable,
+        dynamic_state=dynamic,
+        effective=effective,
+        trace=dict(policy.get("trace", {})),
+    )
+
+
+@contextmanager
+def _temporary_runtime_env() -> Any:
+    with TemporaryDirectory(prefix="policy_behavior_") as temp_dir:
+        previous = {
+            "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
+            "DISABLE_SEMANTIC_MEMORY": os.environ.get("DISABLE_SEMANTIC_MEMORY"),
+            "CHROMA_PERSIST_DIR": os.environ.get("CHROMA_PERSIST_DIR"),
+            "STM_COLLECTION": os.environ.get("STM_COLLECTION"),
+            "LTM_COLLECTION": os.environ.get("LTM_COLLECTION"),
+        }
+        os.environ["OPENAI_API_KEY"] = ""
+        os.environ["DISABLE_SEMANTIC_MEMORY"] = "1"
+        os.environ["CHROMA_PERSIST_DIR"] = temp_dir
+        os.environ["STM_COLLECTION"] = f"runtime_policy_stm_{uuid.uuid4().hex[:8]}"
+        os.environ["LTM_COLLECTION"] = f"runtime_policy_ltm_{uuid.uuid4().hex[:8]}"
+        try:
+            yield temp_dir
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+@contextmanager
+def _suppress_runtime_logs() -> Any:
+    previous_disable = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        logging.disable(previous_disable)
 
 
 def build_behavior_scenarios() -> list[PolicyBehaviorScenario]:
@@ -185,6 +263,32 @@ def build_behavior_scenarios() -> list[PolicyBehaviorScenario]:
                 "disclosure": 0.66,
             },
         ),
+        PolicyBehaviorScenario(
+            scenario_id="runtime_traceability_full_policy",
+            user_input="help me continue the roadmap",
+            runner="runtime",
+            response_policy=_build_response_policy(
+                warmth=0.81,
+                directness=0.76,
+                curiosity=0.64,
+                uncertainty=0.58,
+                disclosure=0.66,
+            ).to_dict(),
+            expected_present=(
+                "Happy to help.",
+                "Answer:",
+                "I may be mistaken, but",
+                "From my current perspective,",
+                "What constraint matters most?",
+            ),
+            expected_policy_values={
+                "warmth": 0.81,
+                "directness": 0.76,
+                "curiosity": 0.64,
+                "uncertainty": 0.58,
+                "disclosure": 0.66,
+            },
+        ),
     ]
 
 
@@ -205,12 +309,28 @@ async def _generate_with_fresh_session(scenario: PolicyBehaviorScenario) -> tupl
     return response, provider
 
 
+async def _generate_with_runtime_agent(scenario: PolicyBehaviorScenario) -> tuple[str, PolicyAwareEvalProvider]:
+    provider = PolicyAwareEvalProvider()
+    with _temporary_runtime_env(), _suppress_runtime_logs():
+        agent = CognitiveAgent()
+        agent._llm_session.provider = provider
+        agent._llm_session.openai_client = None
+        agent._cognitive_layers = StubCognitiveLayers(_response_policy_from_dict(scenario.response_policy))
+        agent._turn_processor._get_cognitive_layers = lambda: agent._cognitive_layers
+        agent._turn_processor.retrieve_memory_context = AsyncMock(return_value=[])
+        agent._turn_processor.calculate_attention_allocation = AsyncMock(return_value={"overall_salience": 0.5})
+        agent._turn_processor.consolidate_memory = AsyncMock(return_value=None)
+        response = await agent.process_input(scenario.user_input)
+    return response, provider
+
+
 async def _run_behavior_scenario_async(scenario: PolicyBehaviorScenario) -> PolicyBehaviorScenarioResult:
-    response, provider = await _generate_with_fresh_session(scenario)
+    generator = _generate_with_runtime_agent if scenario.runner == "runtime" else _generate_with_fresh_session
+    response, provider = await generator(scenario)
     replay_response = None
     replay_provider = None
     if scenario.require_stable_replay:
-        replay_response, replay_provider = await _generate_with_fresh_session(scenario)
+        replay_response, replay_provider = await generator(scenario)
 
     matched_expectations = sum(1 for token in scenario.expected_present if token in response)
     matched_expectations += sum(1 for token in scenario.expected_absent if token not in response)
@@ -244,6 +364,7 @@ async def _run_behavior_scenario_async(scenario: PolicyBehaviorScenario) -> Poli
     )
     return PolicyBehaviorScenarioResult(
         scenario_id=scenario.scenario_id,
+        runner=scenario.runner,
         response=response,
         replay_response=replay_response,
         observed_policy_values=observed_policy_values,

@@ -4,10 +4,17 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import warnings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+warnings.filterwarnings(
+    "ignore",
+    message="`clean_up_tokenization_spaces` was not set.*",
+    category=FutureWarning,
+)
 
 from src.evals.scorecard import generate_memory_quality_scorecard
 from src.memory.metrics import metrics_registry
