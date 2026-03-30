@@ -1,15 +1,47 @@
-from .metrics import RetrievalMetrics, expected_coverage, irrelevant_context_rate, precision_at_k, score_retrieval
-from .scenarios import RetrievalScenario, RetrievalScenarioResult, build_baseline_scenarios, run_baseline_suite, run_retrieval_scenario
+from .metrics import (
+    LongitudinalMetrics,
+    RetrievalMetrics,
+    expected_coverage,
+    irrelevant_context_rate,
+    precision_at_k,
+    score_longitudinal,
+    score_retrieval,
+)
+from .scenarios import (
+    FactExpectation,
+    FactSeed,
+    LongitudinalPhase,
+    LongitudinalScenario,
+    LongitudinalScenarioResult,
+    RetrievalScenario,
+    RetrievalScenarioResult,
+    build_baseline_scenarios,
+    build_longitudinal_scenarios,
+    run_baseline_suite,
+    run_longitudinal_scenario,
+    run_longitudinal_suite,
+    run_retrieval_scenario,
+)
 
 __all__ = [
+    "FactExpectation",
+    "FactSeed",
+    "LongitudinalMetrics",
+    "LongitudinalPhase",
+    "LongitudinalScenario",
+    "LongitudinalScenarioResult",
     "RetrievalMetrics",
     "RetrievalScenario",
     "RetrievalScenarioResult",
     "build_baseline_scenarios",
+    "build_longitudinal_scenarios",
     "expected_coverage",
     "irrelevant_context_rate",
     "precision_at_k",
+    "run_longitudinal_scenario",
+    "run_longitudinal_suite",
     "run_baseline_suite",
     "run_retrieval_scenario",
+    "score_longitudinal",
     "score_retrieval",
 ]
