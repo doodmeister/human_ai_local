@@ -115,12 +115,14 @@ Deliverables:
 - explicit behavior controls for tone, interpersonal stance, uncertainty policy, and memory disclosure
 - stable trait layer plus dynamic state layer
 - controllable and testable prompt assembly for policy-conditioned generation
+- behavior-level evaluation fixtures for warmth, directness, curiosity, uncertainty, and disclosure
 
 Success criteria:
 
 - behavior remains stable across sessions for the same persona
 - behavior changes coherently when internal state changes
 - style and stance can be explained through policy inputs rather than prompt accidents
+- fixed scenarios can detect policy-to-output regressions in a repeatable way
 
 ### 5. Reconsolidation, Revision, And Forgetting
 
@@ -136,6 +138,12 @@ Deliverables:
 - confidence updates and source weighting
 - explicit contradiction sets and belief revision logic
 - selective forgetting and suppression policies
+
+Current implementation note:
+
+- low-value long-term, episodic, and semantic memories can now be suppressed through an explicit memory-facade forgetting policy
+- autobiographical and relationship anchors are preserved by rule-based protection checks instead of relying on ad hoc deletion avoidance
+- retrieval and proactive recall skip suppressed or quarantined items by default so decayed memories stop competing indefinitely
 
 Success criteria:
 

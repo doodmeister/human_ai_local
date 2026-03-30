@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import logging
 
 from ..core.config import CognitiveConfig
+from .cognitive_layers import ChatCognitiveLayerRuntime
 from .agent import (
     CognitiveAgentLLMSession,
     CognitiveAgentRuntimeBuilder,
@@ -49,9 +50,11 @@ class CognitiveAgent:
         self.config = config or CognitiveConfig.from_env()
         # Temporary simple session ID
         self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self._turn_counter = 0
         
         # Initialize cognitive components
         self._initialize_components()
+        self._cognitive_layers = ChatCognitiveLayerRuntime()
         
         # Cognitive state
         self.current_fatigue = 0.0
@@ -82,7 +85,9 @@ class CognitiveAgent:
             get_dream_processor=lambda: self.dream_processor,
         )
         self._turn_processor = CognitiveTurnProcessor(
+            get_session=lambda: self,
             get_session_id=lambda: self.session_id,
+            get_cognitive_layers=lambda: self._cognitive_layers,
             get_sensory_interface=lambda: self.sensory_interface,
             get_memory=lambda: self.memory,
             get_attention=lambda: self.attention,
@@ -90,6 +95,8 @@ class CognitiveAgent:
             get_conversation_context=lambda: self.conversation_context,
             get_neural_integration=lambda: self.neural_integration,
             get_current_fatigue=lambda: self.current_fatigue,
+            get_turn_counter=lambda: self._turn_counter,
+            increment_turn_counter=self._increment_turn_counter,
             set_current_fatigue=self._set_current_fatigue,
             set_attention_focus=self._set_attention_focus,
         )
@@ -146,6 +153,9 @@ class CognitiveAgent:
 
     def _set_attention_focus(self, value: List[Any]) -> None:
         self.attention_focus = value
+
+    def _increment_turn_counter(self) -> None:
+        self._turn_counter += 1
     
     async def process_input(
         self,
@@ -235,6 +245,9 @@ class CognitiveAgent:
             ollama_base_url=ollama_base_url,
             ollama_model=ollama_model,
         )
+
+    def get_response_policy_state(self) -> Optional[Dict[str, Any]]:
+        return self._cognitive_layers.get_response_policy_state()
     
     async def _consolidate_memory(
         self,

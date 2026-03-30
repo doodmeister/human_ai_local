@@ -429,6 +429,12 @@ Mechanisms:
 - update self-model or relationship model when repeated evidence appears
 - create narrative links when an event becomes identity-relevant
 
+Current implementation note:
+
+- recalled STM, LTM, and episodic items now support explicit reconsolidation feedback through the memory facade
+- successful recall can reinforce importance, confidence, access metadata, or episodic consolidation strength
+- correction-style feedback can weaken metadata without requiring backend-specific callers
+
 ## 13. Reflection Layer
 
 Reflection remains useful, but should not be the only adaptation mechanism.

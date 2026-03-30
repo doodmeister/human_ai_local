@@ -8,6 +8,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _is_suppressed(memory: Any, source: str) -> bool:
+    source_key = str(source).strip().lower()
+    if source_key == "episodic":
+        return bool(getattr(memory, "suppressed", False))
+    if isinstance(memory, dict):
+        if source_key == "semantic" and str(memory.get("belief_status", "")).lower() == "quarantined":
+            return True
+        return bool(memory.get("suppressed", False))
+    return bool(getattr(memory, "suppressed", False))
+
+
 class MemoryRecallService:
     def __init__(
         self,
@@ -37,7 +48,8 @@ class MemoryRecallService:
         try:
             stm_results = self._get_stm().search(query, max_results=max_per_system)
             for memory, score in stm_results:
-                all_results.append((memory, score, "STM"))
+                if not _is_suppressed(memory, "STM"):
+                    all_results.append((memory, score, "STM"))
         except Exception as exc:
             logger.error("Error searching STM for query '%s': %s", query, exc)
 
@@ -47,18 +59,21 @@ class MemoryRecallService:
                 ltm_results = getattr(ltm, "search_semantic", lambda **kwargs: [])(query=query, max_results=max_per_system)
                 for memory in ltm_results:
                     score = memory.get("similarity_score", 0.0)
-                    all_results.append((memory, score, "LTM"))
+                    if not _is_suppressed(memory, "LTM"):
+                        all_results.append((memory, score, "LTM"))
             else:
                 ltm_results = getattr(ltm, "search_by_content", lambda **kwargs: [])(query=query, max_results=max_per_system)
                 for memory, score in ltm_results:
-                    all_results.append((memory, score, "LTM"))
+                    if not _is_suppressed(memory, "LTM"):
+                        all_results.append((memory, score, "LTM"))
         except Exception as exc:
             logger.error("Error searching LTM for query '%s': %s", query, exc)
 
         try:
             episodic_results = self._get_episodic().search_memories(query=query, limit=max_per_system)
             for result in episodic_results:
-                all_results.append((result.memory, result.relevance, "Episodic"))
+                if not _is_suppressed(result.memory, "Episodic"):
+                    all_results.append((result.memory, result.relevance, "Episodic"))
         except Exception as exc:
             logger.error("Error searching Episodic Memory for query '%s': %s", query, exc)
 
@@ -67,9 +82,11 @@ class MemoryRecallService:
             subject_matches = semantic.find_facts(subject=query)
             object_matches = semantic.find_facts(object_val=query)
             for fact in subject_matches:
-                all_results.append((fact, 0.9, "Semantic"))
+                if not _is_suppressed(fact, "Semantic"):
+                    all_results.append((fact, 0.9, "Semantic"))
             for fact in object_matches:
-                all_results.append((fact, 0.8, "Semantic"))
+                if not _is_suppressed(fact, "Semantic"):
+                    all_results.append((fact, 0.8, "Semantic"))
         except Exception as exc:
             logger.error("Error searching Semantic Memory for query '%s': %s", query, exc)
 
@@ -158,6 +175,18 @@ class MemoryRecallService:
             return str(memory)
         except Exception:
             return str(memory)
+
+    def extract_memory_id(self, memory: Any, source: str) -> Optional[str]:
+        try:
+            if source == "Semantic" and isinstance(memory, dict):
+                return memory.get("fact_id") or memory.get("id")
+            if isinstance(memory, dict):
+                return memory.get("id") or memory.get("memory_id")
+            if hasattr(memory, "id"):
+                return getattr(memory, "id")
+        except Exception:
+            pass
+        return None
 
     def extract_timestamp(self, memory: Any, source: str) -> Optional[datetime]:
         try:

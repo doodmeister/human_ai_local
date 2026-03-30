@@ -781,6 +781,49 @@ class VectorShortTermMemory:
             self._error_count += 1
             logger.error(f"Failed to retrieve memory {memory_id}: {e}")
             return None
+
+    def apply_recall_feedback(
+        self,
+        memory_id: str,
+        *,
+        importance_delta: float = 0.0,
+        attention_delta: float = 0.0,
+    ) -> bool:
+        try:
+            memory_id = MetadataValidator.validate_memory_id(memory_id)
+
+            with self.chroma_manager.get_collection() as collection:
+                result = collection.get(ids=[memory_id])
+                if not result.get("ids"):
+                    return False
+
+                metadata = dict(result["metadatas"][0] if result.get("metadatas") else {})
+                content = result["documents"][0] if result.get("documents") else ""
+
+                now = datetime.now()
+                metadata["last_access"] = now.isoformat()
+                metadata["access_count"] = max(0, int(metadata.get("access_count", 0))) + 1
+                metadata["importance"] = max(
+                    0.0,
+                    min(1.0, float(metadata.get("importance", 0.5)) + float(importance_delta)),
+                )
+                metadata["attention_score"] = max(
+                    0.0,
+                    min(1.0, float(metadata.get("attention_score", 0.0)) + float(attention_delta)),
+                )
+
+                collection.update(
+                    ids=[memory_id],
+                    documents=[content],
+                    metadatas=[metadata],
+                )
+
+            self._operation_count += 1
+            return True
+        except Exception as e:
+            self._error_count += 1
+            logger.error(f"Failed to apply recall feedback for memory {memory_id}: {e}")
+            return False
     
     def search_semantic(
         self,

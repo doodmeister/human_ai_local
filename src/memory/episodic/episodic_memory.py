@@ -741,6 +741,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     memory = self.retrieve_memory(memory_id)
                     if memory is None:
                         continue
+                    if getattr(memory, "suppressed", False):
+                        continue
                     results.append(EpisodicSearchResult(
                         memory=memory,
                         relevance=relevance,
@@ -784,6 +786,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 for search_result in search_results:
                     memory = doc_to_memory.get(search_result.doc_id)
                     if memory:
+                        if getattr(memory, "suppressed", False):
+                            continue
                         memory.update_access()
                         results.append(EpisodicSearchResult(
                             memory=memory,
@@ -809,6 +813,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
         # Basic fallback: Substring match (legacy behavior)
         query_lower = query.lower()
         for memory in self._memory_cache.values():
+            if getattr(memory, "suppressed", False):
+                continue
             text_to_search = f"{memory.summary} {memory.detailed_content}".lower()
             if query_lower in text_to_search:
                 if life_period and memory.life_period != life_period:
@@ -834,6 +840,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
         if not results:
             query_words = set(query_lower.split())
             for memory in self._memory_cache.values():
+                if getattr(memory, "suppressed", False):
+                    continue
                 text_words = set(f"{memory.summary} {memory.detailed_content}".lower().split())
                 overlap = query_words & text_words
                 if overlap:
@@ -992,6 +1000,116 @@ class EpisodicMemorySystem(BaseMemorySystem):
         after = memory.consolidation_strength
         logger.debug(f"consolidate_memory: {memory_id} strength {before} -> {after}")
         return after > before
+
+    def apply_recall_feedback(
+        self,
+        memory_id: str,
+        *,
+        outcome: str = "reinforce",
+        importance_delta: float = 0.0,
+        confidence_delta: float = 0.0,
+        strength_increment: float = 0.0,
+        note: Optional[str] = None,
+    ) -> bool:
+        del outcome, note
+        memory = self.retrieve_memory(memory_id)
+        if not memory:
+            return False
+
+        if strength_increment > 0.0:
+            memory.rehearse(strength_increment)
+        else:
+            memory.update_access()
+
+        memory.importance = max(0.0, min(1.0, float(memory.importance) + float(importance_delta)))
+        memory.confidence = max(0.0, min(1.0, float(memory.confidence) + float(confidence_delta)))
+
+        if self.collection is not None:
+            try:
+                searchable_text = f"{memory.summary} {memory.detailed_content}"
+                metadata = {
+                    "summary": memory.summary,
+                    "timestamp": memory.timestamp.isoformat(),
+                    "importance": memory.importance,
+                    "emotional_valence": memory.emotional_valence,
+                    "life_period": memory.life_period or "general",
+                    "interaction_type": memory.context.interaction_type,
+                    "duration": memory.duration.total_seconds(),
+                    "vividness": memory.vividness,
+                    "confidence": memory.confidence,
+                    "tags": ",".join(memory.tags),
+                }
+                self.collection.update(
+                    ids=[memory_id],
+                    documents=[searchable_text],
+                    metadatas=[metadata],
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update episodic memory metadata for {memory_id}: {e}")
+
+        self._save_to_json_backup(memory)
+        return True
+
+    def apply_forgetting_policy(
+        self,
+        *,
+        min_importance: float = 0.3,
+        min_confidence: float = 0.35,
+        min_access_count: int = 1,
+        min_age_days: float = 14.0,
+    ) -> dict:
+        now = datetime.now()
+        suppressed = 0
+        protected = 0
+        min_age_delta = timedelta(days=float(min_age_days))
+
+        for memory in list(self._memory_cache.values()):
+            is_anchor = bool(
+                getattr(memory.context, "participants", [])
+                or memory.importance >= 0.75
+                or abs(memory.emotional_valence) >= 0.6
+                or (memory.life_period and memory.life_period != "general" and memory.consolidation_strength >= 0.55)
+            )
+            if is_anchor:
+                protected += 1
+                memory.suppressed = False
+                self._save_to_json_backup(memory)
+                continue
+
+            age = now - memory.timestamp
+            if (
+                age >= min_age_delta
+                and memory.importance <= min_importance
+                and memory.confidence <= min_confidence
+                and memory.access_count <= min_access_count
+            ):
+                if not getattr(memory, "suppressed", False):
+                    suppressed += 1
+                memory.suppressed = True
+                self._save_to_json_backup(memory)
+
+        if self.collection is not None:
+            try:
+                for memory in self._memory_cache.values():
+                    searchable_text = f"{memory.summary} {memory.detailed_content}"
+                    metadata = {
+                        "summary": memory.summary,
+                        "timestamp": memory.timestamp.isoformat(),
+                        "importance": memory.importance,
+                        "emotional_valence": memory.emotional_valence,
+                        "life_period": memory.life_period or "general",
+                        "interaction_type": memory.context.interaction_type,
+                        "duration": memory.duration.total_seconds(),
+                        "vividness": memory.vividness,
+                        "confidence": memory.confidence,
+                        "tags": ",".join(memory.tags),
+                        "suppressed": bool(getattr(memory, "suppressed", False)),
+                    }
+                    self.collection.update(ids=[memory.id], documents=[searchable_text], metadatas=[metadata])
+            except Exception as e:
+                logger.warning(f"Failed to persist episodic forgetting policy updates: {e}")
+
+        return {"suppressed": suppressed, "protected": protected}
 
     def get_memory_statistics(self) -> dict:
         """

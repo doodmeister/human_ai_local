@@ -297,6 +297,13 @@ class ChatTurnPipeline:
                             meta["promoted_semantic"] = bool(fact_id)
                             if fact_id:
                                 meta["semantic_fact_id"] = fact_id
+                            get_revision_event = getattr(sem, "get_last_revision_event", None)
+                            if callable(get_revision_event):
+                                revision_event = get_revision_event()
+                                if revision_event:
+                                    meta["semantic_revision"] = revision_event
+                                    if revision_event.get("revision_reason") == "supersedes_conflicting_belief":
+                                        metrics_registry.inc("captured_memory_correction_revisions_total")
                             metrics_registry.inc("captured_memory_semantic_promotions_total")
                         except Exception:
                             pass

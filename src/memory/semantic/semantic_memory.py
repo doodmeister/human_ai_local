@@ -83,6 +83,7 @@ class SemanticMemorySystem(BaseMemorySystem):
         # Initialize ChromaDB
         self.chroma_client = None
         self.collection = None
+        self._last_revision_event: Optional[Dict[str, Any]] = None
         self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
         self._initialize_chromadb()
 
@@ -183,6 +184,51 @@ class SemanticMemorySystem(BaseMemorySystem):
         )
         return fact_id
 
+    def _set_last_revision_event(self, event: Optional[Dict[str, Any]]) -> None:
+        self._last_revision_event = dict(event) if event else None
+
+    def get_last_revision_event(self) -> Optional[Dict[str, Any]]:
+        event = getattr(self, "_last_revision_event", None)
+        return dict(event) if isinstance(event, dict) else None
+
+    @staticmethod
+    def _clamp_unit(value: Any, default: float = 0.0) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            numeric = default
+        return max(0.0, min(1.0, numeric))
+
+    def _apply_quarantine_weakening(
+        self,
+        metadata: Dict[str, Any],
+        *,
+        candidate_source: str | None,
+    ) -> Dict[str, Any]:
+        weakened = dict(metadata)
+        if str(weakened.get("belief_status", "")).lower() != "quarantined":
+            return weakened
+
+        source_key = str(candidate_source or "").strip().lower()
+        confidence_delta = 0.16 if source_key == "explicit_user_correction" else 0.08
+        importance_delta = 0.10 if source_key == "explicit_user_correction" else 0.05
+
+        weakened["confidence"] = max(
+            0.1,
+            self._clamp_unit(weakened.get("confidence"), default=0.55) - confidence_delta,
+        )
+        weakened["importance"] = max(
+            0.1,
+            self._clamp_unit(weakened.get("importance"), default=0.6) - importance_delta,
+        )
+        weakened["revision_feedback"] = (
+            "superseded_by_explicit_user_correction"
+            if source_key == "explicit_user_correction"
+            else "superseded_by_higher_weighted_belief"
+        )
+        weakened["last_access"] = datetime.now(timezone.utc).isoformat()
+        return weakened
+
     def _default_confidence(self, source: str) -> float:
         if source == "explicit_user_correction":
             return 0.9
@@ -250,6 +296,7 @@ class SemanticMemorySystem(BaseMemorySystem):
             return ""
         candidate_fact_id = str(fact_id or uuid.uuid4())
         fact_text = str(content or f"{subject} {predicate} {object_val}").strip()
+        self._set_last_revision_event(None)
         prepared = self._prepare_fact_metadata(
             subject=subject,
             predicate=predicate,
@@ -278,6 +325,10 @@ class SemanticMemorySystem(BaseMemorySystem):
                 continue
             merged_existing = dict(existing)
             merged_existing.update(updates)
+            merged_existing = self._apply_quarantine_weakening(
+                merged_existing,
+                candidate_source=prepared.get("source"),
+            )
             if "source" in merged_existing:
                 merged_existing["source_history_json"] = json.dumps(
                     merge_source_history(merged_existing.get("source_history_json"), merged_existing.get("source")),
@@ -305,6 +356,19 @@ class SemanticMemorySystem(BaseMemorySystem):
                 merged_text = str(merged_meta.get("fact_text") or fact_text)
                 if not self._upsert_fact_record(decision.merge_into_fact_id, merged_text, merged_meta):
                     return ""
+            self._set_last_revision_event(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "candidate_fact_id": candidate_fact_id,
+                    "stored_fact_id": decision.merge_into_fact_id,
+                    "candidate_status": decision.candidate_status,
+                    "revision_reason": decision.rationale,
+                    "source": prepared.get("source"),
+                    "conflicting_fact_ids": list(decision.conflicting_fact_ids),
+                    "winning_fact_id": decision.winning_fact_id,
+                    "merge_into_fact_id": decision.merge_into_fact_id,
+                }
+            )
             return decision.merge_into_fact_id
 
         prepared.update(
@@ -329,7 +393,68 @@ class SemanticMemorySystem(BaseMemorySystem):
         else:
             prepared.pop("quarantine_reason", None)
 
-        return self._upsert_fact_record(candidate_fact_id, fact_text, prepared)
+        stored_id = self._upsert_fact_record(candidate_fact_id, fact_text, prepared)
+        if stored_id:
+            self._set_last_revision_event(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "candidate_fact_id": candidate_fact_id,
+                    "stored_fact_id": stored_id,
+                    "candidate_status": decision.candidate_status,
+                    "revision_reason": decision.rationale,
+                    "source": prepared.get("source"),
+                    "conflicting_fact_ids": list(decision.conflicting_fact_ids),
+                    "winning_fact_id": decision.winning_fact_id,
+                    "merge_into_fact_id": decision.merge_into_fact_id,
+                }
+            )
+        return stored_id
+
+    def apply_recall_feedback(
+        self,
+        fact_id: str,
+        *,
+        outcome: str = "reinforce",
+        importance_delta: float = 0.0,
+        confidence_delta: float = 0.0,
+        note: Optional[str] = None,
+    ) -> bool:
+        fact = self.retrieve_fact(fact_id)
+        if not fact:
+            return False
+
+        updated = dict(fact)
+        updated.pop("fact_id", None)
+        updated.pop("fact_text", None)
+        updated["last_access"] = datetime.now(timezone.utc).isoformat()
+        updated["importance"] = max(
+            0.0,
+            min(1.0, float(updated.get("importance", 0.6)) + float(importance_delta)),
+        )
+        updated["confidence"] = max(
+            0.0,
+            min(1.0, float(updated.get("confidence", 0.65)) + float(confidence_delta)),
+        )
+        updated["recall_feedback"] = str(outcome)
+        if note:
+            updated["recall_feedback_note"] = str(note)
+
+        stored_id = self._upsert_fact_record(fact_id, str(fact.get("fact_text") or ""), updated)
+        if stored_id:
+            self._set_last_revision_event(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "candidate_fact_id": fact_id,
+                    "stored_fact_id": stored_id,
+                    "candidate_status": updated.get("belief_status", "active"),
+                    "revision_reason": f"recall_{outcome}",
+                    "source": updated.get("source"),
+                    "conflicting_fact_ids": [],
+                    "winning_fact_id": updated.get("winning_fact_id"),
+                    "merge_into_fact_id": None,
+                }
+            )
+        return bool(stored_id)
 
 
     def retrieve_fact(self, fact_id: str) -> Optional[Dict[str, Any]]:
@@ -380,7 +505,8 @@ class SemanticMemorySystem(BaseMemorySystem):
             if match:
                 meta['fact_id'] = fact_id
                 meta['fact_text'] = doc
-                facts.append(meta)
+                if not meta.get("suppressed") and str(meta.get("belief_status", "active")).lower() != "quarantined":
+                    facts.append(meta)
         return facts
 
 
@@ -471,13 +597,73 @@ class SemanticMemorySystem(BaseMemorySystem):
                     doc = str(documents[0][i]) if documents and len(documents[0]) > i and documents[0][i] is not None else ""
                     meta['fact_id'] = fact_id
                     meta['fact_text'] = doc
-                    found.append(meta)
+                    if not meta.get("suppressed") and str(meta.get("belief_status", "active")).lower() != "quarantined":
+                        found.append(meta)
             return found
         else:
             subject = kwargs.get('subject')
             predicate = kwargs.get('predicate')
             object_val = kwargs.get('object_val')
             return self.find_facts(subject, predicate, object_val)
+
+    def apply_forgetting_policy(
+        self,
+        *,
+        min_importance: float = 0.3,
+        min_confidence: float = 0.35,
+        min_access_count: int = 1,
+        min_age_days: float = 14.0,
+    ) -> Dict[str, int]:
+        del min_access_count
+        if not self.collection:
+            return {"suppressed": 0, "protected": 0}
+
+        now = datetime.now(timezone.utc)
+        min_age_seconds = float(min_age_days) * 86400.0
+        suppressed = 0
+        protected = 0
+
+        result = self.collection.get()
+        ids = result.get("ids") or []
+        metadatas = result.get("metadatas") or []
+        documents = result.get("documents") or []
+
+        for i, fact_id in enumerate(ids):
+            meta = dict(metadatas[i]) if len(metadatas) > i and metadatas[i] is not None else {}
+            meta = self._decode_metadata(meta)
+            doc = str(documents[i]) if len(documents) > i and documents[i] is not None else ""
+
+            is_anchor = bool(
+                str(meta.get("source", "")).lower() == "explicit_user_correction"
+                or (str(meta.get("subject", "")).lower() == "user" and float(meta.get("confidence", 0.0) or 0.0) >= 0.8)
+                or meta.get("relationship_target")
+            )
+            if is_anchor:
+                protected += 1
+                meta["suppressed"] = False
+                meta.pop("suppression_reason", None)
+                self._upsert_fact_record(fact_id, doc, meta)
+                continue
+
+            last_access = meta.get("last_access") or meta.get("encoding_time")
+            age_seconds = 0.0
+            if last_access:
+                try:
+                    age_seconds = (now - datetime.fromisoformat(str(last_access))).total_seconds()
+                except Exception:
+                    age_seconds = 0.0
+
+            importance = float(meta.get("importance", 0.6) or 0.6)
+            confidence = float(meta.get("confidence", 0.65) or 0.65)
+            if age_seconds >= min_age_seconds and importance <= min_importance and confidence <= min_confidence:
+                if not meta.get("suppressed"):
+                    suppressed += 1
+                meta["suppressed"] = True
+                meta["suppressed_at"] = now.isoformat()
+                meta["suppression_reason"] = "low_value_decay"
+                self._upsert_fact_record(fact_id, doc, meta)
+
+        return {"suppressed": suppressed, "protected": protected}
 
 
     def clear(self):

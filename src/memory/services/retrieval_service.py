@@ -10,6 +10,17 @@ from ..stm import VectorShortTermMemory
 logger = logging.getLogger(__name__)
 
 
+def _is_suppressed(memory: Any, source: str) -> bool:
+    source_key = str(source).strip().lower()
+    if source_key == "episodic":
+        return bool(getattr(memory, "suppressed", False))
+    if isinstance(memory, dict):
+        if source_key == "semantic" and str(memory.get("belief_status", "")).lower() == "quarantined":
+            return True
+        return bool(memory.get("suppressed", False))
+    return bool(getattr(memory, "suppressed", False))
+
+
 class MemoryRetrievalService:
     def __init__(
         self,
@@ -73,7 +84,8 @@ class MemoryRetrievalService:
                 stm_results = stm.search(query, max_results=max_results // 2)
                 logger.debug("STM search for '%s' returned: %s", query, stm_results)
                 for memory, score in stm_results:
-                    results.append((memory, score, "STM"))
+                    if not _is_suppressed(memory, "STM"):
+                        results.append((memory, score, "STM"))
 
             if search_ltm:
                 if config.use_vector_ltm and isinstance(ltm, VectorLongTermMemory):
@@ -84,7 +96,8 @@ class MemoryRetrievalService:
                     )
                     logger.debug("LTM search for '%s' returned: %s", query, ltm_results)
                     for memory in ltm_results:
-                        results.append((memory, memory.get("similarity_score", 0.0), "LTM"))
+                        if not _is_suppressed(memory, "LTM"):
+                            results.append((memory, memory.get("similarity_score", 0.0), "LTM"))
                 else:
                     ltm_results = getattr(ltm, "search_by_content", lambda **kwargs: [])(
                         query=query,
@@ -93,14 +106,16 @@ class MemoryRetrievalService:
                     )
                     logger.debug("LTM search for '%s' returned: %s", query, ltm_results)
                     for memory, score in ltm_results:
-                        results.append((memory, score, "LTM"))
+                        if not _is_suppressed(memory, "LTM"):
+                            results.append((memory, score, "LTM"))
 
             if search_episodic:
                 try:
                     episodic_results = episodic.search_memories(query=query, limit=max_results)
                     logger.debug("Episodic search for '%s' returned: %s", query, episodic_results)
                     for result in episodic_results:
-                        results.append((result.memory, result.relevance, "Episodic"))
+                        if not _is_suppressed(result.memory, "Episodic"):
+                            results.append((result.memory, result.relevance, "Episodic"))
                 except Exception as exc:
                     logger.error("Error searching episodic memory for query '%s': %s", query, exc)
         except Exception as exc:

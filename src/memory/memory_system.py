@@ -40,8 +40,10 @@ from .services import (
     MemoryConsolidationService,
     MemoryContextService,
     MemoryFactService,
+    MemoryForgettingService,
     MemoryProspectiveService,
     MemoryRecallService,
+    MemoryReconsolidationService,
     MemoryRetrievalService,
     MemoryStatusService,
     MemoryStorageRouter,
@@ -281,6 +283,22 @@ class MemorySystem:
             get_episodic=lambda: self.episodic,
             get_semantic=lambda: self.semantic,
             use_vector_ltm=lambda: self._config.use_vector_ltm,
+        )
+        self._reconsolidation_service = MemoryReconsolidationService(
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            get_episodic=lambda: self.episodic,
+            get_semantic=lambda: self.semantic,
+            increment_operation=self._increment_operation_count,
+            increment_error=self._increment_error_count,
+        )
+        self._forgetting_service = MemoryForgettingService(
+            get_stm=lambda: self.stm,
+            get_ltm=lambda: self.ltm,
+            get_episodic=lambda: self.episodic,
+            get_semantic=lambda: self.semantic,
+            increment_operation=self._increment_operation_count,
+            increment_error=self._increment_error_count,
         )
         self._storage_router = MemoryStorageRouter(
             get_config=lambda: self._config,
@@ -985,6 +1003,7 @@ class MemorySystem:
                     continue
                 recalled_memories.append(
                     {
+                        "id": self._extract_memory_id(memory, source),
                         "content": self._extract_memory_content(memory, source),
                         "score": score,
                         "source": source,
@@ -1015,6 +1034,10 @@ class MemorySystem:
         """Extract readable content from memory object."""
         return self._recall_service.extract_memory_content(memory, source)
 
+    def _extract_memory_id(self, memory: Any, source: str) -> Optional[str]:
+        """Extract stable memory identifier from memory object."""
+        return self._recall_service.extract_memory_id(memory, source)
+
     def _extract_timestamp(self, memory: Any, source: str) -> Optional[datetime]:
         """Extract timestamp from memory object."""
         return self._recall_service.extract_timestamp(memory, source)
@@ -1042,3 +1065,41 @@ class MemorySystem:
     def _generate_ai_summary(self, memories: List[Dict], query: str, openai_client) -> str:
         """Generate an AI-powered summary of recalled memories using GPT-4.1."""
         return self._recall_service.generate_ai_summary(memories, query, openai_client)
+
+    def reconsolidate_recalled_memories(
+        self,
+        recalled_memories: List[Dict[str, Any]],
+        *,
+        outcome: str = "reinforce",
+        response_policy: Optional[Dict[str, Any]] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._reconsolidation_service.record_recall_outcome(
+            recalled_memories,
+            outcome=outcome,
+            response_policy=response_policy,
+            note=note,
+        )
+
+    def get_reconsolidation_events(self, limit: int = 20) -> List[Dict[str, Any]]:
+        return self._reconsolidation_service.get_recent_events(limit)
+
+    def apply_forgetting_policy(
+        self,
+        *,
+        min_importance: float = 0.3,
+        min_confidence: float = 0.35,
+        min_access_count: int = 1,
+        min_age_days: float = 14.0,
+        decay_stm: bool = True,
+    ) -> Dict[str, Any]:
+        return self._forgetting_service.apply_policy(
+            min_importance=min_importance,
+            min_confidence=min_confidence,
+            min_access_count=min_access_count,
+            min_age_days=min_age_days,
+            decay_stm=decay_stm,
+        )
+
+    def get_forgetting_events(self, limit: int = 20) -> List[Dict[str, Any]]:
+        return self._forgetting_service.get_recent_events(limit)

@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 import uuid
 
 from .. import CognitiveStep, CognitiveTick
+from ..chat.emotion_salience import estimate_salience_and_valence
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,9 @@ class CognitiveTurnProcessor:
     def __init__(
         self,
         *,
+        get_session: Callable[[], Any],
         get_session_id: Callable[[], str],
+        get_cognitive_layers: Callable[[], Any],
         get_sensory_interface: Callable[[], Any],
         get_memory: Callable[[], Any],
         get_attention: Callable[[], Any],
@@ -23,10 +26,14 @@ class CognitiveTurnProcessor:
         get_conversation_context: Callable[[], List[Dict[str, Any]]],
         get_neural_integration: Callable[[], Any],
         get_current_fatigue: Callable[[], float],
+        get_turn_counter: Callable[[], int],
+        increment_turn_counter: Callable[[], None],
         set_current_fatigue: Callable[[float], None],
         set_attention_focus: Callable[[List[Any]], None],
     ) -> None:
+        self._get_session = get_session
         self._get_session_id = get_session_id
+        self._get_cognitive_layers = get_cognitive_layers
         self._get_sensory_interface = get_sensory_interface
         self._get_memory = get_memory
         self._get_attention = get_attention
@@ -34,6 +41,8 @@ class CognitiveTurnProcessor:
         self._get_conversation_context = get_conversation_context
         self._get_neural_integration = get_neural_integration
         self._get_current_fatigue = get_current_fatigue
+        self._get_turn_counter = get_turn_counter
+        self._increment_turn_counter = increment_turn_counter
         self._set_current_fatigue = set_current_fatigue
         self._set_attention_focus = set_attention_focus
 
@@ -55,6 +64,28 @@ class CognitiveTurnProcessor:
             tick.assert_step(CognitiveStep.PERCEIVE)
             processed_input = await self.process_sensory_input(input_data, input_type)
             tick.state["processed_input"] = processed_input
+
+            salience, valence = estimate_salience_and_valence(input_data)
+            tick.state["message_salience"] = salience
+            tick.state["message_valence"] = valence
+            try:
+                self._get_cognitive_layers().process_turn(
+                    session=self._get_session(),
+                    tick=tick,
+                    message=input_data,
+                    salience=salience,
+                    valence=valence,
+                    global_turn_counter=self._get_turn_counter(),
+                )
+                response_policy = tick.state.get("response_policy")
+                if response_policy is not None:
+                    if hasattr(response_policy, "to_dict"):
+                        processed_input["response_policy"] = response_policy.to_dict()
+                    else:
+                        processed_input["response_policy"] = response_policy
+            except Exception as exc:
+                logger.debug("Cognitive-layer processing skipped: %s", exc)
+
             tick.advance(CognitiveStep.PERCEIVE)
 
             tick.assert_step(CognitiveStep.UPDATE_STM)
@@ -82,7 +113,13 @@ class CognitiveTurnProcessor:
             tick.advance(CognitiveStep.REFLECT)
 
             tick.assert_step(CognitiveStep.CONSOLIDATE)
-            await self.consolidate_memory(input_data, response, attention_scores)
+            await self.consolidate_memory(
+                input_data,
+                response,
+                attention_scores,
+                recalled_memories=memory_context,
+                response_policy=processed_input.get("response_policy"),
+            )
             tick.finish()
             return response
         except Exception as exc:
@@ -255,9 +292,11 @@ class CognitiveTurnProcessor:
         memory_context: List[Dict[str, Any]],
         attention_scores: Dict[str, float],
     ) -> str:
+        response_policy = processed_input.get("response_policy")
         return await self._get_llm_session().generate_response(
             processed_input=processed_input,
             memory_context=memory_context,
+            response_policy=response_policy,
         )
 
     async def consolidate_memory(
@@ -265,6 +304,8 @@ class CognitiveTurnProcessor:
         input_data: str,
         response: str,
         attention_scores: Dict[str, float],
+        recalled_memories: Optional[List[Dict[str, Any]]] = None,
+        response_policy: Optional[Dict[str, Any]] = None,
     ) -> None:
         try:
             interaction_content = f"User: {input_data}\nAI: {response}"
@@ -283,6 +324,19 @@ class CognitiveTurnProcessor:
             conversation_context.append(interaction_record)
             if len(conversation_context) > 10:
                 conversation_context.pop(0)
+
+            if recalled_memories and not str(response).startswith("[ERROR]"):
+                try:
+                    self._get_memory().reconsolidate_recalled_memories(
+                        recalled_memories,
+                        outcome="reinforce",
+                        response_policy=response_policy,
+                        note="turn_response",
+                    )
+                except Exception as exc:
+                    logger.debug("Reconsolidation skipped: %s", exc)
+
+            self._increment_turn_counter()
 
             logger.debug("Interaction consolidated into memory and conversation context updated.")
         except Exception as exc:

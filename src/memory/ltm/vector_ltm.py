@@ -43,6 +43,20 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def _ltm_is_anchor(meta: Dict[str, Any]) -> bool:
+    tags = {tag.strip().lower() for tag in str(meta.get("tags", "")).split(",") if tag.strip()}
+    memory_type = str(meta.get("memory_type", "")).strip().lower()
+    source = str(meta.get("source", "")).strip().lower()
+    associations = [value for value in str(meta.get("associations", "")).split(",") if value]
+    if memory_type in {"relationship", "self_model"}:
+        return True
+    if source == "explicit_user_correction":
+        return True
+    if tags.intersection({"anchor", "relationship", "relationship_anchor", "autobiographical", "defining_moment"}):
+        return True
+    return len(associations) >= 2 and float(meta.get("importance", 0.0) or 0.0) >= 0.6
+
 @dataclass
 class VectorSearchResult:
     """Result from vector similarity search in LTM"""
@@ -341,6 +355,61 @@ class VectorLongTermMemory(BaseMemorySystem):
         stats = {k: (sum(map(float, v))/len(v) if v else 0) for k, v in summary.items()}
         stats["count"] = len(rec.get("feedback", []))
         return stats
+
+    def apply_recall_feedback(
+        self,
+        memory_id: str,
+        *,
+        outcome: str = "reinforce",
+        importance_delta: float = 0.0,
+        confidence_delta: float = 0.0,
+        note: str | None = None,
+    ) -> bool:
+        if not self.collection:
+            return False
+        try:
+            result = self.collection.get(ids=[memory_id])
+            if not result.get("ids"):
+                return False
+
+            meta = dict(result["metadatas"][0] if result.get("metadatas") else {})
+            doc = result["documents"][0] if result.get("documents") else ""
+
+            feedback = meta.get("feedback", "[]")
+            if isinstance(feedback, str):
+                try:
+                    feedback = json.loads(feedback)
+                except Exception:
+                    feedback = []
+            elif not isinstance(feedback, list):
+                feedback = []
+
+            feedback.append(
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "type": f"recall_{outcome}",
+                    "importance_delta": round(float(importance_delta), 4),
+                    "confidence_delta": round(float(confidence_delta), 4),
+                    "note": note,
+                }
+            )
+
+            meta["last_access"] = datetime.now().isoformat()
+            meta["access_count"] = max(0, int(meta.get("access_count", 0))) + 1
+            meta["importance"] = max(0.0, min(1.0, float(meta.get("importance", 0.5)) + float(importance_delta)))
+            meta["confidence"] = max(0.0, min(1.0, float(meta.get("confidence", 0.8) or 0.8) + float(confidence_delta)))
+            meta["feedback"] = json.dumps(feedback)
+
+            self.collection.update(
+                ids=[memory_id],
+                documents=[doc],
+                metadatas=[meta],
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to apply recall feedback for {memory_id}: {e}")
+            return False
+
     def search_by_tags(self, tags: List[str], operator: str = "OR") -> List[dict]:
         """
         Search memories by tags using ChromaDB metadata filtering.
@@ -727,6 +796,7 @@ class VectorLongTermMemory(BaseMemorySystem):
                             "source": meta.get("source", "unknown"),
                             "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
                             "associations": meta.get("associations", "").split(",") if meta.get("associations") else [],
+                            "suppressed": bool(meta.get("suppressed", False)),
                             "similarity_score": similarity,
                             "distance": distance
                         })
@@ -736,6 +806,57 @@ class VectorLongTermMemory(BaseMemorySystem):
         except Exception as e:
             logger.error(f"LTM semantic search failed: {e}")
             return []
+
+    def apply_forgetting_policy(
+        self,
+        *,
+        min_importance: float = 0.3,
+        min_confidence: float = 0.35,
+        min_access_count: int = 1,
+        min_age_days: float = 14.0,
+    ) -> Dict[str, int]:
+        if not self.collection:
+            return {"suppressed": 0, "protected": 0}
+
+        now = datetime.now()
+        suppressed = 0
+        protected = 0
+        min_age_seconds = float(min_age_days) * 86400.0
+        result = self.collection.get()
+
+        for i, memory_id in enumerate(result.get("ids") or []):
+            meta = dict(result["metadatas"][i] if result.get("metadatas") else {})
+            doc = result["documents"][i] if result.get("documents") else ""
+
+            if _ltm_is_anchor(meta):
+                protected += 1
+                if meta.get("suppressed"):
+                    meta["suppressed"] = False
+                    meta["suppression_reason"] = "anchor_protected"
+                    self.collection.update(ids=[memory_id], documents=[doc], metadatas=[meta])
+                continue
+
+            last_access = meta.get("last_access") or meta.get("encoding_time")
+            age_seconds = 0.0
+            if last_access:
+                try:
+                    age_seconds = (now - datetime.fromisoformat(str(last_access))).total_seconds()
+                except Exception:
+                    age_seconds = 0.0
+
+            importance = float(meta.get("importance", 0.5) or 0.5)
+            confidence = float(meta.get("confidence", 0.8) or 0.8)
+            access_count = int(meta.get("access_count", 0) or 0)
+
+            if age_seconds >= min_age_seconds and importance <= min_importance and confidence <= min_confidence and access_count <= min_access_count:
+                if not meta.get("suppressed"):
+                    suppressed += 1
+                meta["suppressed"] = True
+                meta["suppressed_at"] = now.isoformat()
+                meta["suppression_reason"] = "low_value_decay"
+                self.collection.update(ids=[memory_id], documents=[doc], metadatas=[meta])
+
+        return {"suppressed": suppressed, "protected": protected}
     
     def get_status(self) -> Dict[str, Any]:
         """Get current LTM status (vector DB only)"""
