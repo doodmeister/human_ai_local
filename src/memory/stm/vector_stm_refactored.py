@@ -332,6 +332,16 @@ class ChromaDBManager:
                     logger.error(f"Failed to reset collection: {e}")
                     raise VectorSTMStorageError(f"Failed to reset collection: {e}") from e
 
+    def shutdown(self) -> None:
+        """Release ChromaDB resources without resetting persisted data."""
+        with self._lock:
+            try:
+                if self._client is not None and hasattr(self._client, "clear_system_cache"):
+                    self._client.clear_system_cache()
+            finally:
+                self._collection = None
+                self._client = None
+
 
 class MetadataValidator:
     """Validates and sanitizes metadata for ChromaDB storage"""
@@ -814,7 +824,6 @@ class VectorShortTermMemory:
 
                 collection.update(
                     ids=[memory_id],
-                    documents=[content],
                     metadatas=[metadata],
                 )
 
@@ -1213,6 +1222,8 @@ class VectorShortTermMemory:
         try:
             if hasattr(self, 'executor'):
                 self.executor.shutdown(wait=True)
+            if getattr(self, 'chroma_manager', None) is not None:
+                self.chroma_manager.shutdown()
             logger.info("Vector STM shut down successfully")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")

@@ -144,6 +144,7 @@ class EpisodicMemory:
     updated_at: datetime = field(default_factory=datetime.now)
     source: Optional[str] = None
     episodic_source: Optional[str] = None
+    suppressed: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage"""
@@ -173,6 +174,7 @@ class EpisodicMemory:
             "updated_at": self.updated_at.isoformat(),
             "source": self.source,
             "episodic_source": self.episodic_source,
+            "suppressed": self.suppressed,
             "entropy": self.entropy
         }
     
@@ -208,6 +210,7 @@ class EpisodicMemory:
             updated_at=datetime.fromisoformat(data.get("updated_at", data.get("last_access", datetime.now().isoformat()))),
             source=data.get("source"),
             episodic_source=data.get("episodic_source"),
+            suppressed=bool(data.get("suppressed", False)),
             entropy=data.get("entropy", 0.2)
         )
     
@@ -563,15 +566,16 @@ class EpisodicMemorySystem(BaseMemorySystem):
         return [r.memory.to_dict() for r in results]
     
     def shutdown(self):
-        """Shutdown the memory system and release resources."""
+        """Release ChromaDB resources without resetting persisted data."""
         logger.info("Shutting down Episodic Memory System.")
-        if self.chroma_client:
-            try:
-                self.collection = None
-                self.chroma_client.reset()
-            except Exception as e:
-                logger.error(f"Error shutting down ChromaDB client: {e}")
-        self.chroma_client = None
+        try:
+            if self.chroma_client and hasattr(self.chroma_client, "clear_system_cache"):
+                self.chroma_client.clear_system_cache()
+        except Exception as e:
+            logger.error(f"Error shutting down ChromaDB client: {e}")
+        finally:
+            self.collection = None
+            self.chroma_client = None
 
     def _summarize_content(self, content: str, max_length: int = 128) -> str:
         """Generate a simple summary of the content."""
@@ -1026,7 +1030,6 @@ class EpisodicMemorySystem(BaseMemorySystem):
 
         if self.collection is not None:
             try:
-                searchable_text = f"{memory.summary} {memory.detailed_content}"
                 metadata = {
                     "summary": memory.summary,
                     "timestamp": memory.timestamp.isoformat(),
@@ -1041,7 +1044,6 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 }
                 self.collection.update(
                     ids=[memory_id],
-                    documents=[searchable_text],
                     metadatas=[metadata],
                 )
             except Exception as e:
@@ -1091,7 +1093,6 @@ class EpisodicMemorySystem(BaseMemorySystem):
         if self.collection is not None:
             try:
                 for memory in self._memory_cache.values():
-                    searchable_text = f"{memory.summary} {memory.detailed_content}"
                     metadata = {
                         "summary": memory.summary,
                         "timestamp": memory.timestamp.isoformat(),
@@ -1105,7 +1106,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         "tags": ",".join(memory.tags),
                         "suppressed": bool(getattr(memory, "suppressed", False)),
                     }
-                    self.collection.update(ids=[memory.id], documents=[searchable_text], metadatas=[metadata])
+                    self.collection.update(ids=[memory.id], metadatas=[metadata])
             except Exception as e:
                 logger.warning(f"Failed to persist episodic forgetting policy updates: {e}")
 

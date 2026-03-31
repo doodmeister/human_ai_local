@@ -65,6 +65,16 @@ class VectorSearchResult:
     distance: float
 
 class VectorLongTermMemory(BaseMemorySystem):
+    def shutdown(self) -> None:
+        """Release ChromaDB resources without resetting persisted data."""
+        try:
+            if getattr(self, "chroma_client", None) is not None and hasattr(self.chroma_client, "clear_system_cache"):
+                self.chroma_client.clear_system_cache()
+        finally:
+            self.collection = None
+            self.chroma_client = None
+            self.embedding_model = None
+
     def suggest_cross_system_associations(self, external_memories: List[Dict[str, Any]], system_type: str) -> List[Dict[str, Any]]:
         """Suggest potential associations between LTM and external system memories."""
         if not self.collection:
@@ -402,7 +412,6 @@ class VectorLongTermMemory(BaseMemorySystem):
 
             self.collection.update(
                 ids=[memory_id],
-                documents=[doc],
                 metadatas=[meta],
             )
             return True
@@ -833,7 +842,7 @@ class VectorLongTermMemory(BaseMemorySystem):
                 if meta.get("suppressed"):
                     meta["suppressed"] = False
                     meta["suppression_reason"] = "anchor_protected"
-                    self.collection.update(ids=[memory_id], documents=[doc], metadatas=[meta])
+                    self.collection.update(ids=[memory_id], metadatas=[meta])
                 continue
 
             last_access = meta.get("last_access") or meta.get("encoding_time")
@@ -854,7 +863,7 @@ class VectorLongTermMemory(BaseMemorySystem):
                 meta["suppressed"] = True
                 meta["suppressed_at"] = now.isoformat()
                 meta["suppression_reason"] = "low_value_decay"
-                self.collection.update(ids=[memory_id], documents=[doc], metadatas=[meta])
+                self.collection.update(ids=[memory_id], metadatas=[meta])
 
         return {"suppressed": suppressed, "protected": protected}
     

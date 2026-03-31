@@ -295,9 +295,17 @@ Current status:
 - deterministic restart-aware longitudinal scenarios now live in `src/evals/scenarios/longitudinal_memory.py`
 - the initial suite scores restart continuity, contradiction repair, false-memory count, and over-recall rate in end-to-end tests
 - the retrieval baseline now includes persisted runtime roundtrips for both vector LTM fact recall and episodic restart recall, alongside the fast fixture-backed scenarios
+- the retrieval baseline also covers restart-persisted semantic contradiction repair and relationship-aware social recall using disk-backed relationship memory snapshots
+- the scorecard now reports retrieval quality both in aggregate and split by runner so fixture-only and persisted-runtime regressions are visible separately
+- retrieval runtime coverage now includes an explicit negative case proving quarantined contradiction facts stay hidden after restart
+- the scorecard now splits retrieval, longitudinal, and behavior summaries by runner so fixture and persisted-runtime regressions can be separated quickly
+- retrieval runtime coverage now also includes a real forgetting-policy case proving suppressed low-value facts stay hidden after restart
+- retrieval runtime coverage now also includes a persisted episodic forgetting case proving suppressed low-value episodes stay hidden after restart
+- retrieval runtime coverage now includes a persisted autobiographical continuity case that exercises chapter-aware reranking after restart
+- the scorecard now reports runner-local gate failures by domain so drift can be spotted even before aggregate gating is adjusted
 - deterministic scorecard generation now lives in `src/evals/scorecard.py` with a developer entrypoint at `scripts/generate_memory_scorecard.py`
 - the scorecard now also summarizes policy behavior alignment, traceability, and replay stability using deterministic policy fixtures
-- the behavior suite now includes a stubbed `CognitiveAgent.process_input()` runtime path so policy injection is checked at the live agent boundary as well as the LLM-session boundary
+- the behavior suite now includes multiple stubbed `CognitiveAgent.process_input()` runtime scenarios, including a restart-aware continuity case that only passes when persisted memory context survives across fresh agent instances
 - the longitudinal suite now includes persisted `MemorySystem` roundtrips for restart continuity and contradiction repair, alongside the fixture-backed fast baseline scenarios
 
 ## Priority Backlog

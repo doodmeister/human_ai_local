@@ -60,6 +60,8 @@ class CognitiveAgentRuntimeBuilder:
             use_vector_ltm=self._config.memory.use_vector_ltm,
             use_vector_stm=self._config.memory.use_vector_stm,
             chroma_persist_dir=self._config.memory.chroma_persist_dir,
+            stm_collection_name=self._config.memory.stm_collection_name,
+            ltm_collection_name=self._config.memory.ltm_collection_name,
             embedding_model=self._config.processing.embedding_model,
             semantic_storage_path=self._config.memory.semantic_storage_path,
         )

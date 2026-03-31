@@ -14,6 +14,7 @@ class MemoryConfig:
     stm_decay_threshold: float = 0.1
     stm_decay_minutes: int = 60
     use_vector_stm: bool = True  # Enable vector-based short-term memory
+    stm_collection_name: str = "stm_memories"
 
     # Long-Term Memory
     ltm_storage_path: Optional[str] = None  # Will use default if None
@@ -21,6 +22,7 @@ class MemoryConfig:
     ltm_similarity_threshold: float = 0.7
     ltm_max_results: int = 10
     use_vector_ltm: bool = True
+    ltm_collection_name: str = "ltm_memories"
 
     # Semantic Memory
     semantic_storage_path: Optional[str] = None # Will use default if None
@@ -278,6 +280,15 @@ class CognitiveConfig:
             
         if embedding_model := os.getenv("EMBEDDING_MODEL"):
             config.processing.embedding_model = embedding_model
+
+        if chroma_persist_dir := os.getenv("CHROMA_PERSIST_DIR"):
+            config.memory.chroma_persist_dir = chroma_persist_dir
+
+        if stm_collection := os.getenv("STM_COLLECTION"):
+            config.memory.stm_collection_name = stm_collection
+
+        if ltm_collection := os.getenv("LTM_COLLECTION"):
+            config.memory.ltm_collection_name = ltm_collection
             
         return config
     

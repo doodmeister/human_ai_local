@@ -31,6 +31,7 @@ class MemorySubsystemInitializer:
     def initialize(self) -> MemorySubsystemBundle:
         stm_config = STMConfiguration(
             chroma_persist_dir=self._config.chroma_persist_dir,
+            collection_name=self._config.stm_collection_name,
             embedding_model=self._config.embedding_model,
             capacity=self._config.stm_capacity,
             enable_gpu=getattr(self._config, "enable_gpu", True),
@@ -43,6 +44,7 @@ class MemorySubsystemInitializer:
 
         ltm = VectorLongTermMemory(
             chroma_persist_dir=self._config.chroma_persist_dir,
+            collection_name=self._config.ltm_collection_name,
             embedding_model=self._config.embedding_model,
             lazy_embeddings=self._config.lazy_embeddings,
         )

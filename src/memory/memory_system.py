@@ -80,6 +80,8 @@ class MemorySystemConfig:
     use_vector_ltm: bool = True
     use_vector_stm: bool = True
     chroma_persist_dir: Optional[str] = None
+    stm_collection_name: str = "stm_memories"
+    ltm_collection_name: str = "ltm_memories"
     embedding_model: str = "all-MiniLM-L6-v2"
     semantic_storage_path: Optional[str] = None
     max_concurrent_operations: int = 4
@@ -406,7 +408,7 @@ class MemorySystem:
             self._executor.shutdown(wait=True)
             
             # Shutdown memory systems that support it
-            for system in [self._semantic, self._prospective]:
+            for system in [self._stm, self._ltm, self._episodic, self._semantic, self._prospective, self._procedural]:
                 if system and hasattr(system, 'shutdown'):
                     try:
                         system.shutdown()
