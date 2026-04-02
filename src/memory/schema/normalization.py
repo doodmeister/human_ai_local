@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .canonical import CanonicalMemoryItem, MemoryKind, MemoryTimeInterval
 
@@ -278,7 +278,7 @@ def normalize_semantic_value(value: Mapping[str, Any]) -> CanonicalMemoryItem:
     )
     metadata.setdefault("recency", _derive_recency(last_access, encoding_time))
     return CanonicalMemoryItem(
-        memory_id=str(data.get("id") or data.get("memory_id") or "semantic-unknown"),
+        memory_id=str(data.get("id") or data.get("memory_id") or data.get("fact_id") or "semantic-unknown"),
         memory_kind=MemoryKind.SEMANTIC,
         content=content,
         summary=data.get("fact_text"),
@@ -299,6 +299,49 @@ def normalize_semantic_value(value: Mapping[str, Any]) -> CanonicalMemoryItem:
         tags=list(data.get("tags", [])),
         metadata=metadata,
     )
+
+
+def normalize_memory_search_results(results: Sequence[tuple[Any, float, str]] | None) -> list[CanonicalMemoryItem]:
+    if not results:
+        return []
+
+    normalized: list[CanonicalMemoryItem] = []
+    for result in results:
+        if not isinstance(result, (tuple, list)) or len(result) < 3:
+            continue
+
+        memory_obj, relevance, source = result[0], float(result[1] or 0.0), str(result[2] or "")
+        source_key = source.strip().lower()
+
+        if source_key == "stm":
+            if isinstance(memory_obj, Mapping):
+                item = normalize_stm_mapping(memory_obj)
+                item.metadata["similarity"] = relevance
+            else:
+                item = normalize_stm_item(memory_obj, similarity=relevance)
+        elif source_key == "ltm":
+            record = _to_mapping(memory_obj)
+            record.setdefault("similarity_score", relevance)
+            record.setdefault("source", "ltm")
+            item = normalize_ltm_record(record)
+        elif source_key == "episodic":
+            item = normalize_episodic_value(memory_obj, relevance=relevance)
+        elif source_key == "semantic":
+            record = _to_mapping(memory_obj)
+            record.setdefault("similarity_score", relevance)
+            record.setdefault("source", "semantic")
+            item = normalize_semantic_value(record)
+        elif source_key == "prospective":
+            record = _to_mapping(memory_obj)
+            record.setdefault("source", "prospective")
+            item = normalize_prospective_value(record)
+        else:
+            continue
+
+        item.metadata.setdefault("source_system", source_key)
+        normalized.append(item)
+
+    return normalized
 
 
 def normalize_memory_results(raw: Any) -> list[CanonicalMemoryItem]:
@@ -369,6 +412,35 @@ def canonical_item_to_context_payload(item: CanonicalMemoryItem) -> dict[str, An
         "recency": recency,
         "salience": salience,
         "timestamp": _iso_or_none(item.encoding_time),
+        "memory_kind": item.memory_kind.value,
+        "canonical": item.to_dict(),
+    }
+
+
+def canonical_item_to_prompt_memory_payload(
+    item: CanonicalMemoryItem,
+    *,
+    relevance: float | None = None,
+    source_label: str | None = None,
+) -> dict[str, Any]:
+    source_system = str(item.metadata.get("source_system") or item.source or item.memory_kind.value).strip().lower()
+    source = source_label or {
+        "stm": "STM",
+        "ltm": "LTM",
+        "episodic": "Episodic",
+        "semantic": "Semantic",
+        "prospective": "Prospective",
+    }.get(source_system, source_system.title() or "Memory")
+    timestamp = item.encoding_time
+    if timestamp is None and item.time_interval is not None:
+        timestamp = item.time_interval.start or item.time_interval.end
+    return {
+        "id": item.memory_id,
+        "content": item.content,
+        "summary": item.summary,
+        "source": source,
+        "relevance": float(relevance if relevance is not None else item.metadata.get("similarity", 0.0) or 0.0),
+        "timestamp": _iso_or_none(timestamp),
         "memory_kind": item.memory_kind.value,
         "canonical": item.to_dict(),
     }

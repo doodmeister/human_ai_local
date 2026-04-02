@@ -1,6 +1,6 @@
 # World-Class Memory And Personality Roadmap
 
-Last updated: 2026-03-28
+Last updated: 2026-03-31
 
 ## Purpose
 
@@ -33,6 +33,8 @@ The repository already has strong foundations:
 - a consolidated runtime and thin facades after Phase 3
 - attention, metacognition, consolidation, and reflection hooks
 - a layered cognitive runtime for drives, felt sense, relational state, self-model, and narrative
+- a canonical memory item schema plus normalization adapters for STM, LTM, episodic, semantic, and prospective retrieval outputs
+- chat `ContextBuilder` and direct runtime memory-context assembly now both consume canonicalized memory payloads instead of store-specific prompt dicts
 
 The main gap is not missing modules. The main gap is that memory encoding, retrieval, autobiographical continuity, and personality control are still too shallow or too loosely coupled to produce convincingly human-like continuity.
 
@@ -52,6 +54,12 @@ Deliverables:
 - explicit event-to-memory transformation pipeline
 - typed support for entities, time intervals, source, confidence, affect, contradiction markers, and narrative role
 - compatibility adapters for STM, LTM, episodic, semantic, and prospective memory
+
+Current implementation note:
+
+- `src/memory/schema/canonical.py` defines the shared memory contract
+- `src/memory/schema/normalization.py` normalizes raw store outputs and unified `MemorySystem.search_memories()` tuples into canonical items
+- prompt-facing context payloads for both chat and direct runtime retrieval are now derived from canonical items rather than ad hoc per-store formatting
 
 Success criteria:
 

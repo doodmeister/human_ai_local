@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 import uuid
 
 from src.evals.metrics import BehaviorMetrics, score_behavior
+from src.memory.schema import canonical_item_to_prompt_memory_payload, normalize_memory_search_results
 from src.model.llm_provider import LLMResponse
 from src.orchestration.cognitive_agent import CognitiveAgent
 from src.orchestration.agent.llm_session import CognitiveAgentLLMSession
@@ -234,29 +235,11 @@ async def _retrieve_persisted_runtime_memory_context(agent: CognitiveAgent, quer
         search_episodic=False,
         max_results=3,
     )
-    context_memories: list[dict[str, Any]] = []
-    for memory_obj, relevance, source in memories:
-        source_key = str(source).lower()
-        if source_key != "ltm":
-            continue
-        if isinstance(memory_obj, dict):
-            mem_id = memory_obj.get("id") or memory_obj.get("memory_id")
-            mem_content = memory_obj.get("content", "")
-            mem_timestamp = memory_obj.get("encoding_time")
-        else:
-            mem_id = getattr(memory_obj, "id", None)
-            mem_content = getattr(memory_obj, "content", "")
-            mem_timestamp = getattr(memory_obj, "encoding_time", None)
-        context_memories.append(
-            {
-                "id": mem_id,
-                "content": mem_content,
-                "source": "LTM",
-                "relevance": relevance,
-                "timestamp": mem_timestamp,
-            }
-        )
-    return context_memories
+    return [
+        canonical_item_to_prompt_memory_payload(item, source_label="LTM")
+        for item in normalize_memory_search_results(memories)
+        if str(item.metadata.get("source_system", "")).lower() == "ltm" and item.content
+    ]
 
 
 @contextmanager

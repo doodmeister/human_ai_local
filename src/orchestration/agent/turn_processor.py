@@ -5,6 +5,8 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 import uuid
 
+from src.memory.schema import canonical_item_to_prompt_memory_payload, normalize_memory_search_results
+
 from .. import CognitiveStep, CognitiveTick
 from ..chat.emotion_salience import estimate_salience_and_valence
 
@@ -170,65 +172,21 @@ class CognitiveTurnProcessor:
             logger.debug("Proactive memory search with query: '%s...'", proactive_query[:200])
             memories = self._get_memory().search_memories(query=proactive_query, max_results=5)
 
-            context_memories: List[Dict[str, Any]] = []
-            for memory_obj, relevance, source in memories:
-                source_key = str(source).lower()
-                if source_key == "stm":
-                    context_memories.append(
-                        {
-                            "id": getattr(memory_obj, "id", None),
-                            "content": getattr(memory_obj, "content", ""),
-                            "source": "STM",
-                            "relevance": relevance,
-                            "timestamp": getattr(memory_obj, "encoding_time", None),
-                        }
-                    )
-                elif source_key == "ltm":
-                    if isinstance(memory_obj, dict):
-                        mem_id = memory_obj.get("id") or memory_obj.get("memory_id")
-                        mem_content = memory_obj.get("content", "")
-                        mem_timestamp = memory_obj.get("encoding_time")
-                    else:
-                        mem_id = getattr(memory_obj, "id", None)
-                        mem_content = getattr(memory_obj, "content", "")
-                        mem_timestamp = getattr(memory_obj, "encoding_time", None)
-
-                    context_memories.append(
-                        {
-                            "id": mem_id,
-                            "content": mem_content,
-                            "source": "LTM",
-                            "relevance": relevance,
-                            "timestamp": mem_timestamp,
-                        }
-                    )
-                elif source_key == "episodic":
-                    mem_content = getattr(memory_obj, "detailed_content", None)
-                    if mem_content is None:
-                        mem_content = getattr(memory_obj, "content", "")
-                    context_memories.append(
-                        {
-                            "id": getattr(memory_obj, "id", None),
-                            "content": str(mem_content),
-                            "source": "Episodic",
-                            "relevance": relevance,
-                            "timestamp": getattr(memory_obj, "encoding_time", None),
-                        }
-                    )
+            context_memories = [
+                canonical_item_to_prompt_memory_payload(item)
+                for item in normalize_memory_search_results(memories)
+                if item.content
+            ]
 
             try:
                 semantic_results = self._get_memory().semantic.search(query=proactive_query)
-                for fact in list(semantic_results)[:5]:
-                    fact_text = fact.get("fact_text") or f"{fact.get('subject', '')} {fact.get('predicate', '')} {fact.get('object', '')}".strip()
-                    context_memories.append(
-                        {
-                            "id": fact.get("fact_id"),
-                            "content": str(fact_text),
-                            "source": "Semantic",
-                            "relevance": 0.8,
-                            "timestamp": None,
-                        }
+                context_memories.extend(
+                    canonical_item_to_prompt_memory_payload(item)
+                    for item in normalize_memory_search_results(
+                        [(fact, 0.8, "Semantic") for fact in list(semantic_results)[:5]]
                     )
+                    if item.content
+                )
             except Exception as exc:
                 logger.debug("Semantic memory search unavailable: %s", exc)
 
