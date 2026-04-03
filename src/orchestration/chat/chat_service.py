@@ -29,6 +29,10 @@ from .turn_pipeline import ChatTurnPipeline
 from .turn_support import ChatTurnSupport
 from .turn_context import ChatTurnContextBuilder
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
+from src.orchestration.autobiographical_promotion import (
+    derive_autobiographical_life_period,
+    promote_interaction_to_autobiographical_memory,
+)
 from src.orchestration.cognitive_layers import ChatCognitiveLayerRuntime
 
 logger = logging.getLogger(__name__)
@@ -70,7 +74,6 @@ class ChatService:
         self.context_builder = context_builder
         self.consolidator = consolidator
         self.agent = agent
-        # Memory capture modules (Phase 1)
         self._capture = MemoryCaptureModule()
         self._capture_cache = MemoryCaptureCache()
         # Production Phase 1: Intent classification and goal detection
@@ -499,6 +502,47 @@ class ChatService:
 
     def _maybe_consolidate(self, user_turn: TurnRecord, assistant_turn: TurnRecord) -> bool:
         return self._turn_support.maybe_consolidate(user_turn, assistant_turn)
+
+    def _get_memory_system(self) -> Any:
+        agent = self.agent
+        if agent is None:
+            return None
+        return getattr(agent, "memory", None)
+
+    def _derive_autobiographical_life_period(self, intent: Any = None, tick: Any = None) -> str:
+        return derive_autobiographical_life_period(
+            intent_type=str(getattr(intent, "intent_type", "") or ""),
+            tick=tick,
+            default_prefix="chat",
+        )
+
+    def _promote_autobiographical_turn(
+        self,
+        *,
+        session: Any,
+        user_turn: TurnRecord,
+        assistant_turn: TurnRecord,
+        intent: Any = None,
+        tick: Any = None,
+    ) -> str | None:
+        try:
+            return promote_interaction_to_autobiographical_memory(
+                memory=self._get_memory_system(),
+                autobiographical_store=getattr(self.context_builder, "_autobiographical_store", None),
+                session=session,
+                user_content=user_turn.content,
+                assistant_content=assistant_turn.content,
+                importance=float(user_turn.importance or 0.0),
+                emotional_valence=float(user_turn.emotional_valence or 0.0),
+                source_event_ids=[user_turn.turn_id, assistant_turn.turn_id],
+                intent_type=str(getattr(intent, "intent_type", "") or "conversation"),
+                tick=tick,
+                goal_ids=sorted(self._session_goal_index.get(session.session_id, set())),
+                default_prefix="chat",
+            )
+        except Exception as exc:
+            logger.debug("Autobiographical episodic promotion skipped: %s", exc)
+            return None
 
     def _summarize_context_items(self, items):
         return self._response_builder.summarize_context_items(items)

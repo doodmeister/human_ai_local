@@ -7,11 +7,15 @@ import logging
 from math import sqrt
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import Any, Iterable, Mapping
 
 from src.evals.metrics import RetrievalMetrics, score_retrieval
+from src.memory.autobiographical import AutobiographicalGraphBuilder, AutobiographicalGraphStore
+from src.memory.encoding import EventEncoder
 from src.memory.memory_system import MemorySystem, MemorySystemConfig
 from src.memory.relationship import RelationshipMemory, RelationshipMemoryStore
+from src.orchestration.autobiographical_promotion import promote_interaction_to_autobiographical_memory
 from src.orchestration.chat.context_builder import ContextBuilder
 from src.orchestration.chat.conversation_session import SessionManager
 from src.orchestration.chat.models import TurnRecord
@@ -135,8 +139,10 @@ class _RuntimeRetrievalHarness:
         self._episode_aliases = dict(episode_aliases or {})
         self.memory = _build_runtime_memory(self._persist_dir)
         self.relationship_store = RelationshipMemoryStore(storage_path=Path(self._persist_dir) / "relationships")
+        self.autobiographical_store = AutobiographicalGraphStore(storage_path=Path(self._persist_dir) / "autobiographical")
 
     def seed(self, scenario: "RetrievalScenario") -> None:
+        stored_episode_payloads: list[dict[str, Any]] = []
         with _suppress_runtime_logs():
             for result in scenario.ltm_results:
                 if scenario.use_semantic_ltm_backend:
@@ -207,12 +213,39 @@ class _RuntimeRetrievalHarness:
                         if result.get("tags") is not None:
                             episode.tags = list(result.get("tags") or [])
                         self.memory.episodic._save_to_json_backup(episode)
+                        stored_episode_payloads.append(episode.to_dict())
 
             if scenario.relationship_memory is not None:
                 self.relationship_store.upsert(RelationshipMemory.from_dict(dict(scenario.relationship_memory)))
 
+            for interaction in scenario.promoted_interactions:
+                self._seed_promoted_interaction(interaction, scenario_id=scenario.scenario_id)
+
             if scenario.forgetting_policy is not None:
                 self.memory.apply_forgetting_policy(**dict(scenario.forgetting_policy))
+
+        self._seed_autobiographical_graph(scenario, stored_episode_payloads)
+
+    def _seed_autobiographical_graph(
+        self,
+        scenario: "RetrievalScenario",
+        stored_episode_payloads: list[dict[str, Any]],
+    ) -> None:
+        active_payloads = [
+            payload
+            for payload in stored_episode_payloads
+            if payload.get("id") not in {
+                episode_id
+                for episode_id, episode in self.memory.episodic._memory_cache.items()
+                if getattr(episode, "suppressed", False)
+            }
+        ]
+        seed_payloads = [*active_payloads, *[dict(payload) for payload in scenario.autobiographical_seed_episodes]]
+        if not seed_payloads:
+            return
+        items = EventEncoder().encode_events(seed_payloads)
+        graph = AutobiographicalGraphBuilder().build(items)
+        self.autobiographical_store.upsert(scenario.scenario_id, graph)
 
     def restart(self) -> "_RuntimeRetrievalHarness":
         with _suppress_runtime_logs():
@@ -254,6 +287,61 @@ class _RuntimeRetrievalHarness:
     def alias_for(self, source_id: str) -> str:
         return self._episode_aliases.get(source_id, source_id)
 
+    def _seed_promoted_interaction(self, interaction: "PromotedInteractionSeed", *, scenario_id: str) -> None:
+        session_id = str(interaction.session_id or scenario_id)
+        relationship_memory = RelationshipMemory(
+            interlocutor_id=session_id,
+            recurring_norms=list(interaction.relationship_norms),
+            interaction_count=interaction.relationship_interaction_count,
+        )
+        self.relationship_store.upsert(relationship_memory)
+        session = SimpleNamespace(session_id=session_id)
+        setattr(session, "_relationship_memory_snapshot", relationship_memory)
+        tick = SimpleNamespace(
+            state={
+                "narrative": SimpleNamespace(
+                    to_dict=lambda: {
+                        "active_themes": list(interaction.active_themes),
+                        "ongoing_struggles": [],
+                    }
+                )
+            }
+        )
+
+        episode_id = promote_interaction_to_autobiographical_memory(
+            memory=self.memory,
+            autobiographical_store=self.autobiographical_store,
+            session=session,
+            user_content=interaction.user_content,
+            assistant_content=interaction.assistant_content,
+            importance=interaction.importance,
+            emotional_valence=interaction.emotional_valence,
+            source_event_ids=[
+                f"{interaction.interaction_id}:user",
+                f"{interaction.interaction_id}:assistant",
+            ],
+            intent_type=interaction.intent_type,
+            tick=tick,
+            goal_ids=interaction.goal_ids,
+            default_prefix="eval",
+        )
+        if episode_id:
+            self._episode_aliases[str(episode_id)] = interaction.interaction_id
+
+        semantic_products = list(getattr(session, "_last_semantic_products", []) or [])
+        for predicate, object_value, alias in interaction.semantic_aliases:
+            matched = next(
+                (
+                    product
+                    for product in semantic_products
+                    if str(product.get("predicate") or "") == predicate
+                    and str(product.get("object") or "") == object_value
+                ),
+                None,
+            )
+            if matched is not None:
+                self._episode_aliases[str(matched.get("fact_id") or "")] = alias
+
 
 @dataclass(slots=True)
 class RetrievalScenario:
@@ -268,6 +356,7 @@ class RetrievalScenario:
     stm_results: tuple[Any, ...] = ()
     ltm_results: tuple[dict[str, Any], ...] = ()
     episodic_results: tuple[dict[str, Any], ...] = ()
+    autobiographical_seed_episodes: tuple[dict[str, Any], ...] = ()
     runner: str = "fixture"
     restart_before_query: bool = False
     disable_episodic_vector_search: bool = False
@@ -275,6 +364,23 @@ class RetrievalScenario:
     relationship_memory: Mapping[str, Any] | None = None
     use_semantic_ltm_backend: bool = False
     forgetting_policy: Mapping[str, Any] | None = None
+    promoted_interactions: tuple["PromotedInteractionSeed", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PromotedInteractionSeed:
+    interaction_id: str
+    user_content: str
+    assistant_content: str
+    relationship_norms: tuple[str, ...] = ()
+    relationship_interaction_count: int = 1
+    active_themes: tuple[str, ...] = ()
+    goal_ids: tuple[str, ...] = ()
+    semantic_aliases: tuple[tuple[str, str, str], ...] = ()
+    intent_type: str = "conversation"
+    importance: float = 0.7
+    emotional_valence: float = 0.0
+    session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -696,6 +802,98 @@ def build_baseline_scenarios() -> list[RetrievalScenario]:
                 "recurring_norms": ["prefer direct answers"],
             },
         ),
+        RetrievalScenario(
+            scenario_id="runtime_persisted_autobiographical_chapter_context",
+            query="What changed lately in the evaluation work?",
+            expected_intent="continuity",
+            expected_ids=("episode-recent-evals", "episode-recent-restart"),
+            session_turns=("Summarize the recent evaluation changes.",),
+            episodic_results=(
+                {
+                    "id": "episode-recent-evals",
+                    "summary": "Recent evaluation expansion",
+                    "detailed_content": "We recently expanded deterministic evaluation coverage for retrieval and behavior.",
+                    "importance": 0.66,
+                    "confidence": 0.9,
+                    "life_period": "phase_4_memory",
+                    "timestamp": (now - timedelta(days=2)).isoformat(),
+                    "last_access": (now - timedelta(hours=10)).isoformat(),
+                    "tags": ("evals", "recent", "quality"),
+                },
+                {
+                    "id": "episode-recent-restart",
+                    "summary": "Recent restart continuity checks",
+                    "detailed_content": "We recently added stronger restart continuity checks for the evaluation workflow.",
+                    "importance": 0.62,
+                    "confidence": 0.88,
+                    "life_period": "phase_4_memory",
+                    "timestamp": (now - timedelta(days=1)).isoformat(),
+                    "last_access": (now - timedelta(hours=6)).isoformat(),
+                    "tags": ("restart", "recent", "evals"),
+                },
+            ),
+            autobiographical_seed_episodes=(
+                {
+                    "id": "episode-hidden-foundation",
+                    "summary": "Earlier foundation work",
+                    "detailed_content": "Earlier we established the initial schema and planning foundations for the project.",
+                    "importance": 0.8,
+                    "confidence": 0.9,
+                    "life_period": "phase_1_foundations",
+                    "timestamp": (now - timedelta(days=45)).isoformat(),
+                    "last_access": (now - timedelta(days=40)).isoformat(),
+                    "tags": ("foundations", "schema"),
+                },
+            ),
+            runner="runtime",
+            restart_before_query=True,
+            disable_episodic_vector_search=True,
+            chat_config={"timeouts": {"retrieval_ms": 4000}},
+        ),
+        RetrievalScenario(
+            scenario_id="runtime_promoted_preference_fact_recall",
+            query="What do you know about whether I prefer direct answers?",
+            expected_intent="factual",
+            expected_ids=("fact-pref-direct", "fact-asks-rationale"),
+            session_turns=("Check whether promoted preference facts survive restart.",),
+            runner="runtime",
+            restart_before_query=True,
+            use_semantic_ltm_backend=True,
+            promoted_interactions=(
+                PromotedInteractionSeed(
+                    interaction_id="episode-pref-style",
+                    user_content="Please keep the answers direct and include the tradeoffs.",
+                    assistant_content="I will keep the answers direct and include the tradeoffs.",
+                    relationship_norms=("prefers direct answers", "asks for rationale and tradeoffs"),
+                    relationship_interaction_count=4,
+                    semantic_aliases=(
+                        ("prefers", "direct answers", "fact-pref-direct"),
+                        ("asks_for", "rationale and tradeoffs", "fact-asks-rationale"),
+                    ),
+                    intent_type="preference_capture",
+                ),
+            ),
+        ),
+        RetrievalScenario(
+            scenario_id="runtime_promoted_focus_theme_recall",
+            query="What do you know about what I'm focused on in the memory roadmap?",
+            expected_intent="factual",
+            expected_ids=("fact-focus-roadmap",),
+            session_turns=("Check whether promoted focus facts survive restart.",),
+            runner="runtime",
+            restart_before_query=True,
+            use_semantic_ltm_backend=True,
+            promoted_interactions=(
+                PromotedInteractionSeed(
+                    interaction_id="episode-focus-roadmap",
+                    user_content="Let's keep working on the memory roadmap.",
+                    assistant_content="We can keep pushing the memory roadmap forward.",
+                    active_themes=("memory roadmap",),
+                    semantic_aliases=(("focuses_on", "memory roadmap", "fact-focus-roadmap"),),
+                    intent_type="roadmap_continuation",
+                ),
+            ),
+        ),
     ]
 
 
@@ -749,13 +947,14 @@ def _build_runtime_context(scenario: RetrievalScenario) -> tuple[Any, tuple[str,
                 setattr(session, "_relationship_memory_snapshot", relationship)
 
         ltm_backend = None
-        if scenario.ltm_results:
+        if scenario.ltm_results or scenario.promoted_interactions:
             ltm_backend = _SemanticAsLtmSearch(harness.memory.semantic) if scenario.use_semantic_ltm_backend else harness.memory.ltm
 
         builder = ContextBuilder(
             chat_config=dict(scenario.chat_config or {}),
             ltm=ltm_backend,
             episodic=harness.memory.episodic if scenario.episodic_results else None,
+            autobiographical_store=harness.autobiographical_store,
         )
         with _suppress_runtime_logs():
             built = builder.build(session, query=scenario.query, include_trace=True)

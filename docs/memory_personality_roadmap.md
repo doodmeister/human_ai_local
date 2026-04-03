@@ -1,6 +1,6 @@
 # World-Class Memory And Personality Roadmap
 
-Last updated: 2026-03-31
+Last updated: 2026-04-02
 
 ## Purpose
 
@@ -37,6 +37,23 @@ The repository already has strong foundations:
 - chat `ContextBuilder` and direct runtime memory-context assembly now both consume canonicalized memory payloads instead of store-specific prompt dicts
 
 The main gap is not missing modules. The main gap is that memory encoding, retrieval, autobiographical continuity, and personality control are still too shallow or too loosely coupled to produce convincingly human-like continuity.
+
+## Audit Snapshot
+
+As of 2026-04-02, the roadmap needs to be read as a forward-looking design document rather than a list of unstarted work.
+
+Verified against the current runtime and tests:
+
+- Phase 1 foundations are implemented and wired into the active chat/runtime path
+- Phase 2 relationship memory and contradiction repair are implemented; autobiographical continuity is present but still limited by on-demand graph construction rather than a durable autobiographical store
+- Phase 3 response-policy and policy-aware prompt assembly are implemented and exercised in runtime and evaluation paths
+- Phase 4 reconsolidation, forgetting, longitudinal evaluation, and scorecard gating all exist for the current deterministic quality-gate scope
+
+The highest-value remaining gaps are now depth and durability:
+
+- stronger event-to-memory product generation from live turns
+- persisted autobiographical graph and chapter state beyond retrieval-time derivation
+- tighter coupling between recall outcomes, contradiction handling, and long-horizon autobiographical continuity
 
 ## Strategic Workstreams
 
@@ -82,6 +99,12 @@ Deliverables:
 - cross-store reranking using relevance, recency, confidence, affect, relationship relevance, and novelty/diversity
 - explicit retrieval budgets and failure modes
 
+Current implementation note:
+
+- `src/memory/retrieval/retrieval_plan.py` and `src/memory/retrieval/planner.py` define and route retrieval plans by query intent
+- `src/memory/retrieval/reranker.py` reranks canonical items using similarity, recency, activation, salience, confidence, relationship relevance, and continuity signals
+- `src/orchestration/chat/context_builder.py` now plans retrieval before querying stores and reranks normalized candidates before prompt-facing context assembly
+
 Success criteria:
 
 - memory lookup precision improves in targeted eval scenarios
@@ -102,6 +125,22 @@ Deliverables:
 - per-user relationship memory with trust, warmth, familiarity, rupture/repair, and recurring norms
 - chapter and defining-moment summaries
 - relationship-aware retrieval and response conditioning
+
+Current implementation note:
+
+- `src/memory/relationship/model.py`, `src/memory/relationship/store.py`, and `src/memory/relationship/updater.py` persist per-user relationship memory and update it from turn-level relational signals
+- `src/memory/encoding/event_encoder.py` and `src/memory/autobiographical/graph.py` provide event encoding plus graph and chapter construction primitives
+- `src/memory/autobiographical/store.py` now persists autobiographical graph snapshots, and `src/orchestration/chat/context_builder.py` can merge persisted chapter state with on-demand graph construction during continuity reranking
+- `src/orchestration/chat/turn_pipeline.py` and `src/orchestration/chat/chat_service.py` now promote consolidated chat turns into episodic memories and refresh the session's persisted autobiographical snapshot on the main chat path
+- `src/orchestration/agent/turn_processor.py` now uses the same autobiographical promotion seam for the lower-level cognitive-agent path, so direct `CognitiveAgent.process_input()` calls also refresh persisted autobiographical snapshots
+- `src/orchestration/autobiographical_promotion.py` now lets the same promoted turn emit semantic preference facts from relationship-memory norms, so one interaction can update episodic, autobiographical, and semantic stores together
+- the shared promotion path now emits a broader semantic product set: preference-style facts from relationship norms and focus facts from narrative themes, so promoted turns can update multiple semantic axes without going back through the capture-frequency path
+- `src/evals/scenarios/longitudinal_memory.py` now includes restart-aware fixture and runtime scenarios for promoted preference continuity and promoted preference contradiction repair, so the new semantic writeback path is covered by the quality-gate eval lane
+- `src/evals/scenarios/retrieval_baseline.py` now includes runtime restart scenarios proving promoted preference facts and promoted focus facts surface through the live semantic retrieval path after persistence and restart
+- `tests/test_chat_autobiographical_promotion.py` now includes a direct chat-path summary check proving the runtime can summarize a recent life phase together with a relationship trajectory from continuity-oriented context
+- `src/evals/scenarios/policy_behavior.py` now includes a persisted-runtime relationship continuity scenario where a fresh agent reloads relationship memory, recomposes response policy from it, and changes wording through the live policy-aware response path
+- `src/orchestration/cognitive_layers/runtime.py`, `src/orchestration/chat/context_builder.py`, and `src/memory/retrieval/reranker.py` already consume relationship memory and chapter-aware continuity signals in the live runtime
+- the remaining gap is richer multi-product encoding depth: promoted turns now update episodic, autobiographical, and multiple semantic axes, but there is still no broader generalized event-to-product pipeline for additional semantic classes or prospective artifacts
 
 Success criteria:
 
@@ -124,6 +163,13 @@ Deliverables:
 - stable trait layer plus dynamic state layer
 - controllable and testable prompt assembly for policy-conditioned generation
 - behavior-level evaluation fixtures for warmth, directness, curiosity, uncertainty, and disclosure
+
+Current implementation note:
+
+- `src/orchestration/policy/response_policy.py` and `src/orchestration/policy/policy_composer.py` define and compose stable traits, dynamic state, effective policy, and trace data
+- `src/orchestration/cognitive_layers/runtime.py` updates response policy from drives, mood, relationship state, self-model, and narrative snapshots during live turns
+- `src/orchestration/policy/policy_rendering.py` and `src/orchestration/agent/llm_session.py` render structured role, policy, working-self, and memory-context prompt blocks
+- deterministic behavior and runtime-path checks live in `src/evals/scenarios/policy_behavior.py` and related tests
 
 Success criteria:
 
@@ -149,6 +195,8 @@ Deliverables:
 
 Current implementation note:
 
+- `src/memory/schema/contradiction.py` and `src/memory/semantic/semantic_memory.py` now treat contradiction sets and belief revision as first-class semantic-memory behavior
+- `src/memory/services/reconsolidation_service.py` applies post-recall reinforcement, correction, and failed-recall weakening across STM, LTM, episodic, and semantic stores when supported
 - low-value long-term, episodic, and semantic memories can now be suppressed through an explicit memory-facade forgetting policy
 - autobiographical and relationship anchors are preserved by rule-based protection checks instead of relying on ad hoc deletion avoidance
 - retrieval and proactive recall skip suppressed or quarantined items by default so decayed memories stop competing indefinitely
@@ -174,6 +222,11 @@ Deliverables:
 - false-memory and over-recall checks
 - human-believability and memory-discipline scorecards
 
+Current implementation note:
+
+- `src/evals/scenarios/retrieval_baseline.py`, `src/evals/scenarios/longitudinal_memory.py`, and `src/evals/scenarios/policy_behavior.py` provide deterministic retrieval, continuity, contradiction-repair, and behavior scenarios
+- `src/evals/scorecard.py` and `scripts/generate_memory_scorecard.py` generate runner-split scorecards and quality gates for retrieval, longitudinal, and behavior domains
+
 Success criteria:
 
 - PRs can be evaluated against stable memory/personality metrics
@@ -188,6 +241,9 @@ Target window:
 
 Primary outcome:
 Establish canonical representations and retrieval infrastructure.
+
+Status:
+Implemented in the active runtime and test suite.
 
 Deliverables:
 
@@ -218,6 +274,9 @@ Target window:
 Primary outcome:
 Make the system feel like one persistent mind across sessions.
 
+Status:
+Largely implemented, with the main remaining gap in durable autobiographical graph and chapter persistence.
+
 Deliverables:
 
 - autobiographical graph model
@@ -239,6 +298,9 @@ Target window:
 Primary outcome:
 Turn internal state into consistent behavior.
 
+Status:
+Implemented in the active runtime, prompt assembly, and behavior evaluation paths.
+
 Deliverables:
 
 - response-policy composer
@@ -258,6 +320,9 @@ Target window:
 
 Primary outcome:
 Improve realism under long-running usage.
+
+Status:
+Implemented for the current deterministic reconsolidation, forgetting, longitudinal, and scorecard-gate scope; further realism work is now incremental rather than foundational.
 
 Deliverables:
 
@@ -318,16 +383,12 @@ Current status:
 
 ## Priority Backlog
 
-1. Canonical memory schema and normalization layer
-2. Query-aware retrieval planner
-3. Cross-store reranker with diversity and confidence signals
-4. Relationship memory subsystem
-5. Autobiographical graph and chapter model
-6. Contradiction tracking and belief revision
-7. Response-policy composer
-8. Reconsolidation after recall
-9. Longitudinal evaluation harness
-10. Human-believability benchmark pack
+1. Persist autobiographical graph and chapter state as a durable subsystem rather than deriving it only from the current episodic candidate set
+2. Expand event-to-memory product generation so live turns can promote richer semantic, relationship, self-model, and chapter-linked outputs deterministically
+3. Deepen chapter-aware retrieval so restart continuity depends on persisted autobiographical state rather than only on retrieved episodic overlap
+4. Tighten cross-store adaptive-memory coupling so reconsolidation, contradiction repair, and forgetting share anchor semantics and provenance rules
+5. Extend behavior and believability evaluation beyond deterministic fixtures into broader long-horizon and social-continuity scenarios
+6. Harden quality gates around runner-local regressions so fixture-only passes cannot hide runtime drift
 
 ## Metrics That Matter
 
@@ -389,8 +450,8 @@ Mitigation:
 
 ## Recommended Next Step
 
-Start with the architecture in `memory_personality_architecture.md` and implement the first foundation slice:
+Start with the first remaining continuity slice rather than re-planning already-landed Phase 1 work:
 
-1. canonical memory schema
-2. retrieval planner skeleton
-3. evaluation scenarios for fact recall and contradiction repair
+1. persist autobiographical graph and chapter summaries across restarts as a first-class store or snapshot layer
+2. thread `src/memory/encoding/event_encoder.py` into live event-to-memory promotion so autobiographical state is built from turn outputs instead of only from retrieved episodes
+3. extend continuity evaluations so chapter-aware recall must survive restart from persisted autobiographical state, not just from episodic-memory overlap

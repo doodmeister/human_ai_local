@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import logging
 
 from ..core.config import CognitiveConfig
+from ..memory.autobiographical import AutobiographicalGraphStore
 from .cognitive_layers import ChatCognitiveLayerRuntime
 from .agent import (
     CognitiveAgentLLMSession,
@@ -51,6 +52,10 @@ class CognitiveAgent:
         # Temporary simple session ID
         self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self._turn_counter = 0
+        try:
+            self._autobiographical_store = AutobiographicalGraphStore()
+        except Exception:
+            self._autobiographical_store = None
         
         # Initialize cognitive components
         self._initialize_components()
@@ -99,6 +104,8 @@ class CognitiveAgent:
             increment_turn_counter=self._increment_turn_counter,
             set_current_fatigue=self._set_current_fatigue,
             set_attention_focus=self._set_attention_focus,
+            get_autobiographical_store=lambda: self._autobiographical_store,
+            get_active_goal_ids=lambda: list(self.active_goals),
         )
         
         logger.info(f"Cognitive agent initialized with session ID: {self.session_id}")

@@ -1,6 +1,6 @@
 # Memory And Personality Issue Backlog
 
-Last updated: 2026-03-28
+Last updated: 2026-04-02
 
 ## Purpose
 
@@ -28,6 +28,25 @@ Use this file when you want a backlog that is ready for GitHub issues, milestone
 - `Phase 3 Personality Binding`
 - `Phase 4 Adaptive Memory And Believability`
 
+## Audit Status
+
+As of 2026-04-02, this backlog is an audited status tracker rather than a pure forward queue.
+
+Completed and wired into the current runtime:
+
+- MP-101 through MP-105
+- MP-201, MP-202, MP-204, and MP-205
+- MP-301 through MP-304
+- MP-401 through MP-404
+
+Still active:
+
+- MP-203 remains only partially complete because autobiographical graph and chapter construction now persist through a snapshot store and both main runtime paths promote updates, with semantic preference facts also emitted from the same promoted turn, but the system still lacks a broader generalized multi-product pipeline
+
+Recommended active milestone focus:
+
+- finish durable autobiographical continuity before creating new foundational schema or policy tickets
+
 ## Phase 1 Foundations
 
 ### MP-101 Add Canonical Memory Schema
@@ -35,6 +54,7 @@ Use this file when you want a backlog that is ready for GitHub issues, milestone
 - Priority: `P0`
 - Milestone: `Phase 1 Foundations`
 - Depends on: none
+- Status: `done`
 
 Problem:
 Current retrieval outputs vary by store shape, which makes context assembly and downstream reasoning brittle.
@@ -65,6 +85,7 @@ Docs:
 - Priority: `P0`
 - Milestone: `Phase 1 Foundations`
 - Depends on: `MP-101`
+- Status: `done`
 
 Problem:
 Store-specific retrieval results cannot yet be consumed uniformly by planners, rerankers, or policy-aware prompt assembly.
@@ -96,6 +117,7 @@ Docs:
 - Priority: `P0`
 - Milestone: `Phase 1 Foundations`
 - Depends on: `MP-101`, `MP-102`
+- Status: `done`
 
 Problem:
 The current retrieval flow is mostly blended and stage-based, not query-planned.
@@ -126,6 +148,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 1 Foundations`
 - Depends on: `MP-102`, `MP-103`
+- Status: `done`
 
 Problem:
 Even with normalized candidates, the system still needs a principled way to choose which items reach the working set.
@@ -156,6 +179,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 1 Foundations`
 - Depends on: `MP-103`
+- Status: `done`
 
 Problem:
 Retrieval quality improvements are hard to prove without stable scenarios and measurable expectations.
@@ -188,6 +212,7 @@ Docs:
 - Priority: `P0`
 - Milestone: `Phase 2 Autobiographical Continuity`
 - Depends on: `MP-101`
+- Status: `done`
 
 Problem:
 Relationship state currently lives mainly in transient runtime structures instead of a persistent, recallable memory model.
@@ -218,6 +243,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 2 Autobiographical Continuity`
 - Depends on: `MP-201`
+- Status: `done`
 
 Problem:
 Relational state is computed during turns, but not consistently promoted into long-lived relationship memory.
@@ -245,29 +271,36 @@ Docs:
 
 ### MP-203 Add Autobiographical Graph And Chapter Summaries
 
-- Priority: `P1`
+- Priority: `P0`
 - Milestone: `Phase 2 Autobiographical Continuity`
 - Depends on: `MP-101`, `MP-102`
+- Status: `partial`
 
 Problem:
-The system can retrieve episodes, but it does not yet organize them into life-phase continuity or defining moments.
+The system can retrieve episodes, persist autobiographical graph snapshots, and promote autobiographical plus preference-semantic updates across both main runtime paths, but it still lacks richer generalized event-to-memory products beyond the current episodic, chapter-snapshot, and preference-fact flow.
 
 Scope:
 
 - add event-encoding path under `src/memory/encoding/event_encoder.py`
 - add graph or link structures for people, projects, goals, and events
 - add chapter summary contract and defining-moment markers
+- persist autobiographical graph and chapter state across restarts as a first-class continuity layer
+- promote live turn outputs into autobiographical updates instead of deriving chapters only from the current episodic candidate set
 
 Acceptance criteria:
 
 - episode links can be created across related events
 - chapter summaries can be generated from linked events
 - defining moments can be marked and retrieved distinctly
+- persisted autobiographical chapters survive restart and remain available even when the originating episodic candidate set is not reassembled the same way
+- continuity retrieval can prefer persisted chapter summaries and defining moments for "what changed lately?" style queries
 
 Validation:
 
 - event-link creation tests
 - chapter summary tests
+- restart roundtrip tests for persisted autobiographical state
+- longitudinal continuity tests that distinguish chapter persistence from episodic overlap
 
 Docs:
 
@@ -278,6 +311,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 2 Autobiographical Continuity`
 - Depends on: `MP-103`, `MP-104`, `MP-201`
+- Status: `done`
 
 Problem:
 Retrieval planning and reranking do not yet account for user-specific relationship relevance.
@@ -308,6 +342,7 @@ Docs:
 - Priority: `P0`
 - Milestone: `Phase 2 Autobiographical Continuity`
 - Depends on: `MP-101`, `MP-102`
+- Status: `done`
 
 Problem:
 Conflicting beliefs and corrected user facts are not yet tracked as explicit contradiction sets.
@@ -340,6 +375,7 @@ Docs:
 - Priority: `P0`
 - Milestone: `Phase 3 Personality Binding`
 - Depends on: `MP-201`, `MP-205`
+- Status: `done`
 
 Problem:
 Internal state exists, but there is no explicit contract translating it into response behavior.
@@ -370,6 +406,7 @@ Docs:
 - Priority: `P0`
 - Milestone: `Phase 3 Personality Binding`
 - Depends on: `MP-301`
+- Status: `done`
 
 Problem:
 The cognitive layer runtime computes drives, mood, self-model, and narrative, but not a unified response-policy output.
@@ -400,6 +437,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 3 Personality Binding`
 - Depends on: `MP-301`, `MP-302`, `MP-103`
+- Status: `done`
 
 Problem:
 `llm_session.py` still builds prompts around a generic system prompt and a flat memory block.
@@ -430,6 +468,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 3 Personality Binding`
 - Depends on: `MP-302`, `MP-303`
+- Status: `done`
 
 Problem:
 Personality changes are hard to verify unless output behavior is evaluated against explicit policy inputs.
@@ -461,6 +500,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 4 Adaptive Memory And Believability`
 - Depends on: `MP-205`
+- Status: `done`
 
 Problem:
 Recall does not yet modify memory strength and confidence in a first-class way.
@@ -491,6 +531,7 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 4 Adaptive Memory And Believability`
 - Depends on: `MP-401`
+- Status: `done`
 
 Problem:
 Long-horizon memory quality will degrade if every low-value item competes indefinitely for retrieval.
@@ -521,6 +562,7 @@ Docs:
 - Priority: `P0`
 - Milestone: `Phase 4 Adaptive Memory And Believability`
 - Depends on: `MP-105`, `MP-304`, `MP-401`
+- Status: `done`
 
 Problem:
 Long-term continuity and believability cannot be validated with only short single-turn tests.
@@ -551,6 +593,13 @@ Docs:
 - Priority: `P1`
 - Milestone: `Phase 4 Adaptive Memory And Believability`
 - Depends on: `MP-403`
+- Status: `done`
+
+## Active Queue
+
+1. MP-203 Persist autobiographical graph and chapter state across restarts.
+2. Extend continuity retrieval to consume persisted autobiographical chapters before falling back to on-demand graph derivation.
+3. Extend longitudinal and scorecard scenarios so chapter continuity must survive restart independently of episodic overlap.
 
 Problem:
 Memory and personality quality need a stable decision surface for pre-merge review.

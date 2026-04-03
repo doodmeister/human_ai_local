@@ -1,6 +1,6 @@
 # Memory And Personality Implementation Tickets
 
-Last updated: 2026-03-28
+Last updated: 2026-04-02
 
 ## Purpose
 
@@ -35,10 +35,34 @@ The current implementation seams that matter most for this plan are:
 
 These are the highest-leverage insertion points for phased memory and personality work without destabilizing the runtime.
 
+## Audit Summary
+
+As of 2026-04-02, this ticket list no longer represents mostly unstarted work.
+
+Verified implemented and wired in the current runtime:
+
+- MP-101 through MP-105
+- MP-201, MP-202, MP-204, and MP-205
+- MP-301 through MP-304
+- MP-401 through MP-404
+
+Implemented but still limited in depth or durability:
+
+- MP-203 now has concrete event encoding, graph and chapter builders, persisted autobiographical graph snapshots, plus autobiographical promotion on both the main chat path and the lower-level cognitive-agent path; the same promoted turn now writes multiple semantic products including relationship-derived preference facts and narrative-theme focus facts, and both longitudinal plus retrieval eval scenarios cover those paths, but richer generalized multi-product updates are still incomplete
+
+Primary next follow-up slice after this audit:
+
+- finish durable autobiographical continuity by persisting chapter and graph state and promoting it from live turn outputs
+- deepen continuity retrieval so restart-aware behavior depends on persisted autobiographical state rather than only on episodic overlap
+- keep reconsolidation, contradiction, forgetting, and quality-gate work aligned with that durable autobiographical layer
+
 ## Phase 1: Foundations
 
 Outcome:
 Canonical memory representation plus planned retrieval infrastructure.
+
+Current status:
+Implemented in the active runtime and backed by targeted tests and evaluation scenarios.
 
 ### MP-101 Canonical Memory Schema
 
@@ -126,6 +150,9 @@ Canonical memory representation plus planned retrieval infrastructure.
 Outcome:
 Persistent relationship and life-phase continuity across sessions.
 
+Current status:
+Mostly implemented. Relationship persistence, updater integration, contradiction repair, and relationship-aware retrieval are live; durable autobiographical graph persistence remains the main unfinished depth item.
+
 ### MP-201 Relationship Memory Model
 
 - Goal: introduce a first-class per-user relationship memory store.
@@ -199,6 +226,9 @@ Persistent relationship and life-phase continuity across sessions.
 Outcome:
 Internal state becomes explicit response policy rather than prompt-side decoration.
 
+Current status:
+Implemented in runtime composition, prompt assembly, API payloads, and behavior evaluation paths.
+
 ### MP-301 Response Policy Contract
 
 - Goal: define a structured response-policy object for warmth, directness, curiosity, uncertainty, and disclosure.
@@ -252,6 +282,9 @@ Internal state becomes explicit response policy rather than prompt-side decorati
 Outcome:
 Memory revision, forgetting, and long-horizon evaluation become first-class.
 
+Current status:
+Implemented for the current deterministic quality-gate scope, including reconsolidation feedback, forgetting and suppression policy, restart-aware longitudinal scenarios, and scorecard gates.
+
 ### MP-401 Reconsolidation Hooks
 
 - Goal: update memory strength and metadata after successful or failed recall.
@@ -296,38 +329,38 @@ Memory revision, forgetting, and long-horizon evaluation become first-class.
   - scorecard generation tests
   - threshold regression tests
 
-## Recommended First Slice
+## Recommended Next Slice After Audit
 
-Build these first in sequence:
+Build these next in sequence:
 
-1. MP-101 Canonical Memory Schema
-2. MP-102 Store Normalization Adapters
-3. MP-103 Retrieval Plan Contract
+1. finish MP-203 by persisting autobiographical graph and chapter state across restarts
+2. deepen MP-204 so continuity retrieval prefers persisted autobiographical chapters rather than only graphing the current episodic candidate set
+3. keep MP-401 and MP-403 aligned with that durable autobiographical layer so reconsolidation and restart-aware evals operate on the same continuity primitives
 
-Why this first:
+Why this next:
 
-- it improves the weakest architectural seam without forcing a storage rewrite
-- it gives `ContextBuilder` and retrieval code a stable contract
-- it enables every later slice to work against normalized memory items instead of ad hoc shapes
+- the original Phase 1 and most Phase 3 scaffolding already landed and is wired into runtime code
+- autobiographical continuity is now the clearest remaining gap between the current system and the roadmap's target behavior
+- this slice compounds existing work instead of reopening already-solved schema, planner, and prompt-assembly seams
 
-## Suggested First Deliverable Breakdown
+## Suggested Follow-Up Breakdown
 
 ### Slice A
 
-- add canonical memory item model
-- add normalization adapters for current STM, LTM, episodic, and prospective outputs
-- add unit tests for normalized output shape
+- persist autobiographical chapters and graph links as a first-class memory product or snapshot layer
+- define promotion rules from turn-derived events into chapter updates and defining moments
+- add restart roundtrip tests for autobiographical persistence
 
 ### Slice B
 
-- add retrieval plan dataclass and first planner
-- thread retrieval plan use into `ContextBuilder`
-- preserve existing store backends and fallback behavior
+- thread persisted autobiographical state into `ContextBuilder`, retrieval planning, and reranking
+- prefer chapter summaries and defining moments for continuity-style prompts
+- keep retrieval budgets bounded and explainable
 
 ### Slice C
 
-- add first reranker and retrieval eval scenarios
-- measure duplicate suppression and basic recall precision
+- extend longitudinal and scorecard scenarios so continuity success requires persisted autobiographical state
+- add regression checks that distinguish episodic overlap from true chapter continuity
 
 ## Phase Exit Gates
 

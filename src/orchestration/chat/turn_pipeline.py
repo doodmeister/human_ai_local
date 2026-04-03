@@ -595,6 +595,18 @@ class ChatTurnPipeline:
 
         tick.assert_step(CognitiveStep.CONSOLIDATE)
         stored = service._maybe_consolidate(user_turn, assistant_turn)
+        autobiographical_episode_id = None
+        if stored:
+            try:
+                autobiographical_episode_id = service._promote_autobiographical_turn(
+                    session=sess,
+                    user_turn=user_turn,
+                    assistant_turn=assistant_turn,
+                    intent=intent,
+                    tick=tick,
+                )
+            except Exception:
+                autobiographical_episode_id = None
         try:
             if adaptive_cfg is not None:
                 if original_sal_thr is not None:
@@ -666,6 +678,7 @@ class ChatTurnPipeline:
                 "user_valence": user_turn.emotional_valence,
                 "user_importance": user_turn.importance,
                 "consolidation_status": user_turn.consolidation_status,
+                "autobiographical_episode_id": autobiographical_episode_id,
             },
             "context_items": [
                 {

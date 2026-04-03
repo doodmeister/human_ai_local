@@ -19,6 +19,17 @@ def _dedupe(values: Iterable[str]) -> list[str]:
     return ordered
 
 
+def _coerce_datetime(value: Any) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
 @dataclass(slots=True)
 class AutobiographicalLink:
     source_id: str
@@ -35,6 +46,16 @@ class AutobiographicalLink:
             "weight": self.weight,
             "metadata": dict(self.metadata),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AutobiographicalLink":
+        return cls(
+            source_id=str(data.get("source_id") or ""),
+            target_id=str(data.get("target_id") or ""),
+            relationship_type=str(data.get("relationship_type") or ""),
+            weight=float(data.get("weight", 1.0) or 1.0),
+            metadata=dict(data.get("metadata", {})),
+        )
 
 
 @dataclass(slots=True)
@@ -64,6 +85,21 @@ class AutobiographicalChapter:
             "end_time": self.end_time.isoformat() if self.end_time else None,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AutobiographicalChapter":
+        return cls(
+            chapter_id=str(data.get("chapter_id") or ""),
+            title=str(data.get("title") or ""),
+            life_period=str(data.get("life_period") or "general"),
+            summary=str(data.get("summary") or ""),
+            event_ids=_dedupe(data.get("event_ids", [])),
+            goal_ids=_dedupe(data.get("goal_ids", [])),
+            participant_ids=_dedupe(data.get("participant_ids", [])),
+            defining_moment_ids=_dedupe(data.get("defining_moment_ids", [])),
+            start_time=_coerce_datetime(data.get("start_time")),
+            end_time=_coerce_datetime(data.get("end_time")),
+        )
+
 
 @dataclass(slots=True)
 class AutobiographicalGraph:
@@ -75,6 +111,74 @@ class AutobiographicalGraph:
             "links": [link.to_dict() for link in self.links],
             "chapters": [chapter.to_dict() for chapter in self.chapters],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AutobiographicalGraph":
+        return cls(
+            links=[
+                AutobiographicalLink.from_dict(dict(link))
+                for link in data.get("links", [])
+                if isinstance(link, dict)
+            ],
+            chapters=[
+                AutobiographicalChapter.from_dict(dict(chapter))
+                for chapter in data.get("chapters", [])
+                if isinstance(chapter, dict)
+            ],
+        )
+
+    def merged_with(self, other: "AutobiographicalGraph" | None) -> "AutobiographicalGraph":
+        if other is None:
+            return AutobiographicalGraph(
+                links=list(self.links),
+                chapters=list(self.chapters),
+            )
+
+        links: list[AutobiographicalLink] = []
+        seen_links: set[tuple[str, str, str]] = set()
+        for link in [*self.links, *other.links]:
+            key = (link.source_id, link.target_id, link.relationship_type)
+            if key in seen_links:
+                continue
+            seen_links.add(key)
+            links.append(link)
+
+        chapters_by_id: dict[str, AutobiographicalChapter] = {}
+        for chapter in self.chapters:
+            chapters_by_id[chapter.chapter_id] = chapter
+        for chapter in other.chapters:
+            existing = chapters_by_id.get(chapter.chapter_id)
+            chapters_by_id[chapter.chapter_id] = chapter if existing is None else _merge_chapters(existing, chapter)
+
+        chapters = sorted(
+            chapters_by_id.values(),
+            key=lambda chapter: (
+                chapter.start_time or datetime.min,
+                chapter.chapter_id,
+            ),
+        )
+        return AutobiographicalGraph(links=links, chapters=chapters)
+
+
+def _merge_chapters(
+    first: AutobiographicalChapter,
+    second: AutobiographicalChapter,
+) -> AutobiographicalChapter:
+    summary_source = first if len(first.event_ids) >= len(second.event_ids) else second
+    start_candidates = [value for value in (first.start_time, second.start_time) if value is not None]
+    end_candidates = [value for value in (first.end_time, second.end_time) if value is not None]
+    return AutobiographicalChapter(
+        chapter_id=first.chapter_id or second.chapter_id,
+        title=first.title or second.title,
+        life_period=first.life_period or second.life_period,
+        summary=summary_source.summary,
+        event_ids=_dedupe([*first.event_ids, *second.event_ids]),
+        goal_ids=_dedupe([*first.goal_ids, *second.goal_ids]),
+        participant_ids=_dedupe([*first.participant_ids, *second.participant_ids]),
+        defining_moment_ids=_dedupe([*first.defining_moment_ids, *second.defining_moment_ids]),
+        start_time=min(start_candidates) if start_candidates else None,
+        end_time=max(end_candidates) if end_candidates else None,
+    )
 
 
 class AutobiographicalGraphBuilder:

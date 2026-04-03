@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 import uuid
 
 from src.memory.schema import canonical_item_to_prompt_memory_payload, normalize_memory_search_results
+from src.orchestration.autobiographical_promotion import promote_interaction_to_autobiographical_memory
 
 from .. import CognitiveStep, CognitiveTick
 from ..chat.emotion_salience import estimate_salience_and_valence
@@ -32,6 +33,8 @@ class CognitiveTurnProcessor:
         increment_turn_counter: Callable[[], None],
         set_current_fatigue: Callable[[float], None],
         set_attention_focus: Callable[[List[Any]], None],
+        get_autobiographical_store: Callable[[], Any] | None = None,
+        get_active_goal_ids: Callable[[], List[str]] | None = None,
     ) -> None:
         self._get_session = get_session
         self._get_session_id = get_session_id
@@ -47,6 +50,8 @@ class CognitiveTurnProcessor:
         self._increment_turn_counter = increment_turn_counter
         self._set_current_fatigue = set_current_fatigue
         self._set_attention_focus = set_attention_focus
+        self._get_autobiographical_store = get_autobiographical_store or (lambda: None)
+        self._get_active_goal_ids = get_active_goal_ids or (lambda: [])
 
     async def process_input(
         self,
@@ -121,6 +126,7 @@ class CognitiveTurnProcessor:
                 attention_scores,
                 recalled_memories=memory_context,
                 response_policy=processed_input.get("response_policy"),
+                tick=tick,
             )
             tick.finish()
             return response
@@ -264,6 +270,7 @@ class CognitiveTurnProcessor:
         attention_scores: Dict[str, float],
         recalled_memories: Optional[List[Dict[str, Any]]] = None,
         response_policy: Optional[Dict[str, Any]] = None,
+        tick: Any | None = None,
     ) -> None:
         try:
             interaction_content = f"User: {input_data}\nAI: {response}"
@@ -293,6 +300,24 @@ class CognitiveTurnProcessor:
                     )
                 except Exception as exc:
                     logger.debug("Reconsolidation skipped: %s", exc)
+
+            if not str(response).startswith("[ERROR]"):
+                try:
+                    promote_interaction_to_autobiographical_memory(
+                        memory=self._get_memory(),
+                        autobiographical_store=self._get_autobiographical_store(),
+                        session=self._get_session(),
+                        user_content=input_data,
+                        assistant_content=response,
+                        importance=float(attention_scores.get("overall_salience", 0.5) or 0.5),
+                        emotional_valence=float(getattr(tick, "state", {}).get("message_valence", 0.0) if tick is not None else 0.0),
+                        intent_type="agent_turn",
+                        tick=tick,
+                        goal_ids=self._get_active_goal_ids(),
+                        default_prefix="agent",
+                    )
+                except Exception as exc:
+                    logger.debug("Autobiographical promotion skipped: %s", exc)
 
             self._increment_turn_counter()
 

@@ -6,14 +6,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 import logging
+from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
 from typing import Any
 import warnings
+from types import SimpleNamespace
 
 from src.evals.metrics import LongitudinalMetrics, score_longitudinal
+from src.memory.autobiographical import AutobiographicalGraphStore
 from src.memory.episodic.episodic_memory import EpisodicContext, EpisodicMemory
 from src.memory.memory_system import MemorySystem, MemorySystemConfig
+from src.memory.relationship import RelationshipMemory
+from src.orchestration.autobiographical_promotion import promote_interaction_to_autobiographical_memory
 
 
 _BASE_TIME = datetime(2025, 1, 10, 14, 0, tzinfo=timezone.utc)
@@ -91,6 +96,19 @@ class EpisodeSeed:
 
 
 @dataclass(frozen=True, slots=True)
+class PromotedInteractionSeed:
+    interaction_id: str
+    user_content: str
+    assistant_content: str
+    relationship_norms: tuple[str, ...] = ()
+    relationship_interaction_count: int = 1
+    intent_type: str = "conversation"
+    importance: float = 0.7
+    emotional_valence: float = 0.0
+    session_id: str = "longitudinal-user"
+
+
+@dataclass(frozen=True, slots=True)
 class FactExpectation:
     subject: str
     predicate: str
@@ -103,6 +121,7 @@ class LongitudinalPhase:
     phase_id: str
     fact_writes: tuple[FactSeed, ...] = ()
     episode_writes: tuple[EpisodeSeed, ...] = ()
+    promoted_interactions: tuple[PromotedInteractionSeed, ...] = ()
     restart_after: bool = False
 
 
@@ -155,12 +174,25 @@ class _LongitudinalHarness:
         *,
         semantic_records: dict[str, dict[str, Any]] | None = None,
         episodic_records: tuple[dict[str, Any], ...] | None = None,
+        temp_dir_handle: TemporaryDirectory[str] | None = None,
+        persist_dir: str | None = None,
+        episode_aliases: dict[str, str] | None = None,
     ) -> None:
+        self._temp_dir_handle = temp_dir_handle or TemporaryDirectory(
+            prefix="longitudinal_fixture_",
+            ignore_cleanup_errors=True,
+        )
+        self._persist_dir = persist_dir or self._temp_dir_handle.name
+        self._episode_aliases = dict(episode_aliases or {})
+        self.autobiographical_store = AutobiographicalGraphStore(
+            storage_path=Path(self._persist_dir) / "autobiographical"
+        )
         self.semantic = _make_semantic_memory(semantic_records)
         self.episodes = {
             episode["id"]: EpisodicMemory.from_dict(episode)
             for episode in (episodic_records or ())
         }
+        self.episodic = self
 
     def apply_phase(self, phase: LongitudinalPhase) -> None:
         for fact in phase.fact_writes:
@@ -184,12 +216,21 @@ class _LongitudinalHarness:
                 life_period=episode.life_period,
                 tags=list(episode.tags),
             )
+            self._episode_aliases[episode.episode_id] = episode.episode_id
+
+        for interaction in phase.promoted_interactions:
+            actual_id = self._promote_interaction(interaction)
+            if actual_id:
+                self._episode_aliases[interaction.interaction_id] = actual_id
 
     def restart(self) -> "_LongitudinalHarness":
         episodic_records = tuple(memory.to_dict() for memory in self.episodes.values())
         return _LongitudinalHarness(
             semantic_records=deepcopy(self.semantic.collection.records),
             episodic_records=episodic_records,
+            temp_dir_handle=self._temp_dir_handle,
+            persist_dir=self._persist_dir,
+            episode_aliases=self._episode_aliases,
         )
 
     def facts_for_axis(self, subject: str, predicate: str, *, belief_status: str) -> tuple[dict[str, Any], ...]:
@@ -207,7 +248,85 @@ class _LongitudinalHarness:
         return tuple(matched)
 
     def episode_ids(self) -> tuple[str, ...]:
-        return tuple(sorted(self.episodes))
+        available: list[str] = []
+        for alias, actual_id in self._episode_aliases.items():
+            if actual_id in self.episodes:
+                available.append(alias)
+        return tuple(sorted(available))
+
+    def create_episodic_memory(
+        self,
+        summary: str,
+        detailed_content: str,
+        participants: list[str] | None = None,
+        location: str | None = None,
+        emotional_state: str | None = None,
+        cognitive_load: float = 0.5,
+        stm_ids: list[str] | None = None,
+        ltm_ids: list[str] | None = None,
+        importance: float = 0.5,
+        emotional_valence: float = 0.0,
+        life_period: str | None = None,
+    ) -> str:
+        del location, emotional_state
+        episode_id = f"episode-generated-{len(self.episodes) + 1}"
+        timestamp = _BASE_TIME + timedelta(minutes=len(self.episodes) + 1)
+        self.episodes[episode_id] = EpisodicMemory(
+            id=episode_id,
+            summary=summary,
+            detailed_content=detailed_content,
+            timestamp=timestamp,
+            duration=timedelta(minutes=5),
+            context=EpisodicContext(
+                participants=list(participants or []),
+                cognitive_load=float(cognitive_load),
+            ),
+            associated_stm_ids=list(stm_ids or []),
+            associated_ltm_ids=list(ltm_ids or []),
+            importance=float(importance),
+            emotional_valence=float(emotional_valence),
+            life_period=life_period,
+        )
+        return episode_id
+
+    def retrieve_memory(self, memory_id: str) -> EpisodicMemory | None:
+        return self.episodes.get(memory_id)
+
+    def store_fact(self, subject: str, predicate: str, object_val: Any, **kwargs: Any) -> str:
+        return self.semantic.store_fact(subject, predicate, object_val, **kwargs)
+
+    def _promote_interaction(self, interaction: PromotedInteractionSeed) -> str | None:
+        session = SimpleNamespace(session_id=interaction.session_id)
+        setattr(
+            session,
+            "_relationship_memory_snapshot",
+            RelationshipMemory(
+                interlocutor_id=interaction.session_id,
+                recurring_norms=list(interaction.relationship_norms),
+                interaction_count=interaction.relationship_interaction_count,
+            ),
+        )
+        return promote_interaction_to_autobiographical_memory(
+            memory=self,
+            autobiographical_store=self.autobiographical_store,
+            session=session,
+            user_content=interaction.user_content,
+            assistant_content=interaction.assistant_content,
+            importance=interaction.importance,
+            emotional_valence=interaction.emotional_valence,
+            source_event_ids=[
+                f"{interaction.interaction_id}:user",
+                f"{interaction.interaction_id}:assistant",
+            ],
+            intent_type=interaction.intent_type,
+            default_prefix="eval",
+        )
+
+    def close(self) -> None:
+        try:
+            self._temp_dir_handle.cleanup()
+        except Exception:
+            pass
 
 
 def _patch_runtime_memory(memory: MemorySystem) -> None:
@@ -239,6 +358,9 @@ class _RuntimeLongitudinalHarness:
         self._persist_dir = persist_dir or self._temp_dir_handle.name
         self._episode_aliases = dict(episode_aliases or {})
         self.memory = _build_runtime_memory(self._persist_dir)
+        self.autobiographical_store = AutobiographicalGraphStore(
+            storage_path=Path(self._persist_dir) / "autobiographical"
+        )
 
     def apply_phase(self, phase: LongitudinalPhase) -> None:
         with _suppress_runtime_logs():
@@ -261,6 +383,11 @@ class _RuntimeLongitudinalHarness:
                 )
                 if episode_id:
                     self._episode_aliases[episode.episode_id] = episode_id
+
+            for interaction in phase.promoted_interactions:
+                actual_id = self._promote_interaction(interaction)
+                if actual_id:
+                    self._episode_aliases[interaction.interaction_id] = actual_id
 
     def restart(self) -> "_RuntimeLongitudinalHarness":
         with _suppress_runtime_logs():
@@ -312,6 +439,33 @@ class _RuntimeLongitudinalHarness:
             self._temp_dir_handle.cleanup()
         except Exception:
             pass
+
+    def _promote_interaction(self, interaction: PromotedInteractionSeed) -> str | None:
+        session = SimpleNamespace(session_id=interaction.session_id)
+        setattr(
+            session,
+            "_relationship_memory_snapshot",
+            RelationshipMemory(
+                interlocutor_id=interaction.session_id,
+                recurring_norms=list(interaction.relationship_norms),
+                interaction_count=interaction.relationship_interaction_count,
+            ),
+        )
+        return promote_interaction_to_autobiographical_memory(
+            memory=self.memory,
+            autobiographical_store=self.autobiographical_store,
+            session=session,
+            user_content=interaction.user_content,
+            assistant_content=interaction.assistant_content,
+            importance=interaction.importance,
+            emotional_valence=interaction.emotional_valence,
+            source_event_ids=[
+                f"{interaction.interaction_id}:user",
+                f"{interaction.interaction_id}:assistant",
+            ],
+            intent_type=interaction.intent_type,
+            default_prefix="eval",
+        )
 
 
 def build_longitudinal_scenarios() -> list[LongitudinalScenario]:
@@ -497,6 +651,188 @@ def build_longitudinal_scenarios() -> list[LongitudinalScenario]:
                     expected_quarantined_objects=("coffee",),
                 ),
             ),
+        ),
+        LongitudinalScenario(
+            scenario_id="restart_promoted_preference_continuity",
+            phases=(
+                LongitudinalPhase(
+                    phase_id="session_one",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-direct-one",
+                            user_content="Please keep the answers direct.",
+                            assistant_content="I will keep the answers direct.",
+                            relationship_norms=("prefers direct answers", "asks for rationale and tradeoffs"),
+                            relationship_interaction_count=3,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                    restart_after=True,
+                ),
+                LongitudinalPhase(
+                    phase_id="session_two",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-direct-two",
+                            user_content="Continue with the same direct style.",
+                            assistant_content="Continuing with a direct answer and rationale.",
+                            relationship_norms=("prefers direct answers", "asks for rationale and tradeoffs"),
+                            relationship_interaction_count=5,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                ),
+            ),
+            fact_expectations=(
+                FactExpectation(
+                    subject="user",
+                    predicate="prefers",
+                    expected_active_objects=("direct answers",),
+                ),
+                FactExpectation(
+                    subject="user",
+                    predicate="asks_for",
+                    expected_active_objects=("rationale and tradeoffs",),
+                ),
+            ),
+            expected_episode_ids=("episode-pref-direct-one", "episode-pref-direct-two"),
+        ),
+        LongitudinalScenario(
+            scenario_id="runtime_restart_promoted_preference_continuity",
+            runner="runtime",
+            phases=(
+                LongitudinalPhase(
+                    phase_id="session_one",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-direct-one",
+                            user_content="Please keep the answers direct.",
+                            assistant_content="I will keep the answers direct.",
+                            relationship_norms=("prefers direct answers", "asks for rationale and tradeoffs"),
+                            relationship_interaction_count=3,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                    restart_after=True,
+                ),
+                LongitudinalPhase(
+                    phase_id="session_two",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-direct-two",
+                            user_content="Continue with the same direct style.",
+                            assistant_content="Continuing with a direct answer and rationale.",
+                            relationship_norms=("prefers direct answers", "asks for rationale and tradeoffs"),
+                            relationship_interaction_count=5,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                ),
+            ),
+            fact_expectations=(
+                FactExpectation(
+                    subject="user",
+                    predicate="prefers",
+                    expected_active_objects=("direct answers",),
+                ),
+                FactExpectation(
+                    subject="user",
+                    predicate="asks_for",
+                    expected_active_objects=("rationale and tradeoffs",),
+                ),
+            ),
+            expected_episode_ids=("episode-pref-direct-one", "episode-pref-direct-two"),
+        ),
+        LongitudinalScenario(
+            scenario_id="restart_promoted_preference_contradiction_repair",
+            phases=(
+                LongitudinalPhase(
+                    phase_id="session_one",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-direct",
+                            user_content="Be direct.",
+                            assistant_content="I will answer directly.",
+                            relationship_norms=("prefers direct answers",),
+                            relationship_interaction_count=2,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                    restart_after=True,
+                ),
+                LongitudinalPhase(
+                    phase_id="session_two",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-structured",
+                            user_content="Actually, use structured guidance.",
+                            assistant_content="I will switch to structured guidance.",
+                            relationship_norms=("likes structured guidance",),
+                            relationship_interaction_count=4,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                ),
+            ),
+            fact_expectations=(
+                FactExpectation(
+                    subject="user",
+                    predicate="prefers",
+                    expected_active_objects=("structured guidance",),
+                    expected_quarantined_objects=("direct answers",),
+                ),
+            ),
+            expected_episode_ids=("episode-pref-direct", "episode-pref-structured"),
+        ),
+        LongitudinalScenario(
+            scenario_id="runtime_restart_promoted_preference_contradiction_repair",
+            runner="runtime",
+            phases=(
+                LongitudinalPhase(
+                    phase_id="session_one",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-direct",
+                            user_content="Be direct.",
+                            assistant_content="I will answer directly.",
+                            relationship_norms=("prefers direct answers",),
+                            relationship_interaction_count=2,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                    restart_after=True,
+                ),
+                LongitudinalPhase(
+                    phase_id="session_two",
+                    promoted_interactions=(
+                        PromotedInteractionSeed(
+                            interaction_id="episode-pref-structured",
+                            user_content="Actually, use structured guidance.",
+                            assistant_content="I will switch to structured guidance.",
+                            relationship_norms=("likes structured guidance",),
+                            relationship_interaction_count=4,
+                            intent_type="preference_capture",
+                            session_id="preference-user",
+                        ),
+                    ),
+                ),
+            ),
+            fact_expectations=(
+                FactExpectation(
+                    subject="user",
+                    predicate="prefers",
+                    expected_active_objects=("structured guidance",),
+                    expected_quarantined_objects=("direct answers",),
+                ),
+            ),
+            expected_episode_ids=("episode-pref-direct", "episode-pref-structured"),
         ),
     ]
 

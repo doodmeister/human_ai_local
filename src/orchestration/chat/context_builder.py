@@ -21,7 +21,7 @@ from .constants import (
     RANK_BASE_EXECUTIVE,
 )
 from .metrics import metrics_registry
-from src.memory.autobiographical import AutobiographicalGraphBuilder
+from src.memory.autobiographical import AutobiographicalGraph, AutobiographicalGraphBuilder
 from src.memory.schema import CanonicalMemoryItem, canonical_item_to_context_payload, normalize_memory_results
 from src.memory.retrieval import MemoryReranker, RetrievalPlan, RetrievalPlanner
 
@@ -39,6 +39,7 @@ class ContextBuilder:
         attention: Any = None,
         executive: Any = None,
         prospective: Any = None,
+        autobiographical_store: Any = None,
     ):
         # Start with global defaults, then overlay any provided config
         from src.core.config import get_chat_config
@@ -55,6 +56,7 @@ class ContextBuilder:
         self.attention = attention
         self.executive = executive
         self.prospective = prospective
+        self._autobiographical_store = autobiographical_store
         self._retrieval_planner = RetrievalPlanner()
         self._memory_reranker = MemoryReranker()
         self._autobiographical_graph_builder = AutobiographicalGraphBuilder()
@@ -448,6 +450,34 @@ class ContextBuilder:
             return None
         return getattr(session, "_relationship_memory_snapshot", None)
 
+    def _current_autobiographical_graph(self) -> AutobiographicalGraph | None:
+        session = getattr(self, "_current_session", None)
+        if session is None:
+            return None
+
+        snapshot = getattr(session, "_autobiographical_graph_snapshot", None)
+        if isinstance(snapshot, AutobiographicalGraph):
+            return snapshot
+        if isinstance(snapshot, dict):
+            try:
+                graph = AutobiographicalGraph.from_dict(snapshot)
+            except Exception:
+                graph = None
+            else:
+                setattr(session, "_autobiographical_graph_snapshot", graph)
+                return graph
+
+        store = self._autobiographical_store
+        if store is None or not hasattr(store, "get"):
+            return None
+        try:
+            graph = store.get(session.session_id)
+        except Exception:
+            return None
+        if graph is not None:
+            setattr(session, "_autobiographical_graph_snapshot", graph)
+        return graph
+
     def _rerank_memory_context_items(
         self,
         items: List[ContextItem],
@@ -480,7 +510,9 @@ class ContextBuilder:
         if len(canonical_items) < 2:
             return
 
-        autobiographical_graph = self._autobiographical_graph_builder.build(canonical_items)
+        current_graph = self._autobiographical_graph_builder.build(canonical_items)
+        persisted_graph = self._current_autobiographical_graph()
+        autobiographical_graph = current_graph if persisted_graph is None else persisted_graph.merged_with(current_graph)
         reranked = self._memory_reranker.rerank(
             canonical_items,
             relationship_memory=relationship_memory,
@@ -518,6 +550,8 @@ class ContextBuilder:
                 metadata={
                     "intent": retrieval_plan.intent,
                     "relationship_target": retrieval_plan.relationship_target,
+                    "current_chapter_count": len(current_graph.chapters),
+                    "persisted_chapter_count": len(persisted_graph.chapters) if persisted_graph is not None else 0,
                     "chapter_count": len(autobiographical_graph.chapters),
                 },
             )

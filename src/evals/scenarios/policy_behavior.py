@@ -15,11 +15,13 @@ from unittest.mock import AsyncMock
 import uuid
 
 from src.evals.metrics import BehaviorMetrics, score_behavior
+from src.memory.relationship import RelationshipMemory, RelationshipMemoryStore
 from src.memory.schema import canonical_item_to_prompt_memory_payload, normalize_memory_search_results
 from src.model.llm_provider import LLMResponse
 from src.orchestration.cognitive_agent import CognitiveAgent
 from src.orchestration.agent.llm_session import CognitiveAgentLLMSession
-from src.orchestration.policy import PolicyVector, ResponsePolicy
+from src.orchestration.cognitive_layers import ChatCognitiveLayerRuntime
+from src.orchestration.policy import PolicyVector, ResponsePolicy, build_response_policy as compose_response_policy
 
 
 _RUNTIME_EMBEDDING_TERMS = (
@@ -84,6 +86,36 @@ def _build_response_policy(
             },
         },
     )
+
+
+def _runtime_policy_fixture_inputs(*, relationship_state: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "drive_state": {
+            "levels": {
+                "connection": 0.48,
+                "competence": 0.7,
+                "autonomy": 0.55,
+                "understanding": 0.8,
+                "meaning": 0.6,
+            }
+        },
+        "mood_state": {
+            "label": "calm",
+            "valence": 0.2,
+            "arousal": 0.25,
+            "confidence": 0.8,
+        },
+        "relationship_state": dict(relationship_state or {}),
+        "self_model_state": {
+            "self_regard": 0.1,
+            "identity_stability": 0.8,
+            "stated_values": ["clarity"],
+        },
+        "narrative_state": {
+            "active_themes": ["continuity"],
+            "ongoing_struggles": [],
+        },
+    }
 
 
 def _extract_metric(policy_block: str, metric: str) -> float:
@@ -162,6 +194,9 @@ class PolicyBehaviorScenario:
     restart_before_replay: bool = False
     use_runtime_memory_context: bool = False
     runtime_seed_memories: tuple[dict[str, Any], ...] = ()
+    runtime_session_id: str | None = None
+    runtime_relationship_memory: dict[str, Any] | None = None
+    runtime_policy_inputs: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +229,40 @@ class StubCognitiveLayers:
 
     def get_response_policy_state(self):
         return self._policy.to_dict()
+
+
+class RuntimeDerivedPolicyLayers:
+    def __init__(
+        self,
+        *,
+        relationship_storage_path: str | None = None,
+        runtime_policy_inputs: dict[str, Any] | None = None,
+    ) -> None:
+        self._runtime = ChatCognitiveLayerRuntime()
+        self._relationship_storage_path = relationship_storage_path
+        self._runtime_policy_inputs = dict(runtime_policy_inputs or _runtime_policy_fixture_inputs())
+
+    def _relationship_snapshot(self, session: Any) -> RelationshipMemory | None:
+        if not self._relationship_storage_path:
+            return None
+        store = RelationshipMemoryStore(storage_path=self._relationship_storage_path)
+        return store.get(str(getattr(session, "session_id", "") or ""))
+
+    def process_turn(self, *, session, tick, message: str, salience: float, valence: float, global_turn_counter: int) -> None:
+        del message, salience, valence, global_turn_counter
+        relationship_snapshot = self._relationship_snapshot(session)
+        if relationship_snapshot is not None:
+            setattr(session, "_relationship_memory_snapshot", relationship_snapshot)
+            tick.state["relationship_memory"] = relationship_snapshot.to_dict()
+
+        self._runtime.get_drive_state = lambda: dict(self._runtime_policy_inputs["drive_state"])
+        self._runtime.get_mood_state = lambda: dict(self._runtime_policy_inputs["mood_state"])
+        self._runtime.get_self_model_state = lambda: dict(self._runtime_policy_inputs["self_model_state"])
+        self._runtime.get_narrative_state = lambda: dict(self._runtime_policy_inputs["narrative_state"])
+        self._runtime._update_response_policy(session, tick)
+
+    def get_response_policy_state(self):
+        return self._runtime.get_response_policy_state()
 
 
 def _response_policy_from_dict(policy: dict[str, Any]) -> ResponsePolicy:
@@ -288,6 +357,21 @@ def _suppress_runtime_logs() -> Any:
 
 
 def build_behavior_scenarios() -> list[PolicyBehaviorScenario]:
+    relationship_continuity_memory = {
+        "interlocutor_id": "relationship-continuity-user",
+        "display_name": "Primary user",
+        "warmth": 0.78,
+        "trust": 0.8,
+        "familiarity": 0.58,
+        "rupture": 0.05,
+        "recurring_norms": ["prefers direct answers"],
+        "interaction_count": 6,
+    }
+    relationship_policy_inputs = _runtime_policy_fixture_inputs(
+        relationship_state=relationship_continuity_memory,
+    )
+    relationship_policy = compose_response_policy(**relationship_policy_inputs).to_dict()["effective"]
+
     return [
         PolicyBehaviorScenario(
             scenario_id="warmth_directness_high",
@@ -379,6 +463,19 @@ def build_behavior_scenarios() -> list[PolicyBehaviorScenario]:
             ),
         ),
         PolicyBehaviorScenario(
+            scenario_id="runtime_restart_relationship_wording_continuity",
+            user_input="how should we work together next?",
+            runner="runtime",
+            response_policy={"effective": dict(relationship_policy)},
+            expected_present=("Happy to help.", "Answer:"),
+            expected_absent=("Context:",),
+            expected_policy_values=dict(relationship_policy),
+            restart_before_replay=True,
+            runtime_session_id="relationship-continuity-user",
+            runtime_relationship_memory=relationship_continuity_memory,
+            runtime_policy_inputs=relationship_policy_inputs,
+        ),
+        PolicyBehaviorScenario(
             scenario_id="runtime_traceability_full_policy",
             user_input="help me continue the roadmap",
             runner="runtime",
@@ -426,13 +523,16 @@ async def _generate_with_fresh_session(scenario: PolicyBehaviorScenario) -> tupl
 
 async def _generate_with_runtime_agent(scenario: PolicyBehaviorScenario) -> tuple[str, PolicyAwareEvalProvider]:
     provider = PolicyAwareEvalProvider()
-    with _temporary_runtime_env(), _suppress_runtime_logs():
+    with _temporary_runtime_env() as temp_dir, _suppress_runtime_logs():
+        _seed_runtime_relationship_memory(persist_dir=temp_dir, scenario=scenario)
         agent = CognitiveAgent()
         try:
+            if scenario.runtime_session_id:
+                agent.session_id = scenario.runtime_session_id
             _patch_runtime_memory(agent.memory)
             agent._llm_session.provider = provider
             agent._llm_session.openai_client = None
-            agent._cognitive_layers = StubCognitiveLayers(_response_policy_from_dict(scenario.response_policy))
+            agent._cognitive_layers = _runtime_layers_for_scenario(scenario, persist_dir=temp_dir)
             agent._turn_processor._get_cognitive_layers = lambda: agent._cognitive_layers
             if scenario.use_runtime_memory_context:
                 async def _runtime_memory_context(processed_input):
@@ -456,6 +556,7 @@ async def _generate_with_runtime_agent(scenario: PolicyBehaviorScenario) -> tupl
 
 def _seed_runtime_memories(*, persist_dir: str, collection_stem: str, scenario: PolicyBehaviorScenario) -> None:
     if not scenario.runtime_seed_memories:
+        _seed_runtime_relationship_memory(persist_dir=persist_dir, scenario=scenario)
         return
     with _temporary_runtime_env(persist_dir=persist_dir, collection_stem=collection_stem), _suppress_runtime_logs():
         agent = CognitiveAgent()
@@ -473,6 +574,26 @@ def _seed_runtime_memories(*, persist_dir: str, collection_stem: str, scenario: 
             agent.memory.shutdown()
             del agent
             gc.collect()
+    _seed_runtime_relationship_memory(persist_dir=persist_dir, scenario=scenario)
+
+
+def _seed_runtime_relationship_memory(*, persist_dir: str, scenario: PolicyBehaviorScenario) -> None:
+    if scenario.runtime_relationship_memory is None:
+        return
+    store = RelationshipMemoryStore(storage_path=os.path.join(persist_dir, "relationships"))
+    store.upsert(RelationshipMemory.from_dict(dict(scenario.runtime_relationship_memory)))
+
+
+def _runtime_layers_for_scenario(scenario: PolicyBehaviorScenario, *, persist_dir: str | None = None) -> Any:
+    if scenario.runtime_policy_inputs is not None:
+        relationship_storage_path = None
+        if persist_dir is not None:
+            relationship_storage_path = os.path.join(persist_dir, "relationships")
+        return RuntimeDerivedPolicyLayers(
+            relationship_storage_path=relationship_storage_path,
+            runtime_policy_inputs=dict(scenario.runtime_policy_inputs),
+        )
+    return StubCognitiveLayers(_response_policy_from_dict(scenario.response_policy))
 
 
 async def _generate_with_persisted_runtime_agent(
@@ -485,10 +606,12 @@ async def _generate_with_persisted_runtime_agent(
     with _temporary_runtime_env(persist_dir=persist_dir, collection_stem=collection_stem), _suppress_runtime_logs():
         agent = CognitiveAgent()
         try:
+            if scenario.runtime_session_id:
+                agent.session_id = scenario.runtime_session_id
             _patch_runtime_memory(agent.memory)
             agent._llm_session.provider = provider
             agent._llm_session.openai_client = None
-            agent._cognitive_layers = StubCognitiveLayers(_response_policy_from_dict(scenario.response_policy))
+            agent._cognitive_layers = _runtime_layers_for_scenario(scenario, persist_dir=persist_dir)
             agent._turn_processor._get_cognitive_layers = lambda: agent._cognitive_layers
             if scenario.use_runtime_memory_context:
                 async def _runtime_memory_context(processed_input):

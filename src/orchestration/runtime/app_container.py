@@ -145,6 +145,14 @@ class AppRuntime:
         cfg = cfg_obj.to_dict()
         cfg.setdefault("retrieval_timeout_ms", cfg_obj.retrieval_timeout_ms)
 
+        autobiographical_store = None
+        AutobiographicalGraphStore = _lazy_import("src.memory.autobiographical", "AutobiographicalGraphStore")
+        if AutobiographicalGraphStore is not None:
+            try:
+                autobiographical_store = AutobiographicalGraphStore()
+            except Exception:
+                autobiographical_store = None
+
         builder = ContextBuilder(
             chat_config=cfg,
             stm=stm,
@@ -154,6 +162,7 @@ class AppRuntime:
             attention=attention,
             executive=executive,
             prospective=prospective,
+            autobiographical_store=autobiographical_store,
         )
 
         consolidator: Optional[MemoryConsolidator] = None
