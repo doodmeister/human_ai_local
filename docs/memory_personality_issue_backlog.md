@@ -41,7 +41,7 @@ Completed and wired into the current runtime:
 
 Still active:
 
-- MP-203 remains only partially complete because autobiographical graph and chapter construction now persist through a snapshot store and both main runtime paths promote updates, with semantic preference facts also emitted from the same promoted turn, but the system still lacks a broader generalized multi-product pipeline
+- MP-203 remains only partially complete because autobiographical graph and chapter construction now persist through a snapshot store and both main runtime paths promote updates, with semantic preference/focus facts and restart-persisted explicit follow-up reminders also emitted from the same promoted turn, but the system still lacks a broader generalized multi-product pipeline
 
 Recommended active milestone focus:
 
@@ -277,30 +277,25 @@ Docs:
 - Status: `partial`
 
 Problem:
-The system can retrieve episodes, persist autobiographical graph snapshots, and promote autobiographical plus preference-semantic updates across both main runtime paths, but it still lacks richer generalized event-to-memory products beyond the current episodic, chapter-snapshot, and preference-fact flow.
+The system can already persist autobiographical graph snapshots, surface persisted chapter summaries in live context, and promote autobiographical plus semantic/prospective updates across both main runtime paths, but it still lacks persisted-chapter-first continuity retrieval and a richer generalized event-to-memory pipeline beyond the current episodic, autobiographical, semantic-preference, semantic-focus, and follow-up-reminder flow.
 
 Scope:
 
-- add event-encoding path under `src/memory/encoding/event_encoder.py`
-- add graph or link structures for people, projects, goals, and events
-- add chapter summary contract and defining-moment markers
-- persist autobiographical graph and chapter state across restarts as a first-class continuity layer
-- promote live turn outputs into autobiographical updates instead of deriving chapters only from the current episodic candidate set
+- deepen continuity retrieval so persisted chapters and defining moments are preferred for continuity-style prompts before falling back to on-demand graph derivation
+- extend longitudinal and scorecard scenarios so restart continuity requires persisted chapter state rather than episodic overlap alone
+- broaden the shared promotion seam toward additional semantic classes or self-model updates without making heavyweight products mandatory
 
 Acceptance criteria:
 
-- episode links can be created across related events
-- chapter summaries can be generated from linked events
-- defining moments can be marked and retrieved distinctly
-- persisted autobiographical chapters survive restart and remain available even when the originating episodic candidate set is not reassembled the same way
-- continuity retrieval can prefer persisted chapter summaries and defining moments for "what changed lately?" style queries
+- persisted autobiographical chapters and defining moments are preferred for continuity-style prompts when they are the best continuity anchor
+- restart-aware longitudinal and scorecard scenarios fail when chapter continuity is missing even if episodic overlap still exists
+- broader promoted-turn outputs remain measurable, optional, and compatible with the current runtime paths
 
 Validation:
 
-- event-link creation tests
-- chapter summary tests
-- restart roundtrip tests for persisted autobiographical state
+- retrieval baseline tests for persisted chapter and defining-moment preference
 - longitudinal continuity tests that distinguish chapter persistence from episodic overlap
+- scorecard or quality-gate coverage that requires restart-persisted chapter continuity
 
 Docs:
 
@@ -597,9 +592,9 @@ Docs:
 
 ## Active Queue
 
-1. MP-203 Persist autobiographical graph and chapter state across restarts.
-2. Extend continuity retrieval to consume persisted autobiographical chapters before falling back to on-demand graph derivation.
-3. Extend longitudinal and scorecard scenarios so chapter continuity must survive restart independently of episodic overlap.
+1. Extend continuity retrieval to consume persisted autobiographical chapters and defining moments before falling back to on-demand graph derivation.
+2. Extend longitudinal and scorecard scenarios so chapter continuity must survive restart independently of episodic overlap.
+3. Broaden the promoted-turn multi-product pipeline beyond the current autobiographical, semantic-preference, semantic-focus, and prospective-follow-up outputs.
 
 Problem:
 Memory and personality quality need a stable decision surface for pre-merge review.

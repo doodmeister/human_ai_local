@@ -21,7 +21,7 @@ from src.orchestration.chat.conversation_session import SessionManager
 from src.orchestration.chat.models import TurnRecord
 
 
-_MEMORY_SOURCE_SYSTEMS = {"stm", "ltm", "episodic"}
+_MEMORY_SOURCE_SYSTEMS = {"stm", "ltm", "episodic", "prospective"}
 _RUNTIME_EMBEDDING_TERMS = (
     "editor",
     "favorite",
@@ -105,6 +105,9 @@ def _patch_runtime_memory(memory: MemorySystem) -> None:
     memory.ltm._generate_embedding = _runtime_embedding
     memory.episodic._ensure_embedding_model = lambda: True
     memory.episodic._generate_embedding = _runtime_embedding
+    prospective = getattr(memory, "prospective", None)
+    if prospective is not None and hasattr(prospective, "_generate_embedding"):
+        prospective._generate_embedding = _runtime_embedding
 
 
 def _configure_runtime_episodic_storage(memory: MemorySystem, persist_dir: str) -> None:
@@ -115,9 +118,14 @@ def _configure_runtime_episodic_storage(memory: MemorySystem, persist_dir: str) 
     memory.episodic._load_from_json_backup()
 
 
-def _build_runtime_memory(persist_dir: str) -> MemorySystem:
+def _build_runtime_memory(persist_dir: str, *, use_vector_prospective: bool = False) -> MemorySystem:
     with _suppress_runtime_logs():
-        memory = MemorySystem(MemorySystemConfig(chroma_persist_dir=persist_dir))
+        memory = MemorySystem(
+            MemorySystemConfig(
+                chroma_persist_dir=persist_dir,
+                use_vector_prospective=use_vector_prospective,
+            )
+        )
     _patch_runtime_memory(memory)
     _configure_runtime_episodic_storage(memory, persist_dir)
     return memory
@@ -130,6 +138,7 @@ class _RuntimeRetrievalHarness:
         temp_dir_handle: TemporaryDirectory[str] | None = None,
         persist_dir: str | None = None,
         episode_aliases: Mapping[str, str] | None = None,
+        use_vector_prospective: bool = False,
     ) -> None:
         self._temp_dir_handle = temp_dir_handle or TemporaryDirectory(
             prefix="retrieval_runtime_",
@@ -137,7 +146,11 @@ class _RuntimeRetrievalHarness:
         )
         self._persist_dir = persist_dir or self._temp_dir_handle.name
         self._episode_aliases = dict(episode_aliases or {})
-        self.memory = _build_runtime_memory(self._persist_dir)
+        self._use_vector_prospective = use_vector_prospective
+        self.memory = _build_runtime_memory(
+            self._persist_dir,
+            use_vector_prospective=self._use_vector_prospective,
+        )
         self.relationship_store = RelationshipMemoryStore(storage_path=Path(self._persist_dir) / "relationships")
         self.autobiographical_store = AutobiographicalGraphStore(storage_path=Path(self._persist_dir) / "autobiographical")
 
@@ -254,6 +267,7 @@ class _RuntimeRetrievalHarness:
             temp_dir_handle=self._temp_dir_handle,
             persist_dir=self._persist_dir,
             episode_aliases=self._episode_aliases,
+            use_vector_prospective=self._use_vector_prospective,
         )
 
     def prepare_for_query(self, scenario: "RetrievalScenario") -> None:
@@ -363,6 +377,7 @@ class RetrievalScenario:
     chat_config: Mapping[str, Any] | None = None
     relationship_memory: Mapping[str, Any] | None = None
     use_semantic_ltm_backend: bool = False
+    use_vector_prospective: bool = False
     forgetting_policy: Mapping[str, Any] | None = None
     promoted_interactions: tuple["PromotedInteractionSeed", ...] = ()
 
@@ -894,6 +909,102 @@ def build_baseline_scenarios() -> list[RetrievalScenario]:
                 ),
             ),
         ),
+        RetrievalScenario(
+            scenario_id="runtime_promoted_value_fact_recall",
+            query="What do you know about what I value in our work?",
+            expected_intent="factual",
+            expected_ids=("fact-value-clarity", "fact-value-reliability"),
+            session_turns=("Check whether promoted value facts survive restart.",),
+            runner="runtime",
+            restart_before_query=True,
+            use_semantic_ltm_backend=True,
+            promoted_interactions=(
+                PromotedInteractionSeed(
+                    interaction_id="episode-values-work",
+                    user_content="I value clarity and reliability in our work.",
+                    assistant_content="I will optimize for clarity and reliability in how we work together.",
+                    semantic_aliases=(
+                        ("values", "clarity", "fact-value-clarity"),
+                        ("values", "reliability in our work", "fact-value-reliability"),
+                    ),
+                    intent_type="preference_capture",
+                ),
+            ),
+        ),
+        RetrievalScenario(
+            scenario_id="runtime_promoted_follow_up_reminder_recall",
+            query="What follow up reminders do I have?",
+            expected_intent="reminder",
+            expected_ids=("reminders",),
+            session_turns=("Check whether promoted follow-up reminders survive restart.",),
+            runner="runtime",
+            restart_before_query=True,
+            use_vector_prospective=True,
+            promoted_interactions=(
+                PromotedInteractionSeed(
+                    interaction_id="episode-follow-up-roadmap",
+                    user_content="Let's follow up on the evaluation roadmap in 10 minutes.",
+                    assistant_content="We should follow up on the evaluation roadmap in 10 minutes.",
+                    goal_ids=("MP-203",),
+                    intent_type="roadmap_continuation",
+                ),
+            ),
+        ),
+        RetrievalScenario(
+            scenario_id="runtime_promoted_defining_moment_priority",
+            query="What changed lately in the project direction?",
+            expected_intent="continuity",
+            expected_ids=("episode-project-pivot", "episode-status-check"),
+            session_turns=("Summarize the major project direction changes after the latest pivot.",),
+            episodic_results=(
+                {
+                    "id": "episode-status-check",
+                    "summary": "Recent status check",
+                    "detailed_content": "We recently checked project status and confirmed the current implementation backlog.",
+                    "importance": 0.58,
+                    "confidence": 0.86,
+                    "life_period": "phase_4_memory",
+                    "timestamp": (now - timedelta(days=1)).isoformat(),
+                    "last_access": (now - timedelta(hours=8)).isoformat(),
+                    "tags": ("status", "recent", "project"),
+                },
+            ),
+            runner="runtime",
+            restart_before_query=True,
+            disable_episodic_vector_search=True,
+            promoted_interactions=(
+                PromotedInteractionSeed(
+                    interaction_id="episode-project-pivot",
+                    user_content="We made a major project pivot that changed the project direction for the roadmap.",
+                    assistant_content="That major project pivot reoriented the roadmap around memory quality gates and deterministic evaluation.",
+                    intent_type="retrospective",
+                    importance=0.64,
+                ),
+            ),
+            chat_config={"timeouts": {"retrieval_ms": 4000}},
+        ),
+        RetrievalScenario(
+            scenario_id="runtime_promoted_chapter_summary_context",
+            query="What changed lately in MP-203?",
+            expected_intent="continuity",
+            expected_ids=("episode-goal-progress",),
+            session_turns=("Summarize the recent MP-203 continuity.",),
+            runner="runtime",
+            restart_before_query=True,
+            disable_episodic_vector_search=True,
+            promoted_interactions=(
+                PromotedInteractionSeed(
+                    interaction_id="episode-goal-progress",
+                    user_content="We made concrete progress on the roadmap milestone and tightened the continuity plan.",
+                    assistant_content="The milestone now covers stronger restart continuity and chapter-aware recall.",
+                    goal_ids=("MP-203",),
+                    active_themes=("continuity roadmap",),
+                    intent_type="roadmap_continuation",
+                    importance=0.62,
+                ),
+            ),
+            chat_config={"timeouts": {"retrieval_ms": 4000}},
+        ),
     ]
 
 
@@ -928,7 +1039,7 @@ def _build_fixture_context(scenario: RetrievalScenario) -> tuple[Any, tuple[str,
 
 
 def _build_runtime_context(scenario: RetrievalScenario) -> tuple[Any, tuple[str, ...]]:
-    harness = _RuntimeRetrievalHarness()
+    harness = _RuntimeRetrievalHarness(use_vector_prospective=scenario.use_vector_prospective)
     try:
         harness.seed(scenario)
         if scenario.restart_before_query:
@@ -953,8 +1064,9 @@ def _build_runtime_context(scenario: RetrievalScenario) -> tuple[Any, tuple[str,
         builder = ContextBuilder(
             chat_config=dict(scenario.chat_config or {}),
             ltm=ltm_backend,
-            episodic=harness.memory.episodic if scenario.episodic_results else None,
+            episodic=harness.memory.episodic if (scenario.episodic_results or scenario.promoted_interactions) else None,
             autobiographical_store=harness.autobiographical_store,
+            prospective=harness.memory.prospective if scenario.use_vector_prospective else None,
         )
         with _suppress_runtime_logs():
             built = builder.build(session, query=scenario.query, include_trace=True)

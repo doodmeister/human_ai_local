@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 from typing import List, Optional, Callable, Any, Dict
@@ -70,8 +71,10 @@ class ContextBuilder:
         include_attention: bool = True,
         include_memory: bool = True,
         include_trace: bool = True,
+        read_only_retrieval: bool = False,
     ) -> BuiltContext:
         self._current_session = session  # track for fallback enrichment
+        self._read_only_retrieval = read_only_retrieval
         start = time.time()
         trace = ProvenanceTrace()
         metrics = ChatMetrics()
@@ -148,6 +151,12 @@ class ContextBuilder:
         self._run_stage(
             name="prospective_reminders",
             func=self._inject_upcoming_reminders,
+            sink=items,
+            trace=trace,
+        )
+        self._run_stage(
+            name="autobiographical_chapter",
+            func=lambda: self._inject_autobiographical_chapter_context(retrieval_plan),
             sink=items,
             trace=trace,
         )
@@ -330,6 +339,7 @@ class ContextBuilder:
             latency_ms=(time.time() - t0) * 1000.0,
             rationale=base_rationale + stats_part,
             added=len(sink) - before,
+            metadata=dict(self._last_stage_stats),
         )
         trace.add_stage(stage)
         return fallback_flag
@@ -397,8 +407,17 @@ class ContextBuilder:
                 max_results=retrieval_plan.limit_for("episodic", 5) if retrieval_plan else None,
             )
             items = self._wrap_memory_results(raw, "episodic", "importance")
-            # no threshold filtering yet; record stats
-            self._last_stage_stats = {"kept": len(items), "filtered": 0, "threshold": None}
+            items, chapter_backfill, chapter_id = self._prefer_persisted_chapter_episodic_items(
+                items,
+                retrieval_plan=retrieval_plan,
+            )
+            self._last_stage_stats = {
+                "kept": len(items),
+                "filtered": 0,
+                "threshold": None,
+                "chapter_backfill": chapter_backfill,
+                "chapter_id": chapter_id,
+            }
             return items
         except Exception as e:  # pragma: no cover
             metrics_registry.inc("episodic_anchors_errors_total")
@@ -407,16 +426,28 @@ class ContextBuilder:
     def _timed_search(self, memory_obj: Any, query: str, label: str, max_results: Optional[int] = None):
         result_container = {}
         exc_container = {}
+        read_only_retrieval = bool(getattr(self, "_read_only_retrieval", False))
         def _run():
             try:
                 # Search signatures vary across memory stores; try richer kwargs first.
                 result = None
                 if max_results is not None:
-                    attempts = [
-                        {"query": query, "max_results": max_results, "limit": max_results},
-                        {"query": query, "limit": max_results},
-                        {"query": query, "max_results": max_results},
-                    ]
+                    attempts = []
+                    if read_only_retrieval:
+                        attempts.extend(
+                            [
+                                {"query": query, "max_results": max_results, "limit": max_results, "update_access": False},
+                                {"query": query, "limit": max_results, "update_access": False},
+                                {"query": query, "max_results": max_results, "update_access": False},
+                            ]
+                        )
+                    attempts.extend(
+                        [
+                            {"query": query, "max_results": max_results, "limit": max_results},
+                            {"query": query, "limit": max_results},
+                            {"query": query, "max_results": max_results},
+                        ]
+                    )
                     for kwargs in attempts:
                         try:
                             result = memory_obj.search(**kwargs)  # type: ignore[arg-type]
@@ -424,7 +455,13 @@ class ContextBuilder:
                         except TypeError:
                             continue
                 if result is None:
-                    result = memory_obj.search(query=query)  # type: ignore
+                    if read_only_retrieval:
+                        try:
+                            result = memory_obj.search(query=query, update_access=False)  # type: ignore[arg-type]
+                        except TypeError:
+                            result = None
+                    if result is None:
+                        result = memory_obj.search(query=query)  # type: ignore
                 result_container["res"] = self._normalize_memory_results(result)
             except Exception as e:  # pragma: no cover
                 exc_container["exc"] = e
@@ -477,6 +514,169 @@ class ContextBuilder:
         if graph is not None:
             setattr(session, "_autobiographical_graph_snapshot", graph)
         return graph
+
+    def _selected_persisted_chapter(self, retrieval_plan: RetrievalPlan | None) -> Any | None:
+        if retrieval_plan is None or retrieval_plan.intent not in {"continuity", "episodic", "social"}:
+            return None
+
+        graph = self._current_autobiographical_graph()
+        if graph is None or not graph.chapters:
+            return None
+        return self._select_autobiographical_chapter(graph, retrieval_plan.query)
+
+    def _prefer_persisted_chapter_episodic_items(
+        self,
+        items: List[ContextItem],
+        *,
+        retrieval_plan: RetrievalPlan | None,
+    ) -> tuple[List[ContextItem], int, str | None]:
+        chapter = self._selected_persisted_chapter(retrieval_plan)
+        if chapter is None or not hasattr(self.episodic, "retrieve_memory"):
+            return items, 0, None
+
+        defining_moment_ids = set(getattr(chapter, "defining_moment_ids", []) or [])
+        ordered_episode_ids: list[str] = []
+        for episode_id in [
+            *list(getattr(chapter, "defining_moment_ids", []) or []),
+            *list(getattr(chapter, "event_ids", []) or []),
+        ]:
+            episode_key = str(episode_id or "").strip()
+            if episode_key and episode_key not in ordered_episode_ids:
+                ordered_episode_ids.append(episode_key)
+        if not ordered_episode_ids:
+            return items, 0, str(getattr(chapter, "chapter_id", "") or "") or None
+
+        existing_by_id = {item.source_id: item for item in items}
+        backfilled: list[ContextItem] = []
+        chapter_backfill = 0
+        for episode_id in ordered_episode_ids:
+            continuity_boost = 1.0 if episode_id in defining_moment_ids else 0.72
+            existing_item = existing_by_id.get(episode_id)
+            if existing_item is not None:
+                existing_item.scores["continuity"] = max(
+                    float(existing_item.scores.get("continuity", 0.0) or 0.0),
+                    continuity_boost,
+                )
+                existing_item.metadata["persisted_chapter_id"] = getattr(chapter, "chapter_id", None)
+                existing_item.metadata["from_persisted_chapter"] = True
+                continue
+
+            try:
+                episode = self.episodic.retrieve_memory(episode_id)  # type: ignore[call-arg]
+            except Exception:
+                continue
+            if episode is None or getattr(episode, "suppressed", False):
+                continue
+
+            payloads = self._normalize_memory_results([episode.to_dict()])
+            chapter_items = self._wrap_memory_results(payloads, "episodic", "importance")
+            if not chapter_items:
+                continue
+            for chapter_item in chapter_items:
+                chapter_item.reason = "persisted_chapter_anchor"
+                chapter_item.scores["continuity"] = continuity_boost
+                chapter_item.metadata["persisted_chapter_id"] = getattr(chapter, "chapter_id", None)
+                chapter_item.metadata["from_persisted_chapter"] = True
+            backfilled.extend(chapter_items)
+            chapter_backfill += len(chapter_items)
+
+        if not backfilled:
+            return items, 0, str(getattr(chapter, "chapter_id", "") or "") or None
+
+        combined: list[ContextItem] = []
+        seen_ids: set[str] = set()
+        for candidate in [*backfilled, *items]:
+            if candidate.source_id in seen_ids:
+                continue
+            seen_ids.add(candidate.source_id)
+            combined.append(candidate)
+
+        limit = retrieval_plan.limit_for("episodic", 5) if retrieval_plan is not None else len(combined)
+        return combined[:limit], chapter_backfill, str(getattr(chapter, "chapter_id", "") or "") or None
+
+    def _inject_autobiographical_chapter_context(
+        self,
+        retrieval_plan: RetrievalPlan | None,
+    ) -> List[ContextItem]:
+        items: List[ContextItem] = []
+        chapter = self._selected_persisted_chapter(retrieval_plan)
+        if chapter is None or not chapter.summary:
+            return items
+
+        recency = self._chapter_recency_score(chapter)
+        content_lines = [f"CURRENT CHAPTER: {chapter.summary}"]
+        if chapter.goal_ids:
+            content_lines.append("Goals in play: " + ", ".join(chapter.goal_ids[:3]))
+        if chapter.participant_ids:
+            content_lines.append("People in chapter: " + ", ".join(chapter.participant_ids[:3]))
+
+        items.append(
+            ContextItem(
+                source_id=chapter.chapter_id,
+                source_system="autobiographical",
+                content="\n".join(content_lines),
+                rank=RANK_BASE_EXECUTIVE - 1,
+                reason="persisted_chapter_context",
+                scores={
+                    "continuity": 1.0,
+                    "recency": recency,
+                    "importance": 0.85,
+                },
+                metadata={
+                    "life_period": chapter.life_period,
+                    "goal_ids": list(chapter.goal_ids),
+                    "participant_ids": list(chapter.participant_ids),
+                    "defining_moment_ids": list(chapter.defining_moment_ids),
+                },
+            )
+        )
+        return items
+
+    def _select_autobiographical_chapter(
+        self,
+        graph: AutobiographicalGraph,
+        query: str | None,
+    ) -> Any:
+        if not graph.chapters:
+            return None
+
+        query_tokens = self._autobiographical_query_tokens(query)
+        ranked = sorted(
+            graph.chapters,
+            key=lambda chapter: (
+                -self._chapter_query_overlap(chapter, query_tokens),
+                -(chapter.end_time.timestamp() if chapter.end_time is not None else float("-inf")),
+                -(chapter.start_time.timestamp() if chapter.start_time is not None else float("-inf")),
+                chapter.chapter_id,
+            ),
+        )
+        return ranked[0]
+
+    def _chapter_query_overlap(self, chapter: Any, query_tokens: set[str]) -> int:
+        if not query_tokens:
+            return 0
+        chapter_tokens = self._autobiographical_query_tokens(
+            " ".join(
+                [
+                    str(getattr(chapter, "title", "") or ""),
+                    str(getattr(chapter, "summary", "") or ""),
+                    str(getattr(chapter, "life_period", "") or ""),
+                    *[str(goal_id) for goal_id in getattr(chapter, "goal_ids", [])],
+                    *[str(participant_id) for participant_id in getattr(chapter, "participant_ids", [])],
+                ]
+            )
+        )
+        return len(query_tokens & chapter_tokens)
+
+    def _autobiographical_query_tokens(self, value: str | None) -> set[str]:
+        return {token for token in re.findall(r"[a-z0-9-]+", str(value or "").lower()) if len(token) > 1}
+
+    def _chapter_recency_score(self, chapter: Any) -> float:
+        timestamp = getattr(chapter, "end_time", None) or getattr(chapter, "start_time", None)
+        if not isinstance(timestamp, datetime):
+            return 0.4
+        age_hours = max(0.0, (datetime.now() - timestamp).total_seconds() / 3600.0)
+        return 1.0 / (1.0 + (age_hours / 24.0))
 
     def _rerank_memory_context_items(
         self,

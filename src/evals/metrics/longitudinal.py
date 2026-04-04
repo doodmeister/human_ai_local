@@ -6,6 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class LongitudinalMetrics:
     continuity_score: float
+    chapter_continuity_score: float
     contradiction_repair_score: float
     over_recall_rate: float
     false_memory_count: int
@@ -18,6 +19,8 @@ def score_longitudinal(
     *,
     matched_continuity_checks: int,
     total_continuity_checks: int,
+    matched_chapter_checks: int,
+    total_chapter_checks: int,
     repaired_contradictions: int,
     total_contradiction_checks: int,
     false_memory_count: int,
@@ -27,6 +30,10 @@ def score_longitudinal(
     continuity_score = 1.0
     if total_continuity_checks > 0:
         continuity_score = matched_continuity_checks / total_continuity_checks
+
+    chapter_continuity_score = 1.0
+    if total_chapter_checks > 0:
+        chapter_continuity_score = matched_chapter_checks / total_chapter_checks
 
     contradiction_repair_score = 1.0
     if total_contradiction_checks > 0:
@@ -38,6 +45,7 @@ def score_longitudinal(
 
     return LongitudinalMetrics(
         continuity_score=continuity_score,
+        chapter_continuity_score=chapter_continuity_score,
         contradiction_repair_score=contradiction_repair_score,
         over_recall_rate=over_recall_rate,
         false_memory_count=false_memory_count,

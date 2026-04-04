@@ -79,6 +79,7 @@ def default_scorecard_gates() -> tuple[ScorecardGate, ...]:
         ScorecardGate(metric_key="retrieval_expected_coverage_avg", comparator="min", threshold=1.0),
         ScorecardGate(metric_key="retrieval_irrelevant_context_rate_avg", comparator="max", threshold=0.05),
         ScorecardGate(metric_key="longitudinal_continuity_score_avg", comparator="min", threshold=1.0),
+        ScorecardGate(metric_key="longitudinal_chapter_continuity_score_avg", comparator="min", threshold=1.0),
         ScorecardGate(metric_key="longitudinal_contradiction_repair_score_avg", comparator="min", threshold=1.0),
         ScorecardGate(metric_key="longitudinal_over_recall_rate_avg", comparator="max", threshold=0.0),
         ScorecardGate(metric_key="longitudinal_false_memory_count_total", comparator="max", threshold=0.0),
@@ -126,6 +127,7 @@ def summarize_longitudinal_results(results: Iterable[LongitudinalScenarioResult]
         return {
             "longitudinal_scenario_count": 0.0,
             "longitudinal_continuity_score_avg": 0.0,
+            "longitudinal_chapter_continuity_score_avg": 0.0,
             "longitudinal_contradiction_repair_score_avg": 0.0,
             "longitudinal_over_recall_rate_avg": 0.0,
             "longitudinal_false_memory_count_total": 0.0,
@@ -135,6 +137,9 @@ def summarize_longitudinal_results(results: Iterable[LongitudinalScenarioResult]
     return {
         "longitudinal_scenario_count": float(count),
         "longitudinal_continuity_score_avg": sum(result.metrics.continuity_score for result in result_list) / count,
+        "longitudinal_chapter_continuity_score_avg": sum(
+            result.metrics.chapter_continuity_score for result in result_list
+        ) / count,
         "longitudinal_contradiction_repair_score_avg": sum(result.metrics.contradiction_repair_score for result in result_list) / count,
         "longitudinal_over_recall_rate_avg": sum(result.metrics.over_recall_rate for result in result_list) / count,
         "longitudinal_false_memory_count_total": float(sum(result.metrics.false_memory_count for result in result_list)),

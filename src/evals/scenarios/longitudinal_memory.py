@@ -14,7 +14,8 @@ import warnings
 from types import SimpleNamespace
 
 from src.evals.metrics import LongitudinalMetrics, score_longitudinal
-from src.memory.autobiographical import AutobiographicalGraphStore
+from src.memory.autobiographical import AutobiographicalGraphBuilder, AutobiographicalGraphStore
+from src.memory.encoding import EventEncoder
 from src.memory.episodic.episodic_memory import EpisodicContext, EpisodicMemory
 from src.memory.memory_system import MemorySystem, MemorySystemConfig
 from src.memory.relationship import RelationshipMemory
@@ -132,6 +133,7 @@ class LongitudinalScenario:
     runner: str = "fixture"
     fact_expectations: tuple[FactExpectation, ...] = ()
     expected_episode_ids: tuple[str, ...] = ()
+    expected_chapter_ids: tuple[str, ...] = ()
     min_continuity_score: float = 1.0
     min_contradiction_repair_score: float = 1.0
     max_over_recall_rate: float = 0.0
@@ -145,6 +147,20 @@ class LongitudinalScenarioResult:
     active_fact_objects: dict[str, tuple[str, ...]]
     quarantined_fact_objects: dict[str, tuple[str, ...]]
     available_episode_ids: tuple[str, ...]
+    available_chapter_ids: tuple[str, ...]
+
+
+def _merge_episode_payloads_into_autobiographical_store(
+    store: AutobiographicalGraphStore,
+    graph_key: str,
+    payloads: list[dict[str, Any]],
+) -> None:
+    if not payloads:
+        return
+    items = EventEncoder().encode_events(payloads)
+    if not items:
+        return
+    store.merge(graph_key, AutobiographicalGraphBuilder().build(items))
 
 
 @contextmanager
@@ -184,6 +200,7 @@ class _LongitudinalHarness:
         )
         self._persist_dir = persist_dir or self._temp_dir_handle.name
         self._episode_aliases = dict(episode_aliases or {})
+        self._graph_key = "longitudinal-user"
         self.autobiographical_store = AutobiographicalGraphStore(
             storage_path=Path(self._persist_dir) / "autobiographical"
         )
@@ -195,6 +212,7 @@ class _LongitudinalHarness:
         self.episodic = self
 
     def apply_phase(self, phase: LongitudinalPhase) -> None:
+        episode_payloads: list[dict[str, Any]] = []
         for fact in phase.fact_writes:
             self.semantic.store_fact(
                 fact.subject,
@@ -217,6 +235,13 @@ class _LongitudinalHarness:
                 tags=list(episode.tags),
             )
             self._episode_aliases[episode.episode_id] = episode.episode_id
+            episode_payloads.append(self.episodes[episode.episode_id].to_dict())
+
+        _merge_episode_payloads_into_autobiographical_store(
+            self.autobiographical_store,
+            self._graph_key,
+            episode_payloads,
+        )
 
         for interaction in phase.promoted_interactions:
             actual_id = self._promote_interaction(interaction)
@@ -252,6 +277,15 @@ class _LongitudinalHarness:
         for alias, actual_id in self._episode_aliases.items():
             if actual_id in self.episodes:
                 available.append(alias)
+        return tuple(sorted(available))
+
+    def chapter_ids(self) -> tuple[str, ...]:
+        available: set[str] = set()
+        for graph in getattr(self.autobiographical_store, "_cache", {}).values():
+            for chapter in getattr(graph, "chapters", []):
+                chapter_id = str(getattr(chapter, "chapter_id", "") or "").strip()
+                if chapter_id:
+                    available.add(chapter_id)
         return tuple(sorted(available))
 
     def create_episodic_memory(
@@ -357,12 +391,14 @@ class _RuntimeLongitudinalHarness:
         )
         self._persist_dir = persist_dir or self._temp_dir_handle.name
         self._episode_aliases = dict(episode_aliases or {})
+        self._graph_key = "longitudinal-user"
         self.memory = _build_runtime_memory(self._persist_dir)
         self.autobiographical_store = AutobiographicalGraphStore(
             storage_path=Path(self._persist_dir) / "autobiographical"
         )
 
     def apply_phase(self, phase: LongitudinalPhase) -> None:
+        episode_payloads: list[dict[str, Any]] = []
         with _suppress_runtime_logs():
             for fact in phase.fact_writes:
                 self.memory.store_fact(
@@ -383,6 +419,15 @@ class _RuntimeLongitudinalHarness:
                 )
                 if episode_id:
                     self._episode_aliases[episode.episode_id] = episode_id
+                    stored_episode = self.memory.episodic.retrieve_memory(episode_id)
+                    if stored_episode is not None:
+                        episode_payloads.append(stored_episode.to_dict())
+
+            _merge_episode_payloads_into_autobiographical_store(
+                self.autobiographical_store,
+                self._graph_key,
+                episode_payloads,
+            )
 
             for interaction in phase.promoted_interactions:
                 actual_id = self._promote_interaction(interaction)
@@ -423,6 +468,15 @@ class _RuntimeLongitudinalHarness:
             for alias, actual_id in self._episode_aliases.items():
                 if self.memory.episodic.retrieve_memory(actual_id) is not None:
                     available.append(alias)
+        return tuple(sorted(available))
+
+    def chapter_ids(self) -> tuple[str, ...]:
+        available: set[str] = set()
+        for graph in getattr(self.autobiographical_store, "_cache", {}).values():
+            for chapter in getattr(graph, "chapters", []):
+                chapter_id = str(getattr(chapter, "chapter_id", "") or "").strip()
+                if chapter_id:
+                    available.add(chapter_id)
         return tuple(sorted(available))
 
     def close(self) -> None:
@@ -519,6 +573,7 @@ def build_longitudinal_scenarios() -> list[LongitudinalScenario]:
                 ),
             ),
             expected_episode_ids=("episode-roadmap-kickoff", "episode-roadmap-review"),
+            expected_chapter_ids=("chapter:phase_4_memory",),
         ),
         LongitudinalScenario(
             scenario_id="runtime_restart_continuity_project_history",
@@ -570,6 +625,7 @@ def build_longitudinal_scenarios() -> list[LongitudinalScenario]:
                 ),
             ),
             expected_episode_ids=("episode-roadmap-kickoff", "episode-roadmap-review"),
+            expected_chapter_ids=("chapter:phase_4_memory",),
         ),
         LongitudinalScenario(
             scenario_id="restart_contradiction_repair_drink_preference",
@@ -849,6 +905,8 @@ def run_longitudinal_scenario(scenario: LongitudinalScenario) -> LongitudinalSce
 
         matched_continuity_checks = 0
         total_continuity_checks = 0
+        matched_chapter_checks = 0
+        total_chapter_checks = 0
         repaired_contradictions = 0
         total_contradiction_checks = 0
         false_memory_count = 0
@@ -889,9 +947,19 @@ def run_longitudinal_scenario(scenario: LongitudinalScenario) -> LongitudinalSce
             if episode_id in available_episode_ids:
                 matched_continuity_checks += 1
 
+        available_chapter_ids = harness.chapter_ids() if hasattr(harness, "chapter_ids") else ()
+        for chapter_id in scenario.expected_chapter_ids:
+            total_continuity_checks += 1
+            total_chapter_checks += 1
+            if chapter_id in available_chapter_ids:
+                matched_continuity_checks += 1
+                matched_chapter_checks += 1
+
         metrics = score_longitudinal(
             matched_continuity_checks=matched_continuity_checks,
             total_continuity_checks=total_continuity_checks,
+            matched_chapter_checks=matched_chapter_checks,
+            total_chapter_checks=total_chapter_checks,
             repaired_contradictions=repaired_contradictions,
             total_contradiction_checks=total_contradiction_checks,
             false_memory_count=false_memory_count,
@@ -905,6 +973,7 @@ def run_longitudinal_scenario(scenario: LongitudinalScenario) -> LongitudinalSce
             active_fact_objects=active_fact_objects,
             quarantined_fact_objects=quarantined_fact_objects,
             available_episode_ids=available_episode_ids,
+            available_chapter_ids=available_chapter_ids,
         )
     finally:
         if hasattr(harness, "close"):

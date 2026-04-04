@@ -18,6 +18,8 @@ _SOURCE_WEIGHTS = {
     "unknown": 0.5,
 }
 
+_MULTI_VALUE_PREDICATES = {"focuses_on", "values"}
+
 
 def _clamp01(value: Any, default: float = 0.0) -> float:
     try:
@@ -53,6 +55,21 @@ def source_weight(source: str | None) -> float:
 
 def weighted_belief_score(confidence: float | None, source: str | None) -> float:
     return _clamp01(confidence, default=0.55) * source_weight(source)
+
+
+def _supports_multi_value_beliefs(predicate: str | None) -> bool:
+    return _normalize_component(predicate) in _MULTI_VALUE_PREDICATES
+
+
+def _build_belief_axis_id(
+    subject: str,
+    predicate: str,
+    relationship_target: str | None,
+    object_value: Any,
+) -> str:
+    if _supports_multi_value_beliefs(predicate):
+        return build_contradiction_set_id(subject, f"{predicate}:{_normalize_component(object_value)}", relationship_target)
+    return build_contradiction_set_id(subject, predicate, relationship_target)
 
 
 def parse_json_list(value: Any) -> list[str]:
@@ -102,18 +119,11 @@ def evaluate_belief_revision(
     existing_facts: Sequence[Mapping[str, Any]],
     relationship_target: str | None = None,
 ) -> BeliefRevisionDecision:
-    contradiction_set_id = next(
-        (
-            str(fact.get("contradiction_set_id"))
-            for fact in existing_facts
-            if fact.get("contradiction_set_id")
-        ),
-        build_contradiction_set_id(subject, predicate, relationship_target),
-    )
     candidate_object = _normalize_component(object_value)
     candidate_confidence_value = _clamp01(candidate_confidence, default=0.65)
     candidate_weight = source_weight(candidate_source)
     candidate_score = candidate_confidence_value * candidate_weight
+    multi_value_beliefs = _supports_multi_value_beliefs(predicate)
 
     relevant_facts = [
         fact
@@ -122,7 +132,17 @@ def evaluate_belief_revision(
         and _normalize_component(fact.get("predicate")) == _normalize_component(predicate)
     ]
     same_object = [fact for fact in relevant_facts if _normalize_component(fact.get("object")) == candidate_object]
-    conflicting = [fact for fact in relevant_facts if _normalize_component(fact.get("object")) != candidate_object]
+    conflicting = [] if multi_value_beliefs else [
+        fact for fact in relevant_facts if _normalize_component(fact.get("object")) != candidate_object
+    ]
+    contradiction_set_id = next(
+        (
+            str(fact.get("contradiction_set_id"))
+            for fact in same_object
+            if fact.get("contradiction_set_id")
+        ),
+        _build_belief_axis_id(subject, predicate, relationship_target, object_value),
+    )
 
     if same_object:
         winner = max(

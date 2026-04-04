@@ -151,6 +151,7 @@ class ChatService:
             include_attention=not flags.get("disable_attention", False),
             include_memory=not flags.get("disable_memory", False),
             include_trace=False,
+            read_only_retrieval=True,
         )
         items_summary = self._summarize_context_items(built.items)
         metrics_registry.inc("context_preview_calls_total")

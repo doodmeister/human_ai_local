@@ -74,10 +74,13 @@ class ChatTurnPipeline:
 
                         executive_system = ExecutiveSystem()
                         service._orchestrator = ExecutiveOrchestrator(executive_system)
+                    loop = None
                     try:
-                        asyncio.create_task(service._orchestrator.execute_goal_async(detected_goal.goal_id))
+                        loop = asyncio.get_running_loop()
                     except RuntimeError:
-                        pass
+                        loop = None
+                    if loop is not None:
+                        loop.create_task(service._orchestrator.execute_goal_async(detected_goal.goal_id))
             except Exception as exc:
                 print(f"Goal detection error: {exc}")
                 detected_goal = None

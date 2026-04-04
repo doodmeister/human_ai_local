@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+import json
 import uuid
 from pathlib import Path
 
@@ -593,6 +594,13 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
     
     def _reminder_to_metadata(self, reminder: Reminder) -> Dict[str, Any]:
         """Convert reminder to ChromaDB metadata format."""
+        metadata_json = ""
+        if reminder.metadata:
+            try:
+                metadata_json = json.dumps(reminder.metadata, sort_keys=True)
+            except (TypeError, ValueError):
+                safe_metadata = {key: str(value) for key, value in reminder.metadata.items()}
+                metadata_json = json.dumps(safe_metadata, sort_keys=True)
         return {
             "content": reminder.content,
             "due_time": reminder.due_time.isoformat() if reminder.due_time else "",
@@ -600,7 +608,7 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
             "completed": reminder.completed,
             "completed_at": reminder.completed_at.isoformat() if reminder.completed_at else "",
             "tags": ",".join(reminder.tags),  # ChromaDB requires scalar values
-            # Store metadata as JSON string if needed
+            "metadata_json": metadata_json,
         }
     
     # Add helper to safely normalize whatever Chroma returns into a dict
@@ -617,6 +625,15 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
 
     def _metadata_to_reminder(self, reminder_id: str, metadata: Dict[str, Any], document: str) -> Reminder:
         """Convert ChromaDB metadata to Reminder object."""
+        reminder_metadata: Dict[str, Any] = {}
+        metadata_json = metadata.get("metadata_json") or ""
+        if metadata_json:
+            try:
+                decoded = json.loads(str(metadata_json))
+                if isinstance(decoded, dict):
+                    reminder_metadata = decoded
+            except (TypeError, ValueError, json.JSONDecodeError):
+                reminder_metadata = {}
         return Reminder(
             id=reminder_id,
             content=metadata.get("content", document),
@@ -625,7 +642,7 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
             completed=metadata.get("completed", False),
             completed_at=datetime.fromisoformat(metadata["completed_at"]) if metadata.get("completed_at") else None,
             tags=metadata.get("tags", "").split(",") if metadata.get("tags") else [],
-            metadata={}
+            metadata=reminder_metadata,
         )
     
     def add_reminder(

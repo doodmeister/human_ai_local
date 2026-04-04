@@ -554,6 +554,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         life_period = kwargs.get('life_period')
         emotional_range = kwargs.get('emotional_range')
         importance_threshold = kwargs.get('importance_threshold', 0.0)
+        update_access = bool(kwargs.get('update_access', True))
         results = self.search_memories(
             query=query,
             limit=limit,
@@ -561,7 +562,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
             time_range=time_range,
             life_period=life_period,
             emotional_range=emotional_range,
-            importance_threshold=importance_threshold
+            importance_threshold=importance_threshold,
+            update_access=update_access,
         )
         return [r.memory.to_dict() for r in results]
     
@@ -696,7 +698,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
         time_range: Optional[Tuple[datetime, datetime]] = None,
         life_period: Optional[str] = None,
         emotional_range: Optional[Tuple[float, float]] = None,
-        importance_threshold: float = 0.0
+        importance_threshold: float = 0.0,
+        update_access: bool = True,
     ) -> List[EpisodicSearchResult]:
         """
         Search episodic memories with multiple criteria
@@ -742,7 +745,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     relevance = 1.0 / (1.0 + distance)
                     if relevance < min_relevance:
                         continue
-                    memory = self.retrieve_memory(memory_id)
+                    memory = self.retrieve_memory(memory_id) if update_access else self._memory_cache.get(memory_id)
                     if memory is None:
                         continue
                     if getattr(memory, "suppressed", False):
@@ -792,7 +795,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
                     if memory:
                         if getattr(memory, "suppressed", False):
                             continue
-                        memory.update_access()
+                        if update_access:
+                            memory.update_access()
                         results.append(EpisodicSearchResult(
                             memory=memory,
                             relevance=search_result.relevance,

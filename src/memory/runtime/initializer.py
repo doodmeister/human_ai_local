@@ -91,7 +91,7 @@ class MemorySubsystemInitializer:
                 from src.memory.prospective.prospective_memory import ProspectiveMemoryVectorStore
 
                 prospective = ProspectiveMemoryVectorStore(
-                    chroma_persist_dir=self._config.chroma_persist_dir,
+                    persist_dir=self._config.chroma_persist_dir,
                     embedding_model=self._config.embedding_model,
                 )
                 logger.info("Prospective memory backend: vector store (ChromaDB)")

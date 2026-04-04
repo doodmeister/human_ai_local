@@ -131,16 +131,18 @@ Current implementation note:
 - `src/memory/relationship/model.py`, `src/memory/relationship/store.py`, and `src/memory/relationship/updater.py` persist per-user relationship memory and update it from turn-level relational signals
 - `src/memory/encoding/event_encoder.py` and `src/memory/autobiographical/graph.py` provide event encoding plus graph and chapter construction primitives
 - `src/memory/autobiographical/store.py` now persists autobiographical graph snapshots, and `src/orchestration/chat/context_builder.py` can merge persisted chapter state with on-demand graph construction during continuity reranking
+- `src/orchestration/chat/context_builder.py` now also surfaces persisted autobiographical chapter summaries as live context for continuity-oriented queries, so restart-aware chapter state affects both reranking and the actual working context seen by the response path
 - `src/orchestration/chat/turn_pipeline.py` and `src/orchestration/chat/chat_service.py` now promote consolidated chat turns into episodic memories and refresh the session's persisted autobiographical snapshot on the main chat path
 - `src/orchestration/agent/turn_processor.py` now uses the same autobiographical promotion seam for the lower-level cognitive-agent path, so direct `CognitiveAgent.process_input()` calls also refresh persisted autobiographical snapshots
 - `src/orchestration/autobiographical_promotion.py` now lets the same promoted turn emit semantic preference facts from relationship-memory norms, so one interaction can update episodic, autobiographical, and semantic stores together
-- the shared promotion path now emits a broader semantic product set: preference-style facts from relationship norms and focus facts from narrative themes, so promoted turns can update multiple semantic axes without going back through the capture-frequency path
+- the shared promotion path now emits a broader product set: preference-style facts from relationship norms, focus facts from narrative themes, and explicit follow-up reminders into prospective memory, so promoted turns can update semantic and prospective state without going back through the capture-frequency path
+- the same shared promotion path now also marks explicit milestone and turning-point interactions as autobiographical defining moments, so persisted chapter state can preserve those pivots even when raw episodic salience is not high enough to infer them implicitly
 - `src/evals/scenarios/longitudinal_memory.py` now includes restart-aware fixture and runtime scenarios for promoted preference continuity and promoted preference contradiction repair, so the new semantic writeback path is covered by the quality-gate eval lane
-- `src/evals/scenarios/retrieval_baseline.py` now includes runtime restart scenarios proving promoted preference facts and promoted focus facts surface through the live semantic retrieval path after persistence and restart
+- `src/evals/scenarios/retrieval_baseline.py` now includes runtime restart scenarios proving promoted preference facts, promoted focus facts, promoted follow-up reminders, promoted defining-moment episodes, and promoted chapter summaries surface through the live persisted retrieval/context path after restart
 - `tests/test_chat_autobiographical_promotion.py` now includes a direct chat-path summary check proving the runtime can summarize a recent life phase together with a relationship trajectory from continuity-oriented context
 - `src/evals/scenarios/policy_behavior.py` now includes a persisted-runtime relationship continuity scenario where a fresh agent reloads relationship memory, recomposes response policy from it, and changes wording through the live policy-aware response path
 - `src/orchestration/cognitive_layers/runtime.py`, `src/orchestration/chat/context_builder.py`, and `src/memory/retrieval/reranker.py` already consume relationship memory and chapter-aware continuity signals in the live runtime
-- the remaining gap is richer multi-product encoding depth: promoted turns now update episodic, autobiographical, and multiple semantic axes, but there is still no broader generalized event-to-product pipeline for additional semantic classes or prospective artifacts
+- the remaining gap is richer multi-product encoding depth: promoted turns now update episodic, autobiographical, multiple semantic axes, and restart-persisted explicit follow-up reminders, but there is still no broader generalized event-to-product pipeline for additional semantic classes, self-model updates, or chapter-linked continuity artifacts
 
 Success criteria:
 
@@ -450,8 +452,8 @@ Mitigation:
 
 ## Recommended Next Step
 
-Start with the first remaining continuity slice rather than re-planning already-landed Phase 1 work:
+Start with the next real continuity depth slice rather than repeating already-landed persistence work:
 
-1. persist autobiographical graph and chapter summaries across restarts as a first-class store or snapshot layer
-2. thread `src/memory/encoding/event_encoder.py` into live event-to-memory promotion so autobiographical state is built from turn outputs instead of only from retrieved episodes
-3. extend continuity evaluations so chapter-aware recall must survive restart from persisted autobiographical state, not just from episodic-memory overlap
+1. deepen continuity retrieval so persisted autobiographical chapters and defining moments are preferred earlier for continuity-style prompts instead of depending mostly on reassembled episodic overlap
+2. extend longitudinal and scorecard evaluations so chapter-aware continuity must survive restart from persisted autobiographical state, not just from episodic-memory overlap
+3. broaden the promoted-turn event-to-product pipeline beyond the current episodic, autobiographical, semantic-preference, semantic-focus, and prospective-follow-up outputs

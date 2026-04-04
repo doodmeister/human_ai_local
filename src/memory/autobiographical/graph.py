@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import re
 from typing import Any, Iterable
 
 from src.memory.schema import CanonicalMemoryItem, MemoryKind
@@ -17,6 +18,11 @@ def _dedupe(values: Iterable[str]) -> list[str]:
         seen.add(normalized)
         ordered.append(normalized)
     return ordered
+
+
+def _humanize_identifier(value: str) -> str:
+    text = re.sub(r"[_\s]+", " ", str(value or "").strip())
+    return text.strip()
 
 
 def _coerce_datetime(value: Any) -> datetime | None:
@@ -251,6 +257,12 @@ class AutobiographicalGraphBuilder:
             or abs(item.emotional_valence) >= 0.6
         ]
         summary_parts = [item.summary or item.content for item in ordered_items[:3]]
+        if goal_ids:
+            summary_parts.append(f"Goals: {', '.join(_humanize_identifier(goal_id) for goal_id in goal_ids[:2])}")
+        if participant_ids:
+            summary_parts.append(f"People: {', '.join(_humanize_identifier(participant_id) for participant_id in participant_ids[:2])}")
+        if defining_moment_ids:
+            summary_parts.append(f"Defining moments: {len(defining_moment_ids)}")
         title = life_period.replace("_", " ").title()
         summary = f"{title}: " + "; ".join(summary_parts)
         return AutobiographicalChapter(

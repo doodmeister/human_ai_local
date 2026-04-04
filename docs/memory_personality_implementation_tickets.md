@@ -48,7 +48,7 @@ Verified implemented and wired in the current runtime:
 
 Implemented but still limited in depth or durability:
 
-- MP-203 now has concrete event encoding, graph and chapter builders, persisted autobiographical graph snapshots, plus autobiographical promotion on both the main chat path and the lower-level cognitive-agent path; the same promoted turn now writes multiple semantic products including relationship-derived preference facts and narrative-theme focus facts, and both longitudinal plus retrieval eval scenarios cover those paths, but richer generalized multi-product updates are still incomplete
+- MP-203 now has concrete event encoding, graph and chapter builders, persisted autobiographical graph snapshots, plus autobiographical promotion on both the main chat path and the lower-level cognitive-agent path; the same promoted turn now writes multiple semantic products including relationship-derived preference facts, narrative-theme focus facts, and explicit follow-up reminders that now round-trip through persisted prospective memory across restart, but richer generalized multi-product updates are still incomplete
 
 Primary next follow-up slice after this audit:
 
@@ -151,7 +151,7 @@ Outcome:
 Persistent relationship and life-phase continuity across sessions.
 
 Current status:
-Mostly implemented. Relationship persistence, updater integration, contradiction repair, and relationship-aware retrieval are live; durable autobiographical graph persistence remains the main unfinished depth item.
+Largely implemented. Relationship persistence, updater integration, contradiction repair, durable autobiographical graph snapshots, live autobiographical promotion, and chapter-summary context injection are live; the main remaining depth items are persisted-chapter-first continuity retrieval, restart-independent continuity evaluation, and broader multi-product promotion depth.
 
 ### MP-201 Relationship Memory Model
 
@@ -333,34 +333,35 @@ Implemented for the current deterministic quality-gate scope, including reconsol
 
 Build these next in sequence:
 
-1. finish MP-203 by persisting autobiographical graph and chapter state across restarts
-2. deepen MP-204 so continuity retrieval prefers persisted autobiographical chapters rather than only graphing the current episodic candidate set
-3. keep MP-401 and MP-403 aligned with that durable autobiographical layer so reconsolidation and restart-aware evals operate on the same continuity primitives
+1. deepen MP-204 so continuity retrieval prefers persisted autobiographical chapters and defining moments rather than mostly graphing the current episodic candidate set
+2. keep MP-401, MP-403, and MP-404 aligned with that durable autobiographical layer so restart-aware evals and scorecards require persisted chapter continuity rather than episodic overlap alone
+3. extend MP-203's promotion seam into a broader generalized event-to-product pipeline for additional semantic and self-model updates
 
 Why this next:
 
 - the original Phase 1 and most Phase 3 scaffolding already landed and is wired into runtime code
-- autobiographical continuity is now the clearest remaining gap between the current system and the roadmap's target behavior
+- autobiographical continuity retrieval and evaluation depth are now the clearest remaining gaps between the current system and the roadmap's target behavior
 - this slice compounds existing work instead of reopening already-solved schema, planner, and prompt-assembly seams
 
 ## Suggested Follow-Up Breakdown
 
 ### Slice A
 
-- persist autobiographical chapters and graph links as a first-class memory product or snapshot layer
-- define promotion rules from turn-derived events into chapter updates and defining moments
-- add restart roundtrip tests for autobiographical persistence
+- thread persisted autobiographical state more aggressively into `ContextBuilder`, retrieval planning, and reranking
+- prefer chapter summaries and defining moments for continuity-style prompts and "what changed lately?" queries
+- keep retrieval budgets bounded and explainable while doing so
 
 ### Slice B
 
-- thread persisted autobiographical state into `ContextBuilder`, retrieval planning, and reranking
-- prefer chapter summaries and defining moments for continuity-style prompts
-- keep retrieval budgets bounded and explainable
+- extend longitudinal and scorecard scenarios so continuity success requires persisted autobiographical state
+- add regression checks that distinguish episodic overlap from true chapter continuity
+- ensure restart-aware quality gates fail when chapter persistence is missing but episodic recall still looks superficially relevant
 
 ### Slice C
 
-- extend longitudinal and scorecard scenarios so continuity success requires persisted autobiographical state
-- add regression checks that distinguish episodic overlap from true chapter continuity
+- broaden the promoted-turn multi-product seam for additional semantic classes or self-model updates
+- keep the new products lazy, optional, and measurable through the existing eval harnesses
+- avoid reopening already-complete persistence or prompt-assembly work unless the new products require it
 
 ## Phase Exit Gates
 
