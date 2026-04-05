@@ -2,9 +2,9 @@
 Enhanced Long-Term Memory (LTM) System with Vector Database Integration
 Implements ChromaDB for semantic memory storage and retrieval (Vector-Only)
 """
+from collections import Counter, defaultdict, deque
 from typing import Dict, List, Optional, Any, Sequence
 from datetime import datetime
-from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
@@ -57,19 +57,41 @@ def _ltm_is_anchor(meta: Dict[str, Any]) -> bool:
         return True
     return len(associations) >= 2 and float(meta.get("importance", 0.0) or 0.0) >= 0.6
 
-@dataclass
-class VectorSearchResult:
-    """Result from vector similarity search in LTM"""
-    record: dict
-    similarity_score: float
-    distance: float
-
 class VectorLongTermMemory(BaseMemorySystem):
+    """Vector-only Long-Term Memory backed by ChromaDB."""
+
+    MAX_KEYWORDS_PER_MEMORY = 20
+    MAX_CONTENT_CLUSTERS = 256
+
+    def __init__(
+        self,
+        chroma_persist_dir: Optional[str] = None,
+        collection_name: str = "ltm_memories",
+        embedding_model: str = "all-MiniLM-L6-v2",
+        lazy_embeddings: bool = True
+    ):
+        """Initialize the ChromaDB-backed LTM store."""
+        self.chroma_persist_dir = Path(chroma_persist_dir or "data/memory_stores/chroma_ltm")
+        self.collection_name = collection_name
+        self._embedding_model_name = embedding_model
+        self._lazy_embeddings = lazy_embeddings
+        self._embedding_lock = threading.Lock()
+        self.embedding_model = None
+        self._initialization_error: Optional[str] = None
+        if not self._lazy_embeddings:
+            self._ensure_embedding_model()
+        self.chroma_client = None
+        self.collection = None
+        self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
+        self._initialize_chromadb()
+        logger.info("Vector LTM initialized (vector-only, no fallback)")
+
     def shutdown(self) -> None:
         """Release ChromaDB resources without resetting persisted data."""
         try:
-            if getattr(self, "chroma_client", None) is not None and hasattr(self.chroma_client, "clear_system_cache"):
-                self.chroma_client.clear_system_cache()
+            chroma_client = getattr(self, "chroma_client", None)
+            if chroma_client is not None and hasattr(chroma_client, "clear_system_cache"):
+                chroma_client.clear_system_cache()
         finally:
             self.collection = None
             self.chroma_client = None
@@ -128,23 +150,42 @@ class VectorLongTermMemory(BaseMemorySystem):
             return {}
         try:
             result = self.collection.get()
-            tag_clusters = {}
-            content_clusters = {}
+            tag_clusters: dict[str, list[str]] = defaultdict(list)
+            keyword_counts: Counter[str] = Counter()
+            per_memory_keywords: list[tuple[str, list[str]]] = []
             for i, memory_id in enumerate(result['ids']):
                 meta = result['metadatas'][i]
-                tags = meta.get('tags', '').split(',') if meta.get('tags') else []
+                tags = self._split_metadata_values(meta.get('tags', ''))
                 for tag in tags:
                     if tag:
-                        tag_clusters.setdefault(tag, []).append(memory_id)
+                        tag_clusters[tag].append(memory_id)
                 doc = result['documents'][i]
-                content_words = str(doc).lower().split()
-                keywords = [word for word in content_words if len(word) > 3]
-                for keyword in keywords:
-                    content_clusters.setdefault(keyword, []).append(memory_id)
+                keywords: list[str] = []
+                seen_keywords = set()
+                for raw_word in str(doc).lower().split():
+                    keyword = raw_word.strip(".,!?;:\"'()[]{}")
+                    if len(keyword) <= 3 or keyword in seen_keywords:
+                        continue
+                    seen_keywords.add(keyword)
+                    keywords.append(keyword)
+                    if len(keywords) >= self.MAX_KEYWORDS_PER_MEMORY:
+                        break
+                per_memory_keywords.append((memory_id, keywords))
+                keyword_counts.update(keywords)
             significant_clusters = {}
             for tag, memory_ids in tag_clusters.items():
                 if len(memory_ids) >= min_cluster_size:
                     significant_clusters[f"tag:{tag}"] = memory_ids
+            tracked_keywords = {
+                keyword
+                for keyword, count in keyword_counts.most_common(self.MAX_CONTENT_CLUSTERS)
+                if count >= min_cluster_size
+            }
+            content_clusters: dict[str, list[str]] = defaultdict(list)
+            for memory_id, keywords in per_memory_keywords:
+                for keyword in keywords:
+                    if keyword in tracked_keywords:
+                        content_clusters[keyword].append(memory_id)
             for keyword, memory_ids in content_clusters.items():
                 if len(memory_ids) >= min_cluster_size:
                     significant_clusters[f"content:{keyword}"] = memory_ids
@@ -156,12 +197,13 @@ class VectorLongTermMemory(BaseMemorySystem):
         """Decay importance and confidence for old, rarely accessed memories in ChromaDB."""
         if not self.collection:
             return 0
-        from datetime import datetime
         now = datetime.now()
         decayed = 0
         half_life_seconds = half_life_days * 86400
         try:
             result = self.collection.get()
+            updated_ids: list[str] = []
+            updated_metadatas: list[dict[str, Any]] = []
             for i, memory_id in enumerate(result['ids']):
                 meta = result['metadatas'][i]
                 last_access = meta.get('last_access')
@@ -178,8 +220,10 @@ class VectorLongTermMemory(BaseMemorySystem):
                     if new_importance < old_importance or new_confidence < old_confidence:
                         meta['importance'] = new_importance
                         meta['confidence'] = new_confidence
-                        self.collection.update(ids=[memory_id], metadatas=[meta])
+                        updated_ids.append(memory_id)
+                        updated_metadatas.append(meta)
                         decayed += 1
+            self._update_metadatas(updated_ids, updated_metadatas)
             logger.info(f"Decayed {decayed} LTM memories (rate={decay_rate}, half_life_days={half_life_days})")
             return decayed
         except Exception as e:
@@ -246,23 +290,12 @@ class VectorLongTermMemory(BaseMemorySystem):
         rec = self.retrieve(ltm_memory_id)
         if not rec:
             return False
-        associations = rec.get("associations", [])
-        if isinstance(associations, str):
-            associations = [a for a in associations.split(",") if a]
+        associations = self._split_metadata_values(rec.get("associations", []))
         if external_memory_id not in associations:
             associations.append(external_memory_id)
-            meta = rec.copy()
-            # Sanitize all metadata fields to allowed types for ChromaDB
-            for key in list(meta.keys()):
-                v = meta[key]
-                if isinstance(v, list):
-                    meta[key] = ",".join(str(x) for x in v) if v else ""
-                elif not isinstance(v, (str, int, float, bool)) and v is not None:
-                    meta[key] = str(v)
-            meta["associations"] = ",".join(str(x) for x in associations if x)
             self.collection.update(
                 ids=[ltm_memory_id],
-                metadatas=[meta]
+                metadatas=[self._sanitize_metadata({**rec, "associations": associations})]
             )
             logger.debug(f"Created {link_type} link: LTM {ltm_memory_id} -> {external_memory_id}")
             return True
@@ -272,26 +305,23 @@ class VectorLongTermMemory(BaseMemorySystem):
         """Find LTM records linked to memories from other systems (by association or content)."""
         if not self.collection:
             return []
-        # Use get() with where clause for metadata-only filtering
-        where = {"associations": {"$in": [external_memory_id]}}
-        results = self.collection.get(where=where)
+        results = self.collection.get()
         matches = []
         if results['ids']:
             for i, memory_id in enumerate(results['ids']):
                 meta = results['metadatas'][i]
+                associations = self._split_metadata_values(meta.get("associations", ""))
+                if external_memory_id not in associations:
+                    continue
                 doc = results['documents'][i]
-                matches.append({
-                    "id": meta.get("memory_id", memory_id),
-                    "content": doc,
-                    "memory_type": meta.get("memory_type", "episodic"),
-                    "encoding_time": meta.get("encoding_time"),
-                    "last_access": meta.get("last_access"),
-                    "importance": float(meta.get("importance", 0.5)),
-                    "emotional_valence": float(meta.get("emotional_valence", 0.0)),
-                    "source": meta.get("source", "unknown"),
-                    "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
-                    "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
-                })
+                matches.append(
+                    self._build_memory_record(
+                        memory_id,
+                        meta,
+                        doc,
+                        extra={"associations": associations},
+                    )
+                )
         return matches
     def add_feedback(self, memory_id: str, feedback_type: str, value: Any, comment: Optional[str] = None, user_id: Optional[str] = None):
         """Add user feedback to a memory record (stored in ChromaDB metadata as JSON string)."""
@@ -300,17 +330,7 @@ class VectorLongTermMemory(BaseMemorySystem):
         rec = self.retrieve(memory_id)
         if not rec:
             return
-        import json
-        feedback = rec.get("feedback", [])
-        # Defensive: always ensure feedback is a list
-        if isinstance(feedback, str):
-            try:
-                feedback = json.loads(feedback)
-            except Exception:
-                feedback = []
-        elif not isinstance(feedback, list):
-            feedback = []
-        from datetime import datetime
+        feedback = self._load_feedback(rec.get("feedback", []))
         event = {
             "timestamp": datetime.now().isoformat(),
             "type": feedback_type,
@@ -333,18 +353,8 @@ class VectorLongTermMemory(BaseMemorySystem):
             except Exception:
                 pass
         if feedback_type == "importance":
-            meta["importance"] = 1.0
-        # Sanitize all metadata fields to allowed types for ChromaDB
-        for key in list(meta.keys()):
-            v = meta[key]
-            if isinstance(v, list):
-                meta[key] = ",".join(str(x) for x in v) if v else ""
-            elif not isinstance(v, (str, int, float, bool)) and v is not None:
-                meta[key] = str(v)
-        self.collection.update(
-            ids=[memory_id],
-            metadatas=[meta]
-        )
+            meta["importance"] = self._clamp01(value)
+        self._update_metadatas([memory_id], [meta])
 
     def get_feedback(self, memory_id: str) -> list:
         """Return all feedback events for a memory."""
@@ -383,7 +393,6 @@ class VectorLongTermMemory(BaseMemorySystem):
                 return False
 
             meta = dict(result["metadatas"][0] if result.get("metadatas") else {})
-            doc = result["documents"][0] if result.get("documents") else ""
 
             feedback = meta.get("feedback", "[]")
             if isinstance(feedback, str):
@@ -437,35 +446,27 @@ class VectorLongTermMemory(BaseMemorySystem):
             for i, memory_id in enumerate(results['ids']):
                 meta = results['metadatas'][i]
                 doc = results['documents'][i]
-                tag_list = meta.get("tags", "").split(",") if meta.get("tags") else []
+                tag_list = self._split_metadata_values(meta.get("tags", ""))
                 if operator == "OR":
                     if any(tag in tag_list for tag in tags):
-                        matches.append({
-                            "id": meta.get("memory_id", memory_id),
-                            "content": doc,
-                            "memory_type": meta.get("memory_type", "episodic"),
-                            "encoding_time": meta.get("encoding_time"),
-                            "last_access": meta.get("last_access"),
-                            "importance": float(meta.get("importance", 0.5)),
-                            "emotional_valence": float(meta.get("emotional_valence", 0.0)),
-                            "source": meta.get("source", "unknown"),
-                            "tags": tag_list,
-                            "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
-                        })
+                        matches.append(
+                            self._build_memory_record(
+                                memory_id,
+                                meta,
+                                doc,
+                                extra={"tags": tag_list},
+                            )
+                        )
                 else:  # AND
                     if all(tag in tag_list for tag in tags):
-                        matches.append({
-                            "id": meta.get("memory_id", memory_id),
-                            "content": doc,
-                            "memory_type": meta.get("memory_type", "episodic"),
-                            "encoding_time": meta.get("encoding_time"),
-                            "last_access": meta.get("last_access"),
-                            "importance": float(meta.get("importance", 0.5)),
-                            "emotional_valence": float(meta.get("emotional_valence", 0.0)),
-                            "source": meta.get("source", "unknown"),
-                            "tags": tag_list,
-                            "associations": meta.get("associations", "").split(",") if meta.get("associations") else []
-                        })
+                        matches.append(
+                            self._build_memory_record(
+                                memory_id,
+                                meta,
+                                doc,
+                                extra={"tags": tag_list},
+                            )
+                        )
             return matches
         except Exception as e:
             logger.error(f"LTM tag search failed: {e}")
@@ -483,52 +484,23 @@ class VectorLongTermMemory(BaseMemorySystem):
         if not self.collection:
             return []
         visited = set()
-        to_visit = [(memory_id, 0)]
+        to_visit = deque([(memory_id, 0)])
         associated = []
         while to_visit:
-            current_id, current_depth = to_visit.pop(0)
+            current_id, current_depth = to_visit.popleft()
             if current_id in visited or current_depth > depth:
                 continue
             visited.add(current_id)
-            if current_depth > 0:
-                rec = self.retrieve(current_id)
-                if rec:
-                    associated.append(rec)
-            # Get associations for this memory
             rec = self.retrieve(current_id)
-            if rec and rec.get("associations"):
+            if not rec:
+                continue
+            if current_depth > 0:
+                associated.append(rec)
+            if rec.get("associations"):
                 for assoc_id in rec["associations"]:
                     if assoc_id and assoc_id not in visited:
                         to_visit.append((assoc_id, current_depth + 1))
         return associated
-    """
-    Vector-only Long-Term Memory using ChromaDB
-    All store, retrieve, and search operations are performed directly on ChromaDB.
-    No in-memory storage or JSON backup.
-    """
-    
-    def __init__(
-        self,
-        chroma_persist_dir: Optional[str] = None,
-        collection_name: str = "ltm_memories",
-        embedding_model: str = "all-MiniLM-L6-v2",
-        lazy_embeddings: bool = True
-    ):
-        """Initialize Vector-only LTM system (ChromaDB only)"""
-        self.chroma_persist_dir = Path(chroma_persist_dir or "data/memory_stores/chroma_ltm")
-        self.collection_name = collection_name
-        self._embedding_model_name = embedding_model
-        self._lazy_embeddings = lazy_embeddings
-        self._embedding_lock = threading.Lock()
-        self.embedding_model = None
-        if not self._lazy_embeddings:
-            self._ensure_embedding_model()
-        self.chroma_client = None
-        self.collection = None
-        self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
-        self._initialize_chromadb()
-        logger.info("Vector LTM initialized (vector-only, no fallback)")
-
     def _ensure_embedding_model(self) -> bool:
         if self.embedding_model is not None:
             return True
@@ -560,7 +532,8 @@ class VectorLongTermMemory(BaseMemorySystem):
     def _initialize_chromadb(self):
         """Initialize ChromaDB client and collection"""
         if not CHROMADB_AVAILABLE:
-            logger.error("ChromaDB not available for LTM")
+            self._initialization_error = "ChromaDB not available for LTM"
+            logger.error(self._initialization_error)
             return
 
         # Build settings if available
@@ -580,33 +553,39 @@ class VectorLongTermMemory(BaseMemorySystem):
 
         # Get client class
         client_cls = getattr(chromadb, "PersistentClient", None) or getattr(chromadb, "Client", None)
-        if client_cls is None or settings is None:
-            logger.error("ChromaDB client class or Settings not available for LTM")
+        if client_cls is None:
+            self._initialization_error = "ChromaDB client class not available for LTM"
+            logger.error(self._initialization_error)
             return
+        if settings is None:
+            logger.warning("ChromaDB Settings unavailable for LTM; continuing with client defaults")
 
         try:
             # Initialize client
             if hasattr(chromadb, "PersistentClient"):
-                self.chroma_client = client_cls(
-                    path=str(self.chroma_persist_dir),
-                    settings=settings
-                )
+                client_kwargs = {"path": str(self.chroma_persist_dir)}
+                if settings is not None:
+                    client_kwargs["settings"] = settings
+                self.chroma_client = client_cls(**client_kwargs)
             else:
-                self.chroma_client = client_cls(settings)
+                self.chroma_client = client_cls(settings) if settings is not None else client_cls()
             
             # Get or create collection
             try:
                 self.collection = self.chroma_client.get_collection(name=self.collection_name)
+                self._initialization_error = None
                 logger.info(f"LTM connected to existing ChromaDB collection: {self.collection_name}")
             except Exception:
                 self.collection = self.chroma_client.create_collection(
                     name=self.collection_name,
                     metadata={"description": "Long-term memory vector storage"}
                 )
+                self._initialization_error = None
                 logger.info(f"LTM created new ChromaDB collection: {self.collection_name}")
             
         except Exception as e:
-            logger.error(f"LTM failed to initialize ChromaDB: {e}")
+            self._initialization_error = f"LTM failed to initialize ChromaDB: {e}"
+            logger.error(self._initialization_error)
             self.chroma_client = None
             self.collection = None
     
@@ -619,7 +598,10 @@ class VectorLongTermMemory(BaseMemorySystem):
         
         try:
             content_str = str(text)
-            embedding = self.embedding_model.encode(content_str)
+            embedding_model = self.embedding_model
+            if embedding_model is None:
+                return None
+            embedding = embedding_model.encode(content_str)
             if hasattr(embedding, 'tolist'):
                 return embedding.tolist()
             else:
@@ -636,6 +618,84 @@ class VectorLongTermMemory(BaseMemorySystem):
             return json.dumps(content, default=str)
         else:
             return str(content)
+
+    @staticmethod
+    def _split_metadata_values(value: Any) -> List[str]:
+        """Convert stored metadata fields into a normalized list of strings."""
+        if isinstance(value, str):
+            return [item for item in value.split(",") if item]
+        if isinstance(value, (list, tuple, set)):
+            return [str(item) for item in value if item]
+        return []
+
+    @staticmethod
+    def _load_feedback(feedback: Any) -> List[Dict[str, Any]]:
+        """Decode feedback metadata into a stable list shape."""
+        if isinstance(feedback, str):
+            try:
+                feedback = json.loads(feedback)
+            except Exception:
+                return []
+        return feedback if isinstance(feedback, list) else []
+
+    @staticmethod
+    def _sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize metadata values to ChromaDB-compatible scalar types."""
+        sanitized = dict(metadata)
+        for key, value in list(sanitized.items()):
+            if isinstance(value, list):
+                sanitized[key] = ",".join(str(item) for item in value) if value else ""
+            elif not isinstance(value, (str, int, float, bool)) and value is not None:
+                sanitized[key] = str(value)
+        return sanitized
+
+    @staticmethod
+    def _clamp01(value: Any) -> float:
+        """Coerce numeric input to the inclusive [0.0, 1.0] range."""
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _update_metadatas(self, ids: List[str], metadatas: List[Dict[str, Any]]) -> None:
+        """Batch metadata updates when the backing collection is available."""
+        if not self.collection or not ids:
+            return
+        self.collection.update(
+            ids=ids,
+            metadatas=[self._sanitize_metadata(metadata) for metadata in metadatas],
+        )
+
+    def _build_memory_record(
+        self,
+        memory_id: str,
+        meta: Dict[str, Any],
+        doc: Any,
+        *,
+        include_confidence: bool = False,
+        include_feedback: bool = False,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build the public memory record shape from stored metadata and content."""
+        record = {
+            "id": meta.get("memory_id", memory_id),
+            "content": doc,
+            "memory_type": meta.get("memory_type", "episodic"),
+            "encoding_time": meta.get("encoding_time"),
+            "last_access": meta.get("last_access"),
+            "importance": float(meta.get("importance", 0.5)),
+            "emotional_valence": float(meta.get("emotional_valence", 0.0)),
+            "source": meta.get("source", "unknown"),
+            "tags": self._split_metadata_values(meta.get("tags", "")),
+            "associations": self._split_metadata_values(meta.get("associations", "")),
+        }
+        if include_confidence:
+            record["confidence"] = float(meta["confidence"]) if "confidence" in meta and meta["confidence"] is not None else None
+        if include_feedback:
+            record["feedback"] = self._load_feedback(meta.get("feedback"))
+        if extra:
+            record.update(extra)
+        return record
     
     def store(
         self,
@@ -660,9 +720,6 @@ class VectorLongTermMemory(BaseMemorySystem):
             if not embedding:
                 logger.error("Failed to generate embedding for LTM store.")
                 return False
-            # Always store tags and associations as comma-separated strings
-            tags_str = ",".join(tags) if tags else ""
-            associations_str = ",".join(associations) if associations else ""
             metadata = {
                 "memory_id": memory_id,
                 "memory_type": memory_type,
@@ -671,21 +728,14 @@ class VectorLongTermMemory(BaseMemorySystem):
                 "source": source,
                 "encoding_time": datetime.now().isoformat(),
                 "last_access": datetime.now().isoformat(),
-                "tags": tags_str,
-                "associations": associations_str
+                "tags": tags or [],
+                "associations": associations or [],
             }
-            # Sanitize all metadata fields to allowed types for ChromaDB
-            for key in list(metadata.keys()):
-                v = metadata[key]
-                if isinstance(v, list):
-                    metadata[key] = ",".join(str(x) for x in v) if v else ""
-                elif not isinstance(v, (str, int, float, bool)) and v is not None:
-                    metadata[key] = str(v)
             self.collection.upsert(
                 ids=[memory_id],
                 embeddings=[embedding],
                 documents=[content_text],
-                metadatas=[metadata]
+                metadatas=[self._sanitize_metadata(metadata)]
             )
             logger.debug(f"LTM stored {memory_id} (type: {memory_type}) in vector DB")
             return True
@@ -702,32 +752,13 @@ class VectorLongTermMemory(BaseMemorySystem):
             if result['ids'] and len(result['ids']) > 0:
                 meta = result['metadatas'][0]
                 doc = result['documents'][0]
-                import json
-                feedback = meta.get("feedback", None)
-                if feedback is not None:
-                    if isinstance(feedback, str):
-                        try:
-                            feedback = json.loads(feedback)
-                        except Exception:
-                            feedback = []
-                    elif not isinstance(feedback, list):
-                        feedback = []
-                else:
-                    feedback = []
-                return {
-                    "id": meta.get("memory_id", memory_id),
-                    "content": doc,
-                    "memory_type": meta.get("memory_type", "episodic"),
-                    "encoding_time": meta.get("encoding_time"),
-                    "last_access": meta.get("last_access"),
-                    "importance": float(meta.get("importance", 0.5)),
-                    "emotional_valence": float(meta.get("emotional_valence", 0.0)),
-                    "confidence": float(meta["confidence"]) if "confidence" in meta and meta["confidence"] is not None else None,
-                    "source": meta.get("source", "unknown"),
-                    "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
-                    "associations": meta.get("associations", "").split(",") if meta.get("associations") else [],
-                    "feedback": feedback
-                }
+                return self._build_memory_record(
+                    memory_id,
+                    meta,
+                    doc,
+                    include_confidence=True,
+                    include_feedback=True,
+                )
             return None
         except Exception as e:
             logger.error(f"LTM failed to retrieve {memory_id} from vector DB: {e}")
@@ -794,21 +825,18 @@ class VectorLongTermMemory(BaseMemorySystem):
                     if similarity >= min_similarity:
                         meta = results['metadatas'][0][i]
                         doc = results['documents'][0][i]
-                        search_results.append({
-                            "id": meta.get("memory_id", memory_id),
-                            "content": doc,
-                            "memory_type": meta.get("memory_type", "episodic"),
-                            "encoding_time": meta.get("encoding_time"),
-                            "last_access": meta.get("last_access"),
-                            "importance": float(meta.get("importance", 0.5)),
-                            "emotional_valence": float(meta.get("emotional_valence", 0.0)),
-                            "source": meta.get("source", "unknown"),
-                            "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
-                            "associations": meta.get("associations", "").split(",") if meta.get("associations") else [],
-                            "suppressed": bool(meta.get("suppressed", False)),
-                            "similarity_score": similarity,
-                            "distance": distance
-                        })
+                        search_results.append(
+                            self._build_memory_record(
+                                memory_id,
+                                meta,
+                                doc,
+                                extra={
+                                    "suppressed": bool(meta.get("suppressed", False)),
+                                    "similarity_score": similarity,
+                                    "distance": distance,
+                                },
+                            )
+                        )
             
             search_results.sort(key=lambda x: x["similarity_score"], reverse=True)
             return search_results
@@ -832,17 +860,19 @@ class VectorLongTermMemory(BaseMemorySystem):
         protected = 0
         min_age_seconds = float(min_age_days) * 86400.0
         result = self.collection.get()
+        updated_ids: list[str] = []
+        updated_metadatas: list[dict[str, Any]] = []
 
         for i, memory_id in enumerate(result.get("ids") or []):
             meta = dict(result["metadatas"][i] if result.get("metadatas") else {})
-            doc = result["documents"][i] if result.get("documents") else ""
 
             if _ltm_is_anchor(meta):
                 protected += 1
                 if meta.get("suppressed"):
                     meta["suppressed"] = False
                     meta["suppression_reason"] = "anchor_protected"
-                    self.collection.update(ids=[memory_id], metadatas=[meta])
+                    updated_ids.append(memory_id)
+                    updated_metadatas.append(meta)
                 continue
 
             last_access = meta.get("last_access") or meta.get("encoding_time")
@@ -860,10 +890,13 @@ class VectorLongTermMemory(BaseMemorySystem):
             if age_seconds >= min_age_seconds and importance <= min_importance and confidence <= min_confidence and access_count <= min_access_count:
                 if not meta.get("suppressed"):
                     suppressed += 1
-                meta["suppressed"] = True
-                meta["suppressed_at"] = now.isoformat()
-                meta["suppression_reason"] = "low_value_decay"
-                self.collection.update(ids=[memory_id], metadatas=[meta])
+                    meta["suppressed"] = True
+                    meta["suppressed_at"] = now.isoformat()
+                    meta["suppression_reason"] = "low_value_decay"
+                    updated_ids.append(memory_id)
+                    updated_metadatas.append(meta)
+
+        self._update_metadatas(updated_ids, updated_metadatas)
 
         return {"suppressed": suppressed, "protected": protected}
     
@@ -879,12 +912,15 @@ class VectorLongTermMemory(BaseMemorySystem):
             try:
                 count_fn = getattr(self.collection, "count", None)
                 if callable(count_fn):
-                    status["vector_db_count"] = int(count_fn())
+                    count = count_fn()
+                    status["vector_db_count"] = int(count) if isinstance(count, (int, float, str)) else 0
                 else:
                     collection_info = self.collection.get()
                     status["vector_db_count"] = len(collection_info['ids']) if collection_info['ids'] else 0
             except Exception as e:
                 status["vector_db_error"] = str(e)
+        elif self._initialization_error:
+            status["vector_db_error"] = self._initialization_error
         return status
     
     def consolidate_from_stm(self, stm_items: List[Any]) -> int:
@@ -898,10 +934,7 @@ class VectorLongTermMemory(BaseMemorySystem):
                 from src.learning.learning_law import clamp01, utility_score
             except Exception:  # pragma: no cover
                 def clamp01(x: Any) -> float:  # type: ignore[no-redef]
-                    try:
-                        return float(x)
-                    except (TypeError, ValueError):
-                        return 0.0
+                    return self._clamp01(x)
 
                 def utility_score(*, benefit: Any, cost: Any, benefit_weight: float = 1.0, cost_weight: float = 1.0) -> float:  # type: ignore[no-redef]
                     return (benefit_weight * clamp01(benefit)) - (cost_weight * clamp01(cost))
@@ -934,14 +967,16 @@ class VectorLongTermMemory(BaseMemorySystem):
         """Remove is an alias for delete in vector-only LTM"""
         return self.delete(memory_id)
     
-    def clear(self):
+    def clear(self) -> bool:
         """Clear all memories from ChromaDB vector store"""
         if not self.collection:
-            return
+            return False
         try:
             result = self.collection.get()
             if result['ids']:
                 self.collection.delete(ids=result['ids'])
             logger.debug("LTM cleared vector database")
+            return True
         except Exception as e:
             logger.error(f"LTM failed to clear vector database: {e}")
+            return False
