@@ -1,7 +1,11 @@
-from typing import Optional, Dict, List, Any
+import logging
+from typing import Optional, Dict, List, Any, Tuple
 from datetime import datetime
 import uuid
 import json
+
+
+logger = logging.getLogger(__name__)
 
 class ProceduralMemory:
     """
@@ -15,6 +19,26 @@ class ProceduralMemory:
         self.stm = stm
         self.ltm = ltm
 
+    @staticmethod
+    def _normalize_timestamp(value: Any) -> Optional[str]:
+        """Normalize stored timestamp values to ISO-8601 strings."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    @staticmethod
+    def _coerce_list(value: Any) -> List[str]:
+        """Normalize tag/association values to a list of strings."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [item for item in value.split(",") if item]
+        if isinstance(value, (list, tuple, set)):
+            return [str(item) for item in value if item is not None]
+        return [str(value)]
+
     def _parse_content(self, raw_content) -> Optional[Dict[str, Any]]:
         """Parse content which may be a dict or JSON-encoded string."""
         if raw_content is None:
@@ -25,8 +49,83 @@ class ProceduralMemory:
             try:
                 return json.loads(raw_content)
             except (json.JSONDecodeError, ValueError):
+                logger.debug("Failed to parse procedural memory content as JSON")
                 return None
         return None
+
+    def _hydrate_procedure(self, record_or_item: Any) -> Optional[Dict[str, Any]]:
+        """Return a normalized procedural-memory payload with preserved metadata."""
+        raw_content = self._extract_content(record_or_item)
+        content = self._parse_content(raw_content)
+        if not content or content.get("memory_type") != "procedural":
+            return None
+
+        procedure = dict(content)
+        procedure["tags"] = self._coerce_list(procedure.get("tags"))
+        procedure["associations"] = self._coerce_list(procedure.get("associations"))
+        procedure["created_at"] = self._normalize_timestamp(procedure.get("created_at"))
+        procedure["last_used"] = self._normalize_timestamp(procedure.get("last_used"))
+
+        if hasattr(record_or_item, "importance"):
+            procedure.setdefault("importance", float(getattr(record_or_item, "importance", 0.5) or 0.5))
+        if hasattr(record_or_item, "attention_score"):
+            procedure.setdefault(
+                "attention_score",
+                float(getattr(record_or_item, "attention_score", 0.0) or 0.0),
+            )
+        if hasattr(record_or_item, "emotional_valence"):
+            procedure.setdefault(
+                "emotional_valence",
+                float(getattr(record_or_item, "emotional_valence", 0.0) or 0.0),
+            )
+        if hasattr(record_or_item, "associations"):
+            procedure["associations"] = procedure.get("associations") or self._coerce_list(
+                getattr(record_or_item, "associations", [])
+            )
+
+        if isinstance(record_or_item, dict):
+            if record_or_item.get("importance") is not None:
+                procedure.setdefault("importance", float(record_or_item.get("importance", 0.5)))
+            if record_or_item.get("attention_score") is not None:
+                procedure.setdefault("attention_score", float(record_or_item.get("attention_score", 0.0)))
+            if record_or_item.get("emotional_valence") is not None:
+                procedure.setdefault(
+                    "emotional_valence",
+                    float(record_or_item.get("emotional_valence", 0.0)),
+                )
+            if record_or_item.get("source") is not None:
+                procedure.setdefault("source", str(record_or_item.get("source")))
+
+            record_tags = self._coerce_list(record_or_item.get("tags"))
+            if record_tags and not procedure.get("tags"):
+                procedure["tags"] = record_tags
+
+            record_associations = self._coerce_list(record_or_item.get("associations"))
+            if record_associations and not procedure.get("associations"):
+                procedure["associations"] = record_associations
+
+        procedure.setdefault("importance", 0.5)
+        procedure.setdefault("attention_score", 0.0)
+        procedure.setdefault("emotional_valence", 0.0)
+        procedure.setdefault("source", "procedural")
+
+        return procedure
+
+    def _load_procedure_from_store(self, proc_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Retrieve a procedure and the backing store it came from."""
+        if self.stm:
+            item = self._get_stm_item(proc_id)
+            procedure = self._hydrate_procedure(item)
+            if procedure:
+                return procedure, "stm"
+
+        if self.ltm:
+            record = self._get_ltm_record(proc_id)
+            procedure = self._hydrate_procedure(record)
+            if procedure:
+                return procedure, "ltm"
+
+        return None, None
 
     def _get_stm_item(self, proc_id: str):
         """Get item from STM using available interface."""
@@ -104,7 +203,7 @@ class ProceduralMemory:
         if hasattr(self.ltm, "search_semantic"):
             try:
                 return self.ltm.search_semantic(
-                    query="procedural",
+                    query="procedural memory routine skill",
                     max_results=250,
                     min_similarity=0.0,
                     memory_types=["procedural"],
@@ -162,10 +261,15 @@ class ProceduralMemory:
             "description": description,
             "steps": steps,
             "tags": tags or [],
-            "created_at": created_at or datetime.now(),
+            "created_at": self._normalize_timestamp(created_at or datetime.now()),
             "last_used": None,
             "usage_count": 0,
             "strength": 0.1,
+            "importance": importance,
+            "attention_score": attention_score,
+            "emotional_valence": emotional_valence,
+            "source": source,
+            "associations": associations or [],
             "memory_type": "procedural",
         }
         if memory_type == "ltm":
@@ -194,7 +298,7 @@ class ProceduralMemory:
             )
         return proc_id
 
-    def _extract_content(self, record_or_item) -> Optional[str]:
+    def _extract_content(self, record_or_item) -> Optional[Any]:
         """Extract raw content from a memory item or record dict.
         
         Handles:
@@ -207,9 +311,12 @@ class ProceduralMemory:
         # Object with .content attribute (MemoryItem)
         if hasattr(record_or_item, 'content'):
             return record_or_item.content
-        # Dict with "content" key (VectorLongTermMemory.retrieve result)
-        if isinstance(record_or_item, dict) and "content" in record_or_item:
-            return record_or_item["content"]
+        if isinstance(record_or_item, dict):
+            # Dict with "content" key (VectorLongTermMemory.retrieve result)
+            if "content" in record_or_item:
+                return record_or_item["content"]
+            # Legacy fallback may hand back the content dict directly.
+            return record_or_item
         # Assume it's already the content
         if isinstance(record_or_item, str):
             return record_or_item
@@ -217,22 +324,8 @@ class ProceduralMemory:
 
     def retrieve(self, proc_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a procedural memory by ID."""
-        # Check STM first, then LTM
-        if self.stm:
-            item = self._get_stm_item(proc_id)
-            if item:
-                raw_content = self._extract_content(item)
-                content = self._parse_content(raw_content)
-                if content and content.get("memory_type") == "procedural":
-                    return content
-        if self.ltm:
-            record = self._get_ltm_record(proc_id)
-            if record:
-                raw_content = self._extract_content(record)
-                content = self._parse_content(raw_content)
-                if content and content.get("memory_type") == "procedural":
-                    return content
-        return None
+        procedure, _ = self._load_procedure_from_store(proc_id)
+        return procedure
 
     def search(
         self,
@@ -268,60 +361,64 @@ class ProceduralMemory:
         search_stm = normalized in (None, "", "stm", "both", "all")
         search_ltm = normalized in (None, "", "ltm", "both", "all")
 
-        results: List[Dict[str, Any]] = []
+        results_by_id: Dict[str, Dict[str, Any]] = {}
         q = (query or "").lower()
+
+        def _remember(proc: Dict[str, Any]) -> None:
+            proc_id = str(proc.get("id", "") or "")
+            if proc_id and proc_id not in results_by_id:
+                results_by_id[proc_id] = proc
 
         # Search STM (local substring filter)
         if search_stm:
             for item in self._get_all_stm_items():
-                raw_content = self._extract_content(item)
-                content = self._parse_content(raw_content)
-                if not content or content.get("memory_type") != "procedural":
+                content = self._hydrate_procedure(item)
+                if not content:
                     continue
                 if not _has_tags(content):
                     continue
                 if not _matches_query(content, q):
                     continue
-                results.append(content)
+                _remember(content)
 
         # Search LTM
         if search_ltm and self.ltm is not None:
+            should_broad_scan = not hasattr(self.ltm, "search_semantic") or not q
             # Prefer semantic search using the *actual query* to avoid sampling issues.
-            if hasattr(self.ltm, "search_semantic"):
+            if hasattr(self.ltm, "search_semantic") and q:
                 try:
                     semantic_results = self.ltm.search_semantic(
-                        query=query or "procedural",
+                        query=query,
                         max_results=max(max_results * 5, 25),
                         min_similarity=0.0,
                         memory_types=["procedural"],
                     )
                     for record in semantic_results:
-                        raw_content = self._extract_content(record)
-                        content = self._parse_content(raw_content)
-                        if not content or content.get("memory_type") != "procedural":
+                        content = self._hydrate_procedure(record)
+                        if not content:
                             continue
                         if not _has_tags(content):
                             continue
                         # Keep substring match to satisfy deterministic test expectations.
                         if not _matches_query(content, q):
                             continue
-                        results.append(content)
+                        _remember(content)
+                    should_broad_scan = False
                 except Exception:
-                    # Fall back to broad-scan below.
-                    pass
+                    should_broad_scan = True
 
-            if not results:
+            if should_broad_scan:
                 for record in self._get_all_ltm_records():
-                    raw_content = self._extract_content(record)
-                    content = self._parse_content(raw_content)
-                    if not content or content.get("memory_type") != "procedural":
+                    content = self._hydrate_procedure(record)
+                    if not content:
                         continue
                     if not _has_tags(content):
                         continue
                     if not _matches_query(content, q):
                         continue
-                    results.append(content)
+                    _remember(content)
 
+        results = list(results_by_id.values())
         results.sort(key=lambda p: -p.get("strength", 0))
         return results[: max_results if max_results > 0 else 10]
 
@@ -330,51 +427,53 @@ class ProceduralMemory:
         
         Updates are persisted back to the memory store.
         """
-        proc = self.retrieve(proc_id)
-        if not proc:
+        proc, store_type = self._load_procedure_from_store(proc_id)
+        if not proc or not store_type:
             return False
         proc["usage_count"] = proc.get("usage_count", 0) + 1
-        proc["last_used"] = datetime.now()
+        proc["last_used"] = datetime.now().isoformat()
         proc["strength"] = min(1.0, proc.get("strength", 0.1) + 0.1)
-        
-        # Re-store to persist updates
-        # Determine which store has this procedure and re-store
-        if self.stm:
-            item = self._get_stm_item(proc_id)
-            if item:
-                # Re-store in STM
+
+        if store_type == "stm" and self.stm:
+            return bool(
                 self.stm.store(
                     memory_id=proc_id,
                     content=proc,
-                    importance=proc.get("importance", 0.5)
+                    importance=proc.get("importance", 0.5),
+                    attention_score=proc.get("attention_score", 0.0),
+                    emotional_valence=proc.get("emotional_valence", 0.0),
+                    associations=proc.get("associations", []),
                 )
-                return True
-        if self.ltm:
-            record = self._get_ltm_record(proc_id)
-            if record:
-                # Re-store in LTM
+            )
+
+        if store_type == "ltm" and self.ltm:
+            return bool(
                 self.ltm.store(
                     memory_id=proc_id,
                     content=proc,
-                    memory_type="procedural"
+                    memory_type="procedural",
+                    importance=proc.get("importance", 0.5),
+                    emotional_valence=proc.get("emotional_valence", 0.0),
+                    source=proc.get("source", "procedural"),
+                    tags=proc.get("tags", []),
+                    associations=proc.get("associations", []),
                 )
-                return True
-        return True
+            )
+
+        return False
 
     def all_procedures(self) -> List[Dict[str, Any]]:
         """Get all procedural memories from both STM and LTM."""
-        all_procs = []
+        all_procs: Dict[str, Dict[str, Any]] = {}
         for item in self._get_all_stm_items():
-            raw_content = self._extract_content(item)
-            content = self._parse_content(raw_content)
-            if content and content.get("memory_type") == "procedural":
-                all_procs.append(content)
+            content = self._hydrate_procedure(item)
+            if content:
+                all_procs[str(content.get("id"))] = content
         for record in self._get_all_ltm_records():
-            raw_content = self._extract_content(record)
-            content = self._parse_content(raw_content)
-            if content and content.get("memory_type") == "procedural":
-                all_procs.append(content)
-        return all_procs
+            content = self._hydrate_procedure(record)
+            if content:
+                all_procs.setdefault(str(content.get("id")), content)
+        return list(all_procs.values())
 
     def delete(self, proc_id: str) -> bool:
         """Delete a procedural memory by ID."""
@@ -385,13 +484,14 @@ class ProceduralMemory:
             deleted = True
         return deleted
 
-    def clear(self, *, memory_type: Optional[str] = None):
+    def clear(self, *, memory_type: Optional[str] = None) -> bool:
         """Remove procedural memories from STM and/or LTM.
 
         Args:
             memory_type: "stm", "ltm", or None for both.
         """
         # Get all procedure IDs first
+        deleted = False
         procs_to_delete = []
         normalized = (memory_type or "").strip().lower() if memory_type else None
         clear_stm = normalized in (None, "", "stm", "both", "all")
@@ -399,22 +499,22 @@ class ProceduralMemory:
 
         if clear_stm:
             for item in self._get_all_stm_items():
-                raw_content = self._extract_content(item)
-                content = self._parse_content(raw_content)
-                if content and content.get("memory_type") == "procedural":
+                content = self._hydrate_procedure(item)
+                if content:
                     procs_to_delete.append(("stm", content.get("id")))
 
         if clear_ltm:
             for record in self._get_all_ltm_records():
-                raw_content = self._extract_content(record)
-                content = self._parse_content(raw_content)
-                if content and content.get("memory_type") == "procedural":
+                content = self._hydrate_procedure(record)
+                if content:
                     procs_to_delete.append(("ltm", content.get("id")))
-        
+
         # Delete each procedure
         for store_type, proc_id in procs_to_delete:
             if proc_id:
                 if store_type == "stm":
-                    self._remove_stm_item(proc_id)
+                    deleted = self._remove_stm_item(proc_id) or deleted
                 else:
-                    self._remove_ltm_record(proc_id)
+                    deleted = self._remove_ltm_record(proc_id) or deleted
+
+        return deleted

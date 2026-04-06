@@ -376,58 +376,6 @@ class VectorLongTermMemory(BaseMemorySystem):
         stats["count"] = len(rec.get("feedback", []))
         return stats
 
-    def apply_recall_feedback(
-        self,
-        memory_id: str,
-        *,
-        outcome: str = "reinforce",
-        importance_delta: float = 0.0,
-        confidence_delta: float = 0.0,
-        note: str | None = None,
-    ) -> bool:
-        if not self.collection:
-            return False
-        try:
-            result = self.collection.get(ids=[memory_id])
-            if not result.get("ids"):
-                return False
-
-            meta = dict(result["metadatas"][0] if result.get("metadatas") else {})
-
-            feedback = meta.get("feedback", "[]")
-            if isinstance(feedback, str):
-                try:
-                    feedback = json.loads(feedback)
-                except Exception:
-                    feedback = []
-            elif not isinstance(feedback, list):
-                feedback = []
-
-            feedback.append(
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "type": f"recall_{outcome}",
-                    "importance_delta": round(float(importance_delta), 4),
-                    "confidence_delta": round(float(confidence_delta), 4),
-                    "note": note,
-                }
-            )
-
-            meta["last_access"] = datetime.now().isoformat()
-            meta["access_count"] = max(0, int(meta.get("access_count", 0))) + 1
-            meta["importance"] = max(0.0, min(1.0, float(meta.get("importance", 0.5)) + float(importance_delta)))
-            meta["confidence"] = max(0.0, min(1.0, float(meta.get("confidence", 0.8) or 0.8) + float(confidence_delta)))
-            meta["feedback"] = json.dumps(feedback)
-
-            self.collection.update(
-                ids=[memory_id],
-                metadatas=[meta],
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to apply recall feedback for {memory_id}: {e}")
-            return False
-
     def search_by_tags(self, tags: List[str], operator: str = "OR") -> List[dict]:
         """
         Search memories by tags using ChromaDB metadata filtering.
@@ -672,7 +620,7 @@ class VectorLongTermMemory(BaseMemorySystem):
         meta: Dict[str, Any],
         doc: Any,
         *,
-        include_confidence: bool = False,
+        include_confidence: bool = True,
         include_feedback: bool = False,
         extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -775,7 +723,7 @@ class VectorLongTermMemory(BaseMemorySystem):
         except Exception as e:
             logger.error(f"LTM failed to remove {memory_id} from vector DB: {e}")
             return False
-    
+
     def search(
         self,
         query: Optional[str] = None,
@@ -786,7 +734,7 @@ class VectorLongTermMemory(BaseMemorySystem):
             results = self.search_semantic(query=query, max_results=kwargs.get('max_results', 10))
             return results
         return []
-    
+
     def search_semantic(
         self,
         query: str,
@@ -799,24 +747,23 @@ class VectorLongTermMemory(BaseMemorySystem):
         if not self.collection or not self._ensure_embedding_model():
             return []
         try:
-            # Build where clause for filtering
             where_clause = {}
             if memory_types:
                 where_clause["memory_type"] = {"$in": memory_types}
             if min_importance > 0.0:
                 where_clause["importance"] = {"$gte": min_importance}
-            
+
             query_embedding = self._generate_embedding(query)
             if not query_embedding:
                 return []
-            
+
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=max_results,
                 where=where_clause if where_clause else None,
                 include=["documents", "distances", "metadatas"]
             )
-            
+
             search_results = []
             if results['ids'][0]:
                 for i, memory_id in enumerate(results['ids'][0]):
@@ -837,12 +784,54 @@ class VectorLongTermMemory(BaseMemorySystem):
                                 },
                             )
                         )
-            
+
             search_results.sort(key=lambda x: x["similarity_score"], reverse=True)
             return search_results
         except Exception as e:
             logger.error(f"LTM semantic search failed: {e}")
             return []
+
+    def apply_recall_feedback(
+        self,
+        memory_id: str,
+        *,
+        outcome: str = "reinforce",
+        importance_delta: float = 0.0,
+        confidence_delta: float = 0.0,
+        note: str | None = None,
+    ) -> bool:
+        if not self.collection:
+            return False
+        try:
+            result = self.collection.get(ids=[memory_id])
+            if not result.get("ids"):
+                return False
+
+            meta = dict(result["metadatas"][0] if result.get("metadatas") else {})
+            now = datetime.now()
+            feedback = self._load_feedback(meta.get("feedback", "[]"))
+
+            feedback.append(
+                {
+                    "timestamp": now.isoformat(),
+                    "type": f"recall_{outcome}",
+                    "importance_delta": round(float(importance_delta), 4),
+                    "confidence_delta": round(float(confidence_delta), 4),
+                    "note": note,
+                }
+            )
+
+            meta["last_access"] = now.isoformat()
+            meta["access_count"] = max(0, int(meta.get("access_count", 0))) + 1
+            meta["importance"] = max(0.0, min(1.0, float(meta.get("importance", 0.5)) + float(importance_delta)))
+            meta["confidence"] = max(0.0, min(1.0, float(meta.get("confidence", 0.8) or 0.8) + float(confidence_delta)))
+            meta["feedback"] = json.dumps(feedback)
+
+            self._update_metadatas([memory_id], [meta])
+            return True
+        except Exception as e:
+            logger.error(f"Failed to apply recall feedback for {memory_id}: {e}")
+            return False
 
     def apply_forgetting_policy(
         self,
@@ -926,18 +915,20 @@ class VectorLongTermMemory(BaseMemorySystem):
     def consolidate_from_stm(self, stm_items: List[Any]) -> int:
         """Consolidate items from STM into LTM (vector DB only)"""
         consolidated = 0
+        try:
+            from src.learning.learning_law import clamp01, utility_score
+        except Exception:  # pragma: no cover
+            def clamp01(x: Any) -> float:  # type: ignore[no-redef]
+                return self._clamp01(x)
+
+            def utility_score(*, benefit: Any, cost: Any, benefit_weight: float = 1.0, cost_weight: float = 1.0) -> float:  # type: ignore[no-redef]
+                return (benefit_weight * clamp01(benefit)) - (cost_weight * clamp01(cost))
+
         for item in stm_items:
             # Phase 7: utility-based learning law.
             # Benefit: importance + access evidence (retrieval success proxy).
             # Cost: fixed small write cost.
-            try:
-                from src.learning.learning_law import clamp01, utility_score
-            except Exception:  # pragma: no cover
-                def clamp01(x: Any) -> float:  # type: ignore[no-redef]
-                    return self._clamp01(x)
 
-                def utility_score(*, benefit: Any, cost: Any, benefit_weight: float = 1.0, cost_weight: float = 1.0) -> float:  # type: ignore[no-redef]
-                    return (benefit_weight * clamp01(benefit)) - (cost_weight * clamp01(cost))
 
             imp = float(getattr(item, "importance", 0.0) or 0.0)
             access = float(getattr(item, "access_count", 0) or 0.0)

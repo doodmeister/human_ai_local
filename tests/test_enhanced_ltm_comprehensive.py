@@ -129,6 +129,23 @@ def test_search_by_tags_supports_or_and(ltm):
     assert [result["id"] for result in and_results] == ["memory-a"]
 
 
+def test_non_retrieve_result_shapes_include_confidence_key(ltm):
+    ltm.store(
+        memory_id="memory-a",
+        content="python concept",
+        tags=["code", "python"],
+        associations=["external-1"],
+    )
+
+    tag_result = ltm.search_by_tags(["python"], operator="OR")[0]
+    link_result = ltm.find_cross_system_links("external-1")[0]
+
+    assert "confidence" in tag_result
+    assert tag_result["confidence"] is None
+    assert "confidence" in link_result
+    assert link_result["confidence"] is None
+
+
 def test_semantic_clusters_group_shared_tags(ltm):
     ltm.store(memory_id="memory-a", content="python concept", tags=["code", "python"])
     ltm.store(memory_id="memory-b", content="java concept", tags=["code", "java"])
@@ -262,3 +279,21 @@ def test_clear_returns_bool(ltm):
 
     assert cleared is True
     assert ltm.collection.records == {}
+
+
+def test_apply_recall_feedback_uses_single_timestamp_and_helper(ltm):
+    ltm.store(memory_id="memory-a", content="programming concept", tags=["code"])
+
+    updated = ltm.apply_recall_feedback(
+        "memory-a",
+        outcome="reinforce",
+        importance_delta=0.1,
+        confidence_delta=0.05,
+        note="recent retrieval",
+    )
+    record = ltm.retrieve("memory-a")
+
+    assert updated is True
+    assert ltm.collection.update_calls == 1
+    assert record is not None
+    assert record["last_access"] == record["feedback"][-1]["timestamp"]
