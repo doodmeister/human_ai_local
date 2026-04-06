@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import abc
+import inspect
 import math
 import random
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from time import monotonic
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING, cast
 import json
 import os
 
@@ -159,6 +161,19 @@ class RealClock:
         return monotonic()
 
 
+_WORD_RE = re.compile(r"\b\w+\b")
+
+
+def _lexical_tokens(text: str) -> set[str]:
+    return {token for token in _WORD_RE.findall(text.lower()) if token}
+
+
+def _normalized_overlap_score(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
 # =========================
 # Decision Engine (pluggable)
 # =========================
@@ -306,6 +321,7 @@ class ExecutiveController:
             self._salience = SalienceScorer()
         except Exception:
             self._salience = None
+        self._outcome_adapter: Any | None = None
         # Load persisted adaptive state if available
         self._state_path = os.environ.get("EXEC_ADAPTIVE_STATE", "executive_state.json")
         self._load_adaptive_state()
@@ -329,18 +345,145 @@ class ExecutiveController:
         if not candidates:
             return self._default_goal(user_input)
 
-        # Simple lexical match + priority bias.
-        tokens = {t for t in user_input.lower().split() if t}
+        # Normalized lexical match + priority bias.
+        tokens = _lexical_tokens(user_input)
         best = candidates[0]
         best_score = -1e9
         for g in candidates:
-            g_tokens = {t for t in g.description.lower().split() if t}
-            overlap = len(tokens & g_tokens)
-            score = float(g.priority) + (0.05 * overlap)
+            g_tokens = _lexical_tokens(g.description)
+            overlap_score = _normalized_overlap_score(tokens, g_tokens)
+            score = float(g.priority) + (0.1 * overlap_score)
             if score > best_score:
                 best_score = score
                 best = g
         return best
+
+    def _build_option_metadata(self, task: Task, user_input: str, context_snippets: List[str]) -> Dict[str, Any]:
+        user_tokens = _lexical_tokens(user_input)
+        task_tokens = _lexical_tokens(task.description)
+        overlap_score = _normalized_overlap_score(user_tokens, task_tokens)
+        context_load = min(1.0, len(context_snippets) / max(self.stm_context_k + self.attention_capacity, 1))
+        complexity = min(max(float(task.complexity), 0.0), 1.0)
+        relevance = min(1.0, 0.15 + (0.65 * overlap_score) + (0.20 * min(max(float(task.urgency), 0.0), 1.0)))
+        latency_ms = int(250 + (850 * complexity) + (150 * context_load))
+        cost_tokens = int(128 + (384 * complexity) + (64 * context_load))
+        return {
+            "relevance": relevance,
+            "urgency": task.urgency,
+            "latency_ms": latency_ms,
+            "cost_tokens": cost_tokens,
+        }
+
+    def _decision_engine_accepts_mode(self) -> bool:
+        choose = getattr(self.decision_engine, "choose", None)
+        if not callable(choose):
+            return False
+        try:
+            params = list(inspect.signature(choose).parameters.values())
+        except (TypeError, ValueError):
+            return False
+        positional_params = [
+            param
+            for param in params
+            if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ]
+        if any(param.name == "mode" for param in params):
+            return True
+        return len(positional_params) >= 2
+
+    async def _choose_decision(self, options: List[Option]) -> Decision:
+        choose = getattr(self.decision_engine, "choose", None)
+        if not callable(choose):
+            raise RuntimeError("Decision engine lacks choose method")
+        choose_async = cast(Callable[..., Awaitable[Decision]], choose)
+        if self._decision_engine_accepts_mode():
+            return await choose_async(options, self.mode)
+        return await choose_async(options)
+
+    def _resolve_chosen_option(self, options: List[Option], option_id: str) -> Option:
+        chosen = next((option for option in options if option.id == option_id), None)
+        if chosen is None:
+            raise ValueError(f"Decision engine returned unknown option_id: {option_id}")
+        return chosen
+
+    def _turn_ok(self, text: str, llm_metadata: Dict[str, Any], act_meta: Dict[str, Any]) -> bool:
+        if not text.strip():
+            return False
+        for metadata in (llm_metadata, act_meta):
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("error") or metadata.get("failed"):
+                return False
+            if "ok" in metadata and metadata.get("ok") is False:
+                return False
+        return True
+
+    def _get_outcome_adapter(self):
+        if self._outcome_adapter is not None:
+            return self._outcome_adapter
+        from .outcome import OutcomeAdapter
+
+        self._outcome_adapter = OutcomeAdapter()
+        return self._outcome_adapter
+
+    def _reward_for_result(self, result: ActionResult) -> float:
+        if not result.ok:
+            return 0.0
+        return 1.0 + min(1.0, len(result.content) / 500.0)
+
+    def _finalize_turn(
+        self,
+        *,
+        result: ActionResult,
+        decision: Decision,
+        candidates: List[str],
+        attended: List[str],
+    ) -> ActionResult:
+        self.events.publish("executive.turn_finished", {
+            "latency_ms": result.latency_ms,
+            "tokens": result.tokens_used,
+            "mode": self.mode.name,
+            "new_memories": len(result.new_memories),
+            "ok": result.ok,
+            "error": result.metadata.get("error"),
+        })
+        try:
+            utilization = len(attended) / max(len(candidates), 1)
+            self.events.publish(
+                "executive.memory_utilization",
+                {"utilization": utilization, "attended": len(attended), "candidates": len(candidates)},
+            )
+        except Exception:
+            pass
+        self.bandit.update(decision.policy, self._reward_for_result(result))
+        return result
+
+    def _build_failed_result(
+        self,
+        *,
+        t0: float,
+        decision: Decision,
+        text: str,
+        tokens_used: int,
+        act_meta: Dict[str, Any],
+        error: Exception,
+        stage: str,
+    ) -> ActionResult:
+        return ActionResult(
+            ok=False,
+            content=text,
+            tokens_used=tokens_used,
+            latency_ms=int((self.clock.now() - t0) * 1000),
+            new_memories=[],
+            metadata={
+                "actuator": act_meta,
+                "mode": self.mode.name,
+                "decision": decision,
+                "error": str(error),
+                "error_stage": stage,
+                "failed": True,
+            },
+        )
 
     # --------- Mode State Machine ---------
 
@@ -350,6 +493,8 @@ class ExecutiveController:
         if self.mode == ExecutiveMode.FOCUSED:
             if signal == "overload" or fatigue > 0.7:
                 self.mode = ExecutiveMode.RECOVERY
+            elif signal == "reflect":
+                self.mode = ExecutiveMode.REFLECTION
             elif signal == "multi":
                 self.mode = ExecutiveMode.MULTI_TASK
             elif signal == "stuck":
@@ -358,12 +503,16 @@ class ExecutiveController:
         elif self.mode == ExecutiveMode.MULTI_TASK:
             if signal == "focus":
                 self.mode = ExecutiveMode.FOCUSED
+            elif signal == "reflect":
+                self.mode = ExecutiveMode.REFLECTION
             elif fatigue > 0.7:
                 self.mode = ExecutiveMode.RECOVERY
 
         elif self.mode == ExecutiveMode.EXPLORATION:
             if signal in ("found", "focus"):
                 self.mode = ExecutiveMode.FOCUSED
+            elif signal == "reflect":
+                self.mode = ExecutiveMode.REFLECTION
             elif fatigue > 0.7:
                 self.mode = ExecutiveMode.RECOVERY
 
@@ -407,34 +556,21 @@ class ExecutiveController:
         tasks = self.planner.expand(goal)
         options: List[Option] = []
         for i, task in enumerate(tasks):
-            # prompt and metadata
             prompt = f"{task.description}\nUser said: {user_input}\n"
-            meta = {
-                "relevance": min(1.0, 0.5 + 0.1 * i),
-                "urgency": task.urgency,
-                "latency_ms": 500 + 200 * i,
-                "cost_tokens": 256 + 64 * i,
-            }
+            context_snippets = stm + attended
+            meta = self._build_option_metadata(task, user_input, context_snippets)
             options.append(Option(
                 id=f"opt::{task.id}::{i}",
                 task=task,
                 prompt=prompt,
-                context_snippets=stm + attended,
+                context_snippets=context_snippets,
                 est_cost_tokens=int(meta["cost_tokens"]),
                 est_latency_ms=int(meta["latency_ms"]),
                 metadata=meta,
             ))
 
         # 4) Decide (policy selection could switch engines; here we log UCB)
-        # Support contextual engines that expect mode argument.
-        if hasattr(self.decision_engine, "choose"):
-            try:
-                # Some engines may accept (options, mode)
-                decision = await self.decision_engine.choose(options, self.mode)  # type: ignore[arg-type]
-            except TypeError:
-                decision = await self.decision_engine.choose(options)  # type: ignore[misc]
-        else:
-            raise RuntimeError("Decision engine lacks choose method")
+        decision = await self._choose_decision(options)
         self.events.publish("executive.decision", {
             "policy": decision.policy,
             "option_id": decision.option_id,
@@ -442,16 +578,43 @@ class ExecutiveController:
             "rationale": decision.rationale,
         })
 
-        chosen = next(o for o in options if o.id == decision.option_id)
+        chosen = self._resolve_chosen_option(options, decision.option_id)
 
         # 5) Act (LLM completion and/or tool action)
-        text, md = await self.llm.complete(chosen.prompt, chosen.context_snippets, max_tokens=self.max_tokens)
+        try:
+            text, md = await self.llm.complete(chosen.prompt, chosen.context_snippets, max_tokens=self.max_tokens)
+        except Exception as e:
+            logger.warning("Executive turn failed during LLM completion: %s", e)
+            failed = self._build_failed_result(
+                t0=t0,
+                decision=decision,
+                text="",
+                tokens_used=0,
+                act_meta={},
+                error=e,
+                stage="llm",
+            )
+            return self._finalize_turn(result=failed, decision=decision, candidates=candidates, attended=attended)
+
         await self.memory.stm_add(f"ASSISTANT: {text}", tags=["output"])
 
         # Optional: route through Actuator for tool-use if requested
         act_meta: Dict[str, Any] = {}
         if chosen.metadata.get("tool_action"):
-            act_meta = await self.actuator.act(chosen.metadata["tool_action"])
+            try:
+                act_meta = await self.actuator.act(chosen.metadata["tool_action"])
+            except Exception as e:
+                logger.warning("Executive turn failed during actuator action: %s", e)
+                failed = self._build_failed_result(
+                    t0=t0,
+                    decision=decision,
+                    text=text,
+                    tokens_used=int(md.get("tokens_used", chosen.est_cost_tokens)) if isinstance(md, dict) else chosen.est_cost_tokens,
+                    act_meta={},
+                    error=e,
+                    stage="actuator",
+                )
+                return self._finalize_turn(result=failed, decision=decision, candidates=candidates, attended=attended)
 
         # 6) Consolidate (store salient stuff in LTM)
         new_ids: List[str] = []
@@ -474,35 +637,23 @@ class ExecutiveController:
         signal = "focus"
         if load > 0.9:
             signal = "overload"
+        elif decision.score < 0.3 and self.mode == ExecutiveMode.EXPLORATION:
+            signal = "reflect"
         elif decision.score < 0.3:
             signal = "stuck"
         self._transition(signal=signal, fatigue=fatigue, load=load)
 
         dt_ms = int((self.clock.now() - t0) * 1000)
+        ok = self._turn_ok(text, md if isinstance(md, dict) else {}, act_meta)
         res = ActionResult(
-            ok=True,
+            ok=ok,
             content=text,
             tokens_used=int(md.get("tokens_used", chosen.est_cost_tokens)) if isinstance(md, dict) else chosen.est_cost_tokens,
             latency_ms=dt_ms,
             new_memories=new_ids,
-            metadata={"actuator": act_meta, "mode": self.mode.name}
+            metadata={"actuator": act_meta, "mode": self.mode.name, "decision": decision}
         )
-        self.events.publish("executive.turn_finished", {
-            "latency_ms": dt_ms,
-            "tokens": res.tokens_used,
-            "mode": self.mode.name,
-            "new_memories": len(new_ids)
-        })
-        # Emit memory utilization proxy: number of attended items used vs retrieved similar items
-        try:
-            utilization = len(attended) / max(len(candidates), 1)
-            self.events.publish("executive.memory_utilization", {"utilization": utilization, "attended": len(attended), "candidates": len(candidates)})
-        except Exception:
-            pass
-        # bandit update with simple reward proxy (length & success)
-        reward = (1.0 if res.ok else 0.0) + min(1.0, len(text)/500.0)
-        self.bandit.update(decision.policy, reward)
-        return res
+        return self._finalize_turn(result=res, decision=decision, candidates=candidates, attended=attended)
 
     # --------- Outcome adaptation ---------
 
@@ -513,10 +664,10 @@ class ExecutiveController:
         - Tighten/loosen salience threshold based on memory utility.
         """
         try:
-            from .outcome import OutcomeAdapter
-        except Exception:
+            adapter = self._get_outcome_adapter()
+        except Exception as e:
+            logger.warning("Failed to initialize OutcomeAdapter: %s", e)
             return
-        adapter = OutcomeAdapter()
         reward = adapter.compute_reward(outcome)
         # adjust salience threshold (higher reward -> slightly lower threshold to capture more)
         if reward > 1.2:
@@ -541,9 +692,11 @@ class ExecutiveController:
                     data = json.load(f)
                 self._salience_threshold = float(data.get("salience_threshold", self._salience_threshold))
                 if hasattr(self.decision_engine, "exploration_scale"):
-                    setattr(self.decision_engine, "exploration_scale", float(data.get("exploration_scale", getattr(self.decision_engine, "exploration_scale", 0.05))))
-        except Exception:
-            pass
+                    current_scale = float(getattr(self.decision_engine, "exploration_scale", 0.05))
+                    exploration_scale = float(data.get("exploration_scale", current_scale))
+                    setattr(self.decision_engine, "exploration_scale", exploration_scale)
+        except Exception as e:
+            logger.warning("Failed to load executive adaptive state from %s: %s", self._state_path, e)
 
     def _persist_adaptive_state(self) -> None:
         try:
@@ -554,8 +707,8 @@ class ExecutiveController:
                 data["exploration_scale"] = getattr(self.decision_engine, "exploration_scale")
             with open(self._state_path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to persist executive adaptive state to %s: %s", self._state_path, e)
 
 
 # =========================
@@ -565,28 +718,25 @@ class ExecutiveController:
 # You already have implementations for Memory (STM/LTM with ChromaDB),
 # Attention (top-k allocator), and LLM. Make adapter classes that conform
 # to the Protocols above. Then wire like this inside your app startup:
-
-"""
-memory: MemoryService = YourMemoryAdapter(...)
-attention: AttentionService = YourAttentionAdapter(...)
-llm: LLMService = YourLLMAdapter(...)
-actuator: ActuatorService = YourActuatorAdapter(...)
-
-bus = EventBus()
-bus.subscribe("executive.decision", lambda e: print("[DECISION]", e))
-bus.subscribe("executive.mode_changed", lambda e: print("[MODE]", e))
-bus.subscribe("executive.turn_finished", lambda e: print("[DONE]", e))
-
-controller = ExecutiveController(
-    memory=memory,
-    attention=attention,
-    llm=llm,
-    actuator=actuator,
-    event_bus=bus,
-)
-
-# Running one turn:
-goal = Goal(id="g1", description="Answer user helpfully with memory-aware context", priority=0.7)
-result = await controller.run_turn(user_input="Summarize my last session and next steps.", high_level_goal=goal)
-print(result.content)
-"""
+#
+# memory: MemoryService = YourMemoryAdapter(...)
+# attention: AttentionService = YourAttentionAdapter(...)
+# llm: LLMService = YourLLMAdapter(...)
+# actuator: ActuatorService = YourActuatorAdapter(...)
+#
+# bus = EventBus()
+# bus.subscribe("executive.decision", lambda e: print("[DECISION]", e))
+# bus.subscribe("executive.mode_changed", lambda e: print("[MODE]", e))
+# bus.subscribe("executive.turn_finished", lambda e: print("[DONE]", e))
+#
+# controller = ExecutiveController(
+#     memory=memory,
+#     attention=attention,
+#     llm=llm,
+#     actuator=actuator,
+#     event_bus=bus,
+# )
+#
+# goal = Goal(id="g1", description="Answer user helpfully with memory-aware context", priority=0.7)
+# result = await controller.run_turn(user_input="Summarize my last session and next steps.", high_level_goal=goal)
+# print(result.content)

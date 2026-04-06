@@ -50,6 +50,14 @@ class CognitiveAgentRuntimeBuilder:
     def __init__(self, config: CognitiveConfig) -> None:
         self._config = config
 
+    @staticmethod
+    def _resolve_sensory_embedding_manager(memory: MemorySystem) -> Any:
+        try:
+            stm = memory.stm
+        except Exception:
+            return None
+        return getattr(stm, "embedding_manager", None)
+
     def build(self) -> CognitiveAgentRuntime:
         fast_init = os.getenv("FAST_AGENT_INIT") == "1"
 
@@ -71,7 +79,13 @@ class CognitiveAgentRuntimeBuilder:
 
         memory = MemorySystem(memory_config)
         attention = AttentionMechanism(self._config.attention)
-        sensory_processor = SensoryProcessor()
+        embedding_manager = self._resolve_sensory_embedding_manager(memory)
+        sensory_processor = SensoryProcessor(
+            embedding_dimension=self._config.processing.embedding_dimension,
+            embedding_model=self._config.processing.embedding_model,
+            use_model_embeddings=embedding_manager is not None,
+            embedding_manager=embedding_manager,
+        )
         sensory_interface = SensoryInterface(sensory_processor)
 
         if fast_init:

@@ -8,6 +8,36 @@ from src.memory.episodic.episodic_memory import (
 )
 
 
+class _FakeCollection:
+    def __init__(self):
+        self.ids = []
+        self.upsert_calls = []
+        self.update_calls = []
+        self.delete_calls = []
+
+    def upsert(self, **kwargs):
+        self.upsert_calls.append(kwargs)
+        for memory_id in kwargs.get("ids", []):
+            if memory_id not in self.ids:
+                self.ids.append(memory_id)
+
+    def update(self, **kwargs):
+        self.update_calls.append(kwargs)
+
+    def delete(self, ids):
+        ids = list(ids)
+        self.delete_calls.append(ids)
+        self.ids = [memory_id for memory_id in self.ids if memory_id not in ids]
+
+    def get(self):
+        return {"ids": list(self.ids)}
+
+
+class _BrokenChromaModule:
+    def PersistentClient(self, *args, **kwargs):
+        raise RuntimeError("persistent init failed")
+
+
 def _build_system(tmp_path, name, monkeypatch):
     monkeypatch.setattr(episodic_module, "CHROMADB_AVAILABLE", False)
     monkeypatch.setattr(episodic_module, "ADVANCED_SEARCH_AVAILABLE", False)
@@ -71,6 +101,25 @@ def test_episodic_memory_round_trip_tracks_access_and_rehearsal():
     assert restored.life_period == "development"
 
 
+def test_from_dict_uses_timestamp_fallbacks_for_missing_recency_fields():
+    timestamp = datetime(2024, 1, 2, 3, 4, 5)
+
+    restored = EpisodicMemory.from_dict(
+        {
+            "id": "episode-legacy",
+            "summary": "Legacy import",
+            "detailed_content": "Imported from older storage format.",
+            "timestamp": timestamp.isoformat(),
+            "context": {},
+        }
+    )
+
+    assert restored.timestamp == timestamp
+    assert restored.created_at == timestamp
+    assert restored.last_access == timestamp
+    assert restored.updated_at == timestamp
+
+
 def test_system_initialization_creates_storage_paths(tmp_path, monkeypatch):
     system = _build_system(tmp_path, "episodic_init", monkeypatch)
 
@@ -78,6 +127,24 @@ def test_system_initialization_creates_storage_paths(tmp_path, monkeypatch):
     assert system.enable_json_backup is True
     assert system.chroma_persist_dir.exists()
     assert system.storage_path.exists()
+
+
+def test_initialize_chromadb_does_not_fallback_to_in_memory_client(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(episodic_module, "CHROMADB_AVAILABLE", True)
+    monkeypatch.setattr(episodic_module, "ADVANCED_SEARCH_AVAILABLE", False)
+    monkeypatch.setattr(episodic_module, "chromadb", _BrokenChromaModule())
+
+    with caplog.at_level("WARNING"):
+        system = EpisodicMemorySystem(
+            chroma_persist_dir=str(tmp_path / "broken_chroma"),
+            collection_name="broken_chroma",
+            enable_json_backup=False,
+            storage_path=str(tmp_path / "broken_json"),
+        )
+
+    assert system.chroma_client is None
+    assert system.collection is None
+    assert any("continue without ChromaDB persistence" in record.message for record in caplog.records)
 
 
 def test_store_and_retrieve_preserves_context_and_references(tmp_path, monkeypatch):
@@ -109,6 +176,21 @@ def test_store_and_retrieve_preserves_context_and_references(tmp_path, monkeypat
     assert retrieved.life_period == "system_development"
 
 
+def test_store_memory_uses_chromadb_upsert(tmp_path, monkeypatch):
+    system = _build_system(tmp_path, "episodic_upsert", monkeypatch)
+    fake_collection = _FakeCollection()
+    system.collection = fake_collection
+
+    memory_id = system.store_memory(
+        detailed_content="Persist this episodic memory into the vector store.",
+        importance=0.7,
+    )
+
+    assert memory_id in system._memory_cache
+    assert len(fake_collection.upsert_calls) == 1
+    assert fake_collection.upsert_calls[0]["ids"] == [memory_id]
+
+
 def test_search_memories_uses_text_fallback_with_life_period_filter(tmp_path, monkeypatch):
     system = _build_system(tmp_path, "episodic_search", monkeypatch)
     system.collection = None
@@ -135,6 +217,27 @@ def test_search_memories_uses_text_fallback_with_life_period_filter(tmp_path, mo
     assert [result.memory.id for result in results] == [target_id]
     assert results[0].match_type in {"text_match", "word_overlap"}
     assert results[0].memory.life_period == "research_phase"
+
+
+def test_search_memories_fallback_respects_update_access_flag(tmp_path, monkeypatch):
+    system = _build_system(tmp_path, "episodic_search_access", monkeypatch)
+
+    memory_id = system.store_memory(
+        detailed_content="Discussed retrieval fallback behavior for episodic search.",
+        importance=0.8,
+    )
+    memory = system._memory_cache[memory_id]
+    access_before = memory.access_count
+
+    results = system.search_memories(
+        "retrieval fallback",
+        limit=5,
+        min_relevance=0.1,
+        update_access=False,
+    )
+
+    assert [result.memory.id for result in results] == [memory_id]
+    assert memory.access_count == access_before
 
 
 def test_related_memories_returns_cross_reference_and_temporal_matches(tmp_path, monkeypatch):
@@ -252,8 +355,48 @@ def test_consolidation_candidates_and_statistics_reflect_memory_state(tmp_path, 
     assert stats["emotional_stats"]["neutral_memories"] == 1
 
 
+def test_apply_forgetting_policy_batches_only_changed_memories(tmp_path, monkeypatch):
+    system = _build_system(tmp_path, "episodic_forgetting", monkeypatch)
+    fake_collection = _FakeCollection()
+    system.collection = fake_collection
+
+    anchor_id = system.store_memory(
+        detailed_content="Important relationship milestone with participants present.",
+        context=EpisodicContext(participants=["user"]),
+        importance=0.9,
+    )
+    transient_id = system.store_memory(
+        detailed_content="Low-signal transient note.",
+        importance=0.1,
+        emotional_valence=0.0,
+    )
+    stable_id = system.store_memory(
+        detailed_content="Another protected milestone that is already unsuppressed.",
+        importance=0.85,
+    )
+
+    old_timestamp = datetime.now() - timedelta(days=30)
+    system._memory_cache[anchor_id].timestamp = old_timestamp
+    system._memory_cache[transient_id].timestamp = old_timestamp
+    system._memory_cache[stable_id].timestamp = old_timestamp
+    system._memory_cache[anchor_id].suppressed = True
+    system._save_to_json_backup(system._memory_cache[anchor_id])
+
+    stats = system.apply_forgetting_policy(min_importance=0.3, min_confidence=0.9, min_age_days=14.0)
+
+    assert stats["suppressed"] == 1
+    assert len(fake_collection.update_calls) == 1
+    updated_ids = set(fake_collection.update_calls[0]["ids"])
+    assert updated_ids == {anchor_id, transient_id}
+    assert stable_id not in updated_ids
+    assert system._memory_cache[anchor_id].suppressed is False
+    assert system._memory_cache[transient_id].suppressed is True
+
+
 def test_clear_memory_removes_old_and_low_importance_entries(tmp_path, monkeypatch):
     system = _build_system(tmp_path, "episodic_clear", monkeypatch)
+    fake_collection = _FakeCollection()
+    system.collection = fake_collection
 
     old_id = system.store_memory(
         detailed_content="This is an old memory with low importance.",
@@ -276,3 +419,35 @@ def test_clear_memory_removes_old_and_low_importance_entries(tmp_path, monkeypat
     assert old_id not in system._memory_cache
     assert low_importance_id not in system._memory_cache
     assert recent_id in system._memory_cache
+    assert not (system.storage_path / f"{old_id}.json").exists()
+    assert not (system.storage_path / f"{low_importance_id}.json").exists()
+    assert (system.storage_path / f"{recent_id}.json").exists()
+    deleted_ids = {memory_id for call in fake_collection.delete_calls for memory_id in call}
+    assert old_id in deleted_ids
+    assert low_importance_id in deleted_ids
+
+
+def test_clear_all_memories_removes_persisted_artifacts(tmp_path, monkeypatch):
+    system = _build_system(tmp_path, "episodic_clear_all", monkeypatch)
+    fake_collection = _FakeCollection()
+    system.collection = fake_collection
+
+    first_id = system.store_memory(detailed_content="First persisted episodic memory.", importance=0.4)
+    second_id = system.store_memory(detailed_content="Second persisted episodic memory.", importance=0.6)
+
+    system.clear_all_memories()
+
+    assert system._memory_cache == {}
+    assert fake_collection.delete_calls == [[first_id, second_id]]
+    assert list(system.storage_path.glob("*.json")) == []
+
+
+def test_summarize_content_handles_abbreviations_and_decimals(tmp_path, monkeypatch):
+    system = _build_system(tmp_path, "episodic_summary", monkeypatch)
+
+    summary = system._summarize_content(
+        "Meeting with Dr. Smith about version 3.2 rollout. Follow-up tomorrow.",
+        max_length=128,
+    )
+
+    assert summary == "Meeting with Dr. Smith about version 3.2 rollout."

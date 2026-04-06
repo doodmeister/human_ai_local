@@ -77,3 +77,5 @@ scratch_*.py
 memory_stores/
 embeddings/
 models/
+
+.claude/

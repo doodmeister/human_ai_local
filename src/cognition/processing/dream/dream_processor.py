@@ -884,5 +884,8 @@ class DreamProcessor:
         if self.scheduler_thread and self.scheduler_thread.is_alive():
             # Note: In a production system, you'd want a more graceful shutdown
             logger.info("Dream processor shutting down")
+
+        if self.neural_integration:
+            self.neural_integration.shutdown()
         
         logger.info("Dream processor shutdown complete")

@@ -431,6 +431,7 @@ class PerformanceOptimizer:
         )
         
         results = []
+        input_batches = []
         total_memory_usage = 0
         
         for batch_embeddings, batch_importance in batches:
@@ -472,6 +473,7 @@ class PerformanceOptimizer:
                     batch_result = model(batch_tensor, **forward_kwargs)
             
             results.append(batch_result)
+            input_batches.append(batch_tensor)
             
             # Monitor memory after processing
             memory_after = self.memory_monitor.get_memory_usage()
@@ -496,6 +498,7 @@ class PerformanceOptimizer:
         
         return {
             'results': results,
+            'input_batches': input_batches,
             'processing_time': processing_time,
             'optimized_batch_size': optimized_batch_size,
             'memory_usage': avg_memory_usage,

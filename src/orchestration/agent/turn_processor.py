@@ -206,15 +206,21 @@ class CognitiveTurnProcessor:
         processed_input: Dict[str, Any],
         memory_context: List[Dict[str, Any]],
     ) -> Dict[str, float]:
-        relevance = processed_input.get("relevance_score", 0.5)
-        novelty = processed_input.get("entropy_score", 0.6)
-        emotional_salience = processed_input.get("salience_score", 0.0)
+        relevance = float(processed_input.get("relevance_score", 0.5) or 0.0)
+        novelty = float(processed_input.get("entropy_score", 0.6) or 0.0)
+        emotional_salience = float(processed_input.get("salience_score", 0.0) or 0.0)
+        filtered = bool(processed_input.get("filtered", False))
 
         if memory_context:
             avg_memory_relevance = sum(mem["relevance"] for mem in memory_context) / len(memory_context)
             relevance = min(1.0, relevance + (avg_memory_relevance * 0.2))
 
-        base_salience = (relevance * 0.6) + (emotional_salience * 0.4)
+        if filtered:
+            relevance = min(relevance, 0.1)
+            novelty = min(novelty, 0.05)
+            emotional_salience = min(emotional_salience, 0.15)
+
+        base_salience = min(1.0, emotional_salience + (relevance * 0.25))
 
         priority = 0.7 if processed_input.get("type") == "text" else 0.5
         effort_required = 0.7 if len(processed_input.get("raw_input", "")) > 100 else 0.5
@@ -239,6 +245,7 @@ class CognitiveTurnProcessor:
 
         return {
             "overall_attention": enhanced_attention.get("attention_score", 0.5),
+            "overall_salience": float(enhanced_attention.get("effective_salience", base_salience)),
             "relevance": relevance,
             "novelty": enhanced_attention.get("neural_novelty", novelty),
             "emotional_salience": emotional_salience,

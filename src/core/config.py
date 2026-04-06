@@ -58,6 +58,7 @@ class ProcessingConfig:
     embedding_dimension: int = 384
     entropy_threshold: float = 0.3
     batch_size: int = 32
+    lshn_memory_capacity: int = 4096
 
 @dataclass
 class LLMConfig:

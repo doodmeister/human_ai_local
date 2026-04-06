@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from src.memory.schema import CanonicalMemoryItem, MemoryKind, MemoryTimeInterval
 
@@ -10,10 +10,11 @@ from src.memory.schema import CanonicalMemoryItem, MemoryKind, MemoryTimeInterva
 def _to_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
-    if is_dataclass(value):
-        return asdict(value)
-    if hasattr(value, "to_dict"):
-        result = value.to_dict()
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(cast(Any, value))
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        result = to_dict()
         if isinstance(result, Mapping):
             return dict(result)
     if hasattr(value, "__dict__"):

@@ -17,12 +17,12 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 import json
 import logging
+import math
 from pathlib import Path
 import threading
 import uuid
-import sys
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from ..base import BaseMemorySystem  # Add import for base class
 import importlib.util
 
@@ -183,12 +183,16 @@ class EpisodicMemory:
         """Create from dictionary"""
         context_data = data.get("context", {})
         context = EpisodicContext.from_dict(context_data) if context_data else EpisodicContext()
+        timestamp = datetime.fromisoformat(data["timestamp"])
+        created_at_raw = data.get("created_at") or data["timestamp"]
+        last_access_raw = data.get("last_access") or data.get("updated_at") or created_at_raw
+        updated_at_raw = data.get("updated_at") or last_access_raw
         
         return cls(
             id=data["id"],
             summary=data["summary"],
             detailed_content=data["detailed_content"],
-            timestamp=datetime.fromisoformat(data["timestamp"]),
+            timestamp=timestamp,
             duration=timedelta(seconds=data.get("duration", 60)),
             context=context,
             associated_stm_ids=data.get("associated_stm_ids", []),
@@ -202,12 +206,12 @@ class EpisodicMemory:
             episode_sequence=data.get("episode_sequence", 0),
             related_episodes=data.get("related_episodes", []),
             access_count=data.get("access_count", 0),
-            last_access=datetime.fromisoformat(data.get("last_access", datetime.now().isoformat())),
+            last_access=datetime.fromisoformat(last_access_raw),
             consolidation_strength=data.get("consolidation_strength", 0.0),
             rehearsal_count=data.get("rehearsal_count", 0),
             tags=data.get("tags", []),
-            created_at=datetime.fromisoformat(data.get("created_at", data.get("timestamp", datetime.now().isoformat()))),
-            updated_at=datetime.fromisoformat(data.get("updated_at", data.get("last_access", datetime.now().isoformat()))),
+            created_at=datetime.fromisoformat(created_at_raw),
+            updated_at=datetime.fromisoformat(updated_at_raw),
             source=data.get("source"),
             episodic_source=data.get("episodic_source"),
             suppressed=bool(data.get("suppressed", False)),
@@ -248,7 +252,6 @@ class EpisodicMemory:
         base = self.entropy
         if nonlinear:
             # Sigmoid-like: dE = k * (1 / (1 + exp(-a*(E-b))))
-            import math
             a = 6.0  # steepness
             b = 0.5  # midpoint
             k = amount * mod
@@ -332,8 +335,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         logger.info("Episodic Memory System initialized")
     
     def _initialize_chromadb(self):
-        global chromadb
-        """Initialize ChromaDB client and collection"""
+        """Initialize a persistent ChromaDB client and collection."""
         if not CHROMADB_AVAILABLE or chromadb is None:
             self.chroma_client = None
             self.collection = None
@@ -356,24 +358,9 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB at {self.chroma_persist_dir}: {e}")
+            logger.warning("Episodic memory will continue without ChromaDB persistence.")
             self.chroma_client = None
             self.collection = None
-        
-        # Fallback initialization logic
-        if not hasattr(self, 'chroma_client') or self.chroma_client is None:
-            try:
-                import chromadb
-                self.chroma_client = chromadb.Client()
-                sys.stdout.flush()
-            except Exception:
-                sys.stdout.flush()
-        if self.collection is None and hasattr(self, 'chroma_client') and self.chroma_client is not None:
-            try:
-                sys.stdout.flush()
-                self.collection = self.chroma_client.get_or_create_collection(self.collection_name)
-                sys.stdout.flush()
-            except Exception:
-                sys.stdout.flush()
     
     def _load_from_json_backup(self):
         """Load memories from JSON backup files"""
@@ -403,14 +390,62 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 json.dump(memory.to_dict(), f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.warning(f"Failed to save memory to JSON backup: {e}")
+
+    def _remove_json_backup(self, memory_id: str):
+        """Remove the JSON backup file for a memory if it exists."""
+        if not self.enable_json_backup:
+            return
+
+        json_file = self.storage_path / f"{memory_id}.json"
+        if not json_file.exists():
+            return
+
+        try:
+            json_file.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to remove JSON file for episodic memory {memory_id}: {e}")
+
+    def _touch_memory_access(self, memory: EpisodicMemory):
+        """Update access tracking and persist the JSON backup state."""
+        memory.update_access()
+        self._save_to_json_backup(memory)
+
+    def _build_collection_metadata(self, memory: EpisodicMemory) -> Dict[str, Any]:
+        """Build ChromaDB metadata for an episodic memory."""
+        return {
+            "summary": memory.summary,
+            "timestamp": memory.timestamp.isoformat(),
+            "importance": memory.importance,
+            "emotional_valence": memory.emotional_valence,
+            "life_period": memory.life_period or "general",
+            "interaction_type": memory.context.interaction_type,
+            "duration": memory.duration.total_seconds(),
+            "vividness": memory.vividness,
+            "confidence": memory.confidence,
+            "tags": ",".join(memory.tags),
+            "suppressed": bool(getattr(memory, "suppressed", False)),
+        }
+
+    def _delete_collection_entries(self, memory_ids: List[str]):
+        """Delete memory IDs from ChromaDB in a single call when possible."""
+        if self.collection is None or not memory_ids:
+            return
+
+        try:
+            self.collection.delete(ids=memory_ids)
+        except Exception as e:
+            logger.warning(f"Failed to remove episodic memories from ChromaDB: {e}")
     
     def _generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate embedding for text"""
         if not self._ensure_embedding_model():
             return None
+        embedding_model = self.embedding_model
+        if embedding_model is None:
+            return None
             
         try:
-            return self.embedding_model.encode(text).tolist()
+            return embedding_model.encode(text).tolist()
         except Exception as e:
             logger.warning(f"Failed to generate embedding: {e}")
             return None
@@ -473,33 +508,6 @@ class EpisodicMemorySystem(BaseMemorySystem):
         """
         memory = self._memory_cache.get(memory_id)
         if memory:
-            # Ensure all required attributes exist and are consistent
-            if not hasattr(memory, 'consolidation_strength'):
-                memory.consolidation_strength = getattr(memory, 'consolidation_strength', 0.5)
-            if not hasattr(memory, 'rehearsal_count'):
-                memory.rehearsal_count = getattr(memory, 'rehearsal_count', 0)
-            if not hasattr(memory, 'access_count'):
-                memory.access_count = getattr(memory, 'access_count', 0)
-            if not hasattr(memory, 'importance'):
-                memory.importance = getattr(memory, 'importance', 0.5)
-            if not hasattr(memory, 'emotional_valence'):
-                memory.emotional_valence = getattr(memory, 'emotional_valence', 0.0)
-            if not hasattr(memory, 'life_period'):
-                memory.life_period = getattr(memory, 'life_period', None)
-            if not hasattr(memory, 'tags'):
-                memory.tags = getattr(memory, 'tags', [])
-            if not hasattr(memory, 'related_episodes'):
-                memory.related_episodes = getattr(memory, 'related_episodes', [])
-            if not hasattr(memory, 'associated_stm_ids'):
-                memory.associated_stm_ids = getattr(memory, 'associated_stm_ids', [])
-            if not hasattr(memory, 'associated_ltm_ids'):
-                memory.associated_ltm_ids = getattr(memory, 'associated_ltm_ids', [])
-            if not hasattr(memory, 'source_memory_ids'):
-                memory.source_memory_ids = getattr(memory, 'source_memory_ids', [])
-            if not hasattr(memory, 'context'):
-                from .episodic_memory import EpisodicContext
-                memory.context = EpisodicContext()
-            memory.update_access()
             # Phase 7: utility-based learning law.
             # Retrieval reinforcement uses a single utility signal.
             # Benefit: memory importance and existing consolidation strength (proxy for usefulness).
@@ -507,8 +515,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
             benefit = clamp01(0.6 * float(getattr(memory, "importance", 0.5)) + 0.4 * float(getattr(memory, "consolidation_strength", 0.5)))
             u = utility_score(benefit=benefit, cost=0.05)
 
-            memory.rehearsal_count += 1
-            memory.consolidation_strength = min(1.0, memory.consolidation_strength + (0.05 * clamp01(u)))
+            memory.rehearse(strength_increment=0.05)
             memory.confidence = min(1.0, memory.confidence + (0.01 * clamp01(u)))
             self._save_to_json_backup(memory)  # Update backup with access info
             return memory.to_dict()
@@ -523,20 +530,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
         if memory_id in self._memory_cache:
             del self._memory_cache[memory_id]
             removed = True
-            # Remove from ChromaDB
-            if self.collection is not None:
-                try:
-                    self.collection.delete(ids=[memory_id])
-                except Exception as e:
-                    logger.warning(f"Failed to remove episodic memory {memory_id} from ChromaDB: {e}")
-            # Remove JSON file
-            if self.enable_json_backup:
-                json_file = self.storage_path / f"{memory_id}.json"
-                if json_file.exists():
-                    try:
-                        json_file.unlink()
-                    except Exception as e:
-                        logger.warning(f"Failed to remove JSON file for episodic memory {memory_id}: {e}")
+            self._delete_collection_entries([memory_id])
+            self._remove_json_backup(memory_id)
         return removed
 
     def search(self, query: Optional[str] = None, **kwargs) -> List[dict]:
@@ -581,8 +576,39 @@ class EpisodicMemorySystem(BaseMemorySystem):
 
     def _summarize_content(self, content: str, max_length: int = 128) -> str:
         """Generate a simple summary of the content."""
-        sentences = content.split('.')
-        return sentences[0] + '.' if sentences else content[:max_length]
+        normalized = " ".join(content.strip().split())
+        if not normalized:
+            return ""
+
+        abbreviations = {"dr", "mr", "mrs", "ms", "prof", "sr", "jr", "etc", "e.g", "i.e", "vs"}
+        for match in re.finditer(r"[.!?]", normalized):
+            punctuation_index = match.start()
+            boundary_index = match.end()
+
+            if match.group() == ".":
+                if (
+                    punctuation_index > 0
+                    and boundary_index < len(normalized)
+                    and normalized[punctuation_index - 1].isdigit()
+                    and normalized[boundary_index].isdigit()
+                ):
+                    continue
+
+                token = normalized[:punctuation_index].rsplit(None, 1)[-1].strip("\"'()[]{}").lower()
+                if token in abbreviations:
+                    continue
+
+            next_text = normalized[boundary_index:].lstrip()
+            if next_text and next_text[0].islower():
+                continue
+
+            summary = normalized[:boundary_index].strip()
+            if summary:
+                return summary if len(summary) <= max_length else summary[:max_length].rstrip() + "..."
+
+        if len(normalized) <= max_length:
+            return normalized
+        return normalized[:max_length].rstrip() + "..."
 
     def _extract_tags(self, content: str, max_tags: int = 10) -> List[str]:
         """Extract keyword tags from the content."""
@@ -650,27 +676,12 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 # Create searchable text combining summary and content
                 searchable_text = f"{summary} {detailed_content}"
                 embedding = self._generate_embedding(searchable_text)
-                
-                metadata = {
-                    "summary": summary,
-                    "timestamp": memory.timestamp.isoformat(),
-                    "importance": importance,
-                    "emotional_valence": emotional_valence,
-                    "life_period": life_period or "general",
-                    "interaction_type": memory.context.interaction_type,
-                    "duration": memory.duration.total_seconds(),
-                    "vividness": memory.vividness,
-                    "confidence": memory.confidence,
-                    "tags": ",".join(tags) # Store tags as a comma-separated string
-                }
-                if life_period:
-                    metadata["life_period"] = life_period
-                
-                self.collection.add(
+
+                self.collection.upsert(
                     ids=[memory_id],
                     documents=[searchable_text],
                     embeddings=[embedding] if embedding else None,
-                    metadatas=[metadata]
+                    metadatas=[self._build_collection_metadata(memory)]
                 )
                 
             except Exception as e:
@@ -686,8 +697,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         """Retrieve a specific memory by ID"""
         memory = self._memory_cache.get(memory_id)
         if memory:
-            memory.update_access()
-            self._save_to_json_backup(memory)  # Update backup with access info
+            self._touch_memory_access(memory)
         return memory
     
     def search_memories(
@@ -796,7 +806,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         if getattr(memory, "suppressed", False):
                             continue
                         if update_access:
-                            memory.update_access()
+                            self._touch_memory_access(memory)
                         results.append(EpisodicSearchResult(
                             memory=memory,
                             relevance=search_result.relevance,
@@ -828,7 +838,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 if life_period and memory.life_period != life_period:
                     continue
                 relevance = 0.6
-                memory.update_access()
+                if update_access:
+                    self._touch_memory_access(memory)
                 results.append(EpisodicSearchResult(
                     memory=memory,
                     relevance=relevance,
@@ -857,6 +868,8 @@ class EpisodicMemorySystem(BaseMemorySystem):
                         continue
                     relevance = 0.4 + 0.1 * len(overlap)
                     if relevance >= min_relevance:
+                        if update_access:
+                            self._touch_memory_access(memory)
                         results.append(EpisodicSearchResult(
                             memory=memory,
                             relevance=relevance,
@@ -1034,21 +1047,9 @@ class EpisodicMemorySystem(BaseMemorySystem):
 
         if self.collection is not None:
             try:
-                metadata = {
-                    "summary": memory.summary,
-                    "timestamp": memory.timestamp.isoformat(),
-                    "importance": memory.importance,
-                    "emotional_valence": memory.emotional_valence,
-                    "life_period": memory.life_period or "general",
-                    "interaction_type": memory.context.interaction_type,
-                    "duration": memory.duration.total_seconds(),
-                    "vividness": memory.vividness,
-                    "confidence": memory.confidence,
-                    "tags": ",".join(memory.tags),
-                }
                 self.collection.update(
                     ids=[memory_id],
-                    metadatas=[metadata],
+                    metadatas=[self._build_collection_metadata(memory)],
                 )
             except Exception as e:
                 logger.warning(f"Failed to update episodic memory metadata for {memory_id}: {e}")
@@ -1068,6 +1069,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
         suppressed = 0
         protected = 0
         min_age_delta = timedelta(days=float(min_age_days))
+        changed_memories: List[EpisodicMemory] = []
 
         for memory in list(self._memory_cache.values()):
             is_anchor = bool(
@@ -1078,8 +1080,10 @@ class EpisodicMemorySystem(BaseMemorySystem):
             )
             if is_anchor:
                 protected += 1
-                memory.suppressed = False
-                self._save_to_json_backup(memory)
+                if memory.suppressed:
+                    memory.suppressed = False
+                    changed_memories.append(memory)
+                    self._save_to_json_backup(memory)
                 continue
 
             age = now - memory.timestamp
@@ -1091,26 +1095,16 @@ class EpisodicMemorySystem(BaseMemorySystem):
             ):
                 if not getattr(memory, "suppressed", False):
                     suppressed += 1
-                memory.suppressed = True
-                self._save_to_json_backup(memory)
+                    memory.suppressed = True
+                    changed_memories.append(memory)
+                    self._save_to_json_backup(memory)
 
-        if self.collection is not None:
+        if self.collection is not None and changed_memories:
             try:
-                for memory in self._memory_cache.values():
-                    metadata = {
-                        "summary": memory.summary,
-                        "timestamp": memory.timestamp.isoformat(),
-                        "importance": memory.importance,
-                        "emotional_valence": memory.emotional_valence,
-                        "life_period": memory.life_period or "general",
-                        "interaction_type": memory.context.interaction_type,
-                        "duration": memory.duration.total_seconds(),
-                        "vividness": memory.vividness,
-                        "confidence": memory.confidence,
-                        "tags": ",".join(memory.tags),
-                        "suppressed": bool(getattr(memory, "suppressed", False)),
-                    }
-                    self.collection.update(ids=[memory.id], metadatas=[metadata])
+                self.collection.update(
+                    ids=[memory.id for memory in changed_memories],
+                    metadatas=[self._build_collection_metadata(memory) for memory in changed_memories],
+                )
             except Exception as e:
                 logger.warning(f"Failed to persist episodic forgetting policy updates: {e}")
 
@@ -1131,19 +1125,30 @@ class EpisodicMemorySystem(BaseMemorySystem):
         }
         if not memories:
             return stats
-        import numpy as np
-        importance = np.array([m.importance for m in memories])
-        emotional = np.array([m.emotional_valence for m in memories])
-        consolidation = np.array([m.consolidation_strength for m in memories])
-        access = np.array([m.access_count for m in memories])
-        stats["importance_stats"] = {"mean": float(importance.mean()), "min": float(importance.min()), "max": float(importance.max())}
-        stats["emotional_stats"] = {
-            "positive_memories": int((emotional > 0.1).sum()),
-            "negative_memories": int((emotional < -0.1).sum()),
-            "neutral_memories": int(((emotional >= -0.1) & (emotional <= 0.1)).sum()),
+        importance = [m.importance for m in memories]
+        emotional = [m.emotional_valence for m in memories]
+        consolidation = [m.consolidation_strength for m in memories]
+        access = [m.access_count for m in memories]
+        stats["importance_stats"] = {
+            "mean": float(sum(importance) / len(importance)),
+            "min": float(min(importance)),
+            "max": float(max(importance)),
         }
-        stats["consolidation_stats"] = {"mean": float(consolidation.mean()), "min": float(consolidation.min()), "max": float(consolidation.max())}
-        stats["access_stats"] = {"mean": float(access.mean()), "min": int(access.min()), "max": int(access.max())}
+        stats["emotional_stats"] = {
+            "positive_memories": sum(1 for value in emotional if value > 0.1),
+            "negative_memories": sum(1 for value in emotional if value < -0.1),
+            "neutral_memories": sum(1 for value in emotional if -0.1 <= value <= 0.1),
+        }
+        stats["consolidation_stats"] = {
+            "mean": float(sum(consolidation) / len(consolidation)),
+            "min": float(min(consolidation)),
+            "max": float(max(consolidation)),
+        }
+        stats["access_stats"] = {
+            "mean": float(sum(access) / len(access)),
+            "min": int(min(access)),
+            "max": int(max(access)),
+        }
         logger.debug(f"get_memory_statistics: {stats}")
         return stats
 
@@ -1164,7 +1169,7 @@ class EpisodicMemorySystem(BaseMemorySystem):
                 to_remove.append(mem_id)
         for mem_id in to_remove:
             logger.debug(f"clear_memory: removing {mem_id}")
-            self._memory_cache.pop(mem_id, None)
+            self.delete(mem_id)
         logger.debug(f"clear_memory: removed {len(to_remove)} memories.")
 
     def get_consolidation_candidates(self, min_importance: float = 0.5, max_consolidation: float = 0.9, limit: int = 10) -> list:
@@ -1180,9 +1185,25 @@ class EpisodicMemorySystem(BaseMemorySystem):
         return candidates[:limit]
 
     def clear_all_memories(self):
-        """Clear all episodic memories from the in-memory cache (for test isolation)."""
+        """Clear all episodic memories from in-memory and persisted storage."""
+        if self.collection is not None:
+            try:
+                result = self.collection.get()
+                ids = result.get("ids", [])
+                if ids:
+                    self._delete_collection_entries(ids)
+            except Exception as e:
+                logger.warning(f"Failed to clear episodic memories from ChromaDB: {e}")
+
+        if self.enable_json_backup:
+            for json_file in self.storage_path.glob("*.json"):
+                try:
+                    json_file.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to remove episodic JSON backup {json_file}: {e}")
+
         self._memory_cache.clear()
-        logger.debug("clear_all_memories: all in-memory episodic memories cleared.")
+        logger.debug("clear_all_memories: all episodic memories cleared from memory and persistence.")
 
     def batch_consolidate_memories(self, min_importance: float = 0.5, max_consolidation: float = 0.9, limit: int = 20, strength_increment: float = 0.2, cluster: bool = True) -> dict:
         """
@@ -1195,7 +1216,6 @@ class EpisodicMemorySystem(BaseMemorySystem):
         merged = []
         if cluster and candidates:
             # Simple clustering: group by similar summary (could use embedding similarity for more advanced)
-            from collections import defaultdict
             import difflib
             clusters = defaultdict(list)
             for mem in candidates:
