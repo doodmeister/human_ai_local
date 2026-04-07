@@ -23,6 +23,7 @@ Design notes
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from .relational_config import RelationalConfig
@@ -121,10 +122,12 @@ class RelationalProcessor:
         """
         cfg = self.config
         rel = field.get_or_create(person_id, person_name=person_name)
+        now = time.time()
 
         # -- Interaction bookkeeping --
         rel.interaction_count += 1
-        rel.last_interaction_ts = __import__("time").time()
+        rel.last_interaction_ts = now
+        rel.last_attachment_decay_ts = now
 
         # -- Felt quality shift --
         rel.felt_quality = self._update_felt_quality(rel.felt_quality, valence, cfg)
@@ -169,15 +172,20 @@ class RelationalProcessor:
         interlocutor are decayed.
         """
         cfg = self.config
+        now = time.time()
         for pid, rel in field.relationships.items():
             if pid == field.current_interlocutor:
                 continue
-            hours_idle = rel.hours_since_last_interaction()
+            baseline_ts = max(rel.last_interaction_ts, rel.last_attachment_decay_ts)
+            if baseline_ts <= 0.0:
+                continue
+            hours_idle = max(0.0, (now - baseline_ts) / 3600.0)
             decay = cfg.attachment_decay_per_hour * hours_idle
             if decay > 0:
                 rel.attachment_strength = _clamp(
                     rel.attachment_strength - decay, 0.0, 1.0,
                 )
+                rel.last_attachment_decay_ts = now
                 # Update status if attachment has decayed significantly
                 rel.current_status = self._classify_status(rel, cfg)
 

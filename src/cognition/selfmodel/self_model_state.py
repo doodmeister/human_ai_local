@@ -23,7 +23,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
+
+DEFAULT_MAX_RECENT_DISCOVERIES = 10
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -135,6 +138,9 @@ class SelfModel:
     recent_discoveries: List[SelfDiscovery] = field(default_factory=list)
     last_updated_ts: float = field(default_factory=time.time)
 
+    def __post_init__(self) -> None:
+        self.recent_discoveries = list(self.recent_discoveries)[-DEFAULT_MAX_RECENT_DISCOVERIES:]
+
     # ── Queries ──────────────────────────────────────────────────────
 
     @property
@@ -221,7 +227,7 @@ class SelfModel:
         discoveries = [
             SelfDiscovery.from_dict(d)
             for d in data.get("recent_discoveries", [])
-        ]
+        ][-DEFAULT_MAX_RECENT_DISCOVERIES:]
         return cls(
             perceived_patterns=dict(data.get("perceived_patterns", {})),
             perceived_needs=dict(data.get("perceived_needs", {})),
@@ -232,7 +238,7 @@ class SelfModel:
             self_regard=float(data.get("self_regard", 0.0)),
             identity_stability=float(data.get("identity_stability", 0.5)),
             recent_discoveries=discoveries,
-            last_updated_ts=float(data.get("last_updated_ts", time.time())),
+            last_updated_ts=float(data.get("last_updated_ts", 0.0)),
         )
 
     def __repr__(self) -> str:

@@ -84,7 +84,7 @@ class ChatCognitiveLayerRuntime:
 
             cfg = get_global_config()
             rel_cfg = cfg.relational if cfg.relational is not None else RelationalConfig()
-            self._relational_field = RelationalField()
+            self._relational_field = RelationalField(max_relationships=rel_cfg.max_relationships)
             self._relational_processor = RelationalProcessor(config=rel_cfg)
             logger.info("Relational field initialized")
         return self._relational_field, self._relational_processor

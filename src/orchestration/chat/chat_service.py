@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Dict, Any, Optional, Set, Tuple, List, Callable
 from functools import partial
 import asyncio
@@ -125,6 +126,10 @@ class ChatService:
         history_size = int(self.context_builder.cfg.get("metacog_snapshot_history_size", 50))
         self._metacog_history = deque(maxlen=history_size)
         self._cognitive_layers = ChatCognitiveLayerRuntime()
+        self._context_preview_cache: Dict[
+            Tuple[str, str, Tuple[Tuple[str, bool], ...]],
+            Tuple[Tuple[Any, ...], Dict[str, Any]],
+        ] = {}
     # Metacog metrics counters (initialized lazily via metrics_registry)
     # Counter names:
     #  - metacog_snapshots_total
@@ -143,6 +148,12 @@ class ChatService:
         """
         flags = flags or {}
         sess = self.sessions.create_or_get(session_id or "default")
+        cache_key = self._context_preview_cache_key(sess, message, flags)
+        state_signature = self._context_preview_state_signature(sess)
+        cached = self._context_preview_cache.get(cache_key)
+        if cached is not None and cached[0] == state_signature:
+            return copy.deepcopy(cached[1])
+
         # Add a transient turn (not persisted) for preview retrieval basis
         builder = self.context_builder
         built = builder.build(
@@ -155,12 +166,14 @@ class ChatService:
         )
         items_summary = self._summarize_context_items(built.items)
         metrics_registry.inc("context_preview_calls_total")
-        return {
+        preview = {
             "session_id": sess.session_id,
             "scoring_version": get_scoring_profile_version(),
             "item_count": len(items_summary),
             "items": items_summary,
         }
+        self._context_preview_cache[cache_key] = (state_signature, copy.deepcopy(preview))
+        return preview
 
     def process_user_message(
         self,
@@ -547,6 +560,21 @@ class ChatService:
 
     def _summarize_context_items(self, items):
         return self._response_builder.summarize_context_items(items)
+
+    def _context_preview_cache_key(
+        self,
+        session: Any,
+        message: str,
+        flags: Dict[str, bool],
+    ) -> Tuple[str, str, Tuple[Tuple[str, bool], ...]]:
+        normalized_flags = tuple(sorted((str(key), bool(value)) for key, value in flags.items()))
+        return session.session_id, message, normalized_flags
+
+    def _context_preview_state_signature(self, session: Any) -> Tuple[Any, ...]:
+        turn_ids = tuple(getattr(turn, "turn_id", None) for turn in getattr(session, "turns", ()))
+        active_goals = tuple(sorted(self._session_goal_index.get(session.session_id, set())))
+        performance_degraded = bool(metrics_registry.state.get("performance_degraded"))
+        return turn_ids, active_goals, performance_degraded
 
     def _trace_to_dict(self, built) -> Dict[str, Any]:
         return self._response_builder.trace_to_dict(built)

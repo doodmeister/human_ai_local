@@ -369,6 +369,11 @@ class CognitiveAgent:
     async def shutdown(self):
         """Gracefully shutdown the cognitive agent"""
         await self._maintenance_service.shutdown()
+        if self.neural_integration is not None:
+            try:
+                self.neural_integration.shutdown()
+            except Exception as exc:
+                logger.warning("Error shutting down neural integration: %s", exc)
         self.stop_reflection_scheduler()
     
     def reflect(self) -> Dict[str, Any]:

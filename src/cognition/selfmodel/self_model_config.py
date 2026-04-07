@@ -36,6 +36,8 @@ class SelfModelConfig:
         in ``perceived_patterns`` (under-perceive them).
     strength_top_n : int
         Number of top patterns to consider for strengths list.
+    strength_threshold : float
+        Minimum perceived strength for a positive pattern to count as a strength.
     weakness_threshold : float
         Perceived strength below which a pattern counts as a weakness.
     discovery_discrepancy_threshold : float
@@ -58,6 +60,8 @@ class SelfModelConfig:
         Maximum number of stated values.
     max_blind_spots : int
         Maximum number of tracked blind spots.
+    max_recent_discoveries : int
+        Maximum number of recent self-discovery moments to retain.
     """
 
     update_interval: int = 15
@@ -71,6 +75,7 @@ class SelfModelConfig:
     blind_spot_low_activation_threshold: int = 3
     blind_spot_perception_factor: float = 0.3
     strength_top_n: int = 5
+    strength_threshold: float = 0.1
     weakness_threshold: float = 0.15
     discovery_discrepancy_threshold: float = 0.3
     identity_stability_recovery_rate: float = 0.02
@@ -82,3 +87,4 @@ class SelfModelConfig:
     max_weaknesses: int = 5
     max_values: int = 5
     max_blind_spots: int = 10
+    max_recent_discoveries: int = 10

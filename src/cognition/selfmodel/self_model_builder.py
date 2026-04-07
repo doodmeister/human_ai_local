@@ -184,7 +184,7 @@ class SelfModelBuilder:
         else:
             prior = []
         all_discoveries = prior + discoveries
-        all_discoveries = all_discoveries[-10:]  # keep last 10
+        all_discoveries = all_discoveries[-cfg.max_recent_discoveries:]
 
         return SelfModel(
             perceived_patterns=perceived,
@@ -207,7 +207,7 @@ class SelfModelBuilder:
         felt_sense: Any,
         existing_self_model: Optional[SelfModel],
         cfg: SelfModelConfig,
-    ) -> tuple:
+    ) -> tuple[Dict[str, float], List[str]]:
         """Perceive patterns with mood bias and blind spots.
 
         Returns (perceived_patterns dict, blind_spots list).
@@ -267,20 +267,22 @@ class SelfModelBuilder:
         is_negative = self._is_negative_pattern_name(pattern_name)
         is_positive = self._is_positive_pattern_name(pattern_name)
 
+        biased_strength = actual_strength
+
         if valence < cfg.negative_bias_threshold:
             # Negative mood → overweight negative, underweight positive
             if is_negative:
-                return actual_strength * cfg.negative_overweight
+                biased_strength = actual_strength * cfg.negative_overweight
             elif is_positive:
-                return actual_strength * cfg.negative_underweight
+                biased_strength = actual_strength * cfg.negative_underweight
         elif valence > cfg.positive_bias_threshold:
             # Positive mood → mild positive bias
             if is_positive:
-                return actual_strength * cfg.positive_overweight
+                biased_strength = actual_strength * cfg.positive_overweight
             elif is_negative:
-                return actual_strength * cfg.positive_underweight
+                biased_strength = actual_strength * cfg.positive_underweight
 
-        return actual_strength
+        return _clamp(biased_strength, 0.0, 1.0)
 
     def _is_blind_spot_candidate(
         self,
@@ -372,7 +374,7 @@ class SelfModelBuilder:
         candidates = [
             (name, strength)
             for name, strength in perceived.items()
-            if self._is_positive_pattern_name(name) and strength >= 0.1
+            if self._is_positive_pattern_name(name) and strength >= cfg.strength_threshold
         ]
         candidates.sort(key=lambda kv: kv[1], reverse=True)
         return [name for name, _ in candidates[: cfg.max_strengths]]
@@ -406,7 +408,11 @@ class SelfModelBuilder:
 
         # Use actual patterns (not perceived) for value derivation —
         # values come from behavior, not self-perception
-        strong = pattern_field.active_patterns(min_strength=0.1)
+        strong = sorted(
+            pattern_field.active_patterns(min_strength=cfg.strength_threshold),
+            key=lambda pattern: pattern.strength,
+            reverse=True,
+        )
         for pattern in strong:
             value = _PATTERN_VALUE_MAP.get(pattern.name)
             if value and value not in values:

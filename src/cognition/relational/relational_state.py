@@ -16,6 +16,16 @@ from typing import Any, Dict, List, Optional
 RELATIONSHIP_STATUSES = ("active", "dormant", "strained", "growing")
 
 
+def _default_drive_effects() -> Dict[str, float]:
+    return {
+        "connection": 0.0,
+        "competence": 0.0,
+        "autonomy": 0.0,
+        "understanding": 0.0,
+        "meaning": 0.0,
+    }
+
+
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
@@ -67,17 +77,12 @@ class RelationalModel:
 
     recurring_patterns: List[str] = field(default_factory=list)
     gifts: List[str] = field(default_factory=list)
-    drive_effects: Dict[str, float] = field(default_factory=lambda: {
-        "connection": 0.0,
-        "competence": 0.0,
-        "autonomy": 0.0,
-        "understanding": 0.0,
-        "meaning": 0.0,
-    })
+    drive_effects: Dict[str, float] = field(default_factory=_default_drive_effects)
     significant_moment_ids: List[str] = field(default_factory=list)
 
     first_interaction_ts: float = field(default_factory=time.time)
     last_interaction_ts: float = field(default_factory=time.time)
+    last_attachment_decay_ts: float = 0.0
     current_status: str = "active"
 
     # ── Helpers ──────────────────────────────────────────────────────
@@ -88,10 +93,14 @@ class RelationalModel:
 
     def hours_since_last_interaction(self) -> float:
         """Hours elapsed since the last recorded interaction."""
+        if self.last_interaction_ts <= 0.0:
+            return 0.0
         return (time.time() - self.last_interaction_ts) / 3600.0
 
     def time_known_hours(self) -> float:
         """Hours since the first interaction."""
+        if self.first_interaction_ts <= 0.0:
+            return 0.0
         return (time.time() - self.first_interaction_ts) / 3600.0
 
     def summary(self) -> str:
@@ -136,11 +145,17 @@ class RelationalModel:
             "significant_moment_ids": list(self.significant_moment_ids),
             "first_interaction_ts": self.first_interaction_ts,
             "last_interaction_ts": self.last_interaction_ts,
+            "last_attachment_decay_ts": self.last_attachment_decay_ts,
             "current_status": self.current_status,
         }
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "RelationalModel":
+        drive_effects = _default_drive_effects()
+        drive_effects.update({
+            key: float(value)
+            for key, value in dict(d.get("drive_effects", {})).items()
+        })
         return cls(
             person_id=d["person_id"],
             person_name=d.get("person_name", ""),
@@ -149,10 +164,11 @@ class RelationalModel:
             interaction_count=int(d.get("interaction_count", 0)),
             recurring_patterns=list(d.get("recurring_patterns", [])),
             gifts=list(d.get("gifts", [])),
-            drive_effects=dict(d.get("drive_effects", {})),
+            drive_effects=drive_effects,
             significant_moment_ids=list(d.get("significant_moment_ids", [])),
-            first_interaction_ts=float(d.get("first_interaction_ts", time.time())),
-            last_interaction_ts=float(d.get("last_interaction_ts", time.time())),
+            first_interaction_ts=float(d.get("first_interaction_ts", 0.0)),
+            last_interaction_ts=float(d.get("last_interaction_ts", 0.0)),
+            last_attachment_decay_ts=float(d.get("last_attachment_decay_ts", 0.0)),
             current_status=d.get("current_status", "active"),
         )
 
@@ -171,6 +187,7 @@ class RelationalField:
 
     relationships: Dict[str, RelationalModel] = field(default_factory=dict)
     current_interlocutor: Optional[str] = None  # person_id
+    max_relationships: Optional[int] = None
 
     # ── Query helpers ────────────────────────────────────────────────
 
@@ -181,11 +198,40 @@ class RelationalField:
     def get_or_create(self, person_id: str, person_name: str = "") -> RelationalModel:
         """Return existing model or create a fresh one."""
         if person_id not in self.relationships:
+            self._evict_if_needed()
             self.relationships[person_id] = RelationalModel(
                 person_id=person_id,
                 person_name=person_name or person_id,
             )
         return self.relationships[person_id]
+
+    def _evict_if_needed(self) -> None:
+        if self.max_relationships is None or self.max_relationships <= 0:
+            return
+        if len(self.relationships) < self.max_relationships:
+            return
+
+        evictable = [
+            (person_id, rel)
+            for person_id, rel in self.relationships.items()
+            if person_id != self.current_interlocutor
+        ]
+        if not evictable:
+            evictable = list(self.relationships.items())
+        if not evictable:
+            return
+
+        person_id, _rel = min(
+            evictable,
+            key=lambda item: (
+                item[1].current_status != "dormant",
+                item[1].attachment_strength,
+                item[1].interaction_count,
+                item[1].last_interaction_ts if item[1].last_interaction_ts > 0.0 else -1.0,
+                item[0],
+            ),
+        )
+        del self.relationships[person_id]
 
     def set_interlocutor(self, person_id: Optional[str]) -> None:
         """Set the current interlocutor for context injection."""
@@ -225,6 +271,7 @@ class RelationalField:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "current_interlocutor": self.current_interlocutor,
+            "max_relationships": self.max_relationships,
             "relationships": {
                 pid: rm.to_dict()
                 for pid, rm in self.relationships.items()
@@ -239,4 +286,5 @@ class RelationalField:
         return cls(
             relationships=rels,
             current_interlocutor=d.get("current_interlocutor"),
+            max_relationships=d.get("max_relationships"),
         )

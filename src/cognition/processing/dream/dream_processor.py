@@ -13,6 +13,7 @@ Features:
 """
 
 import asyncio
+from collections import deque
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -32,8 +33,7 @@ except ImportError:
 from sklearn.feature_extraction.text import TfidfVectorizer
 from scipy.sparse import csr_matrix
 import schedule
-import time
-from threading import Thread
+from threading import Event, Lock, Thread
 
 from src.core.cognitive_tick import CognitiveStep, CognitiveTick
 
@@ -60,14 +60,16 @@ class ConsolidationCandidate:
     emotional_salience: float
     temporal_relevance: float
     cluster_id: Optional[int] = None
+    stm_item: Any = None
 
 class DreamProcessor:
     """
     Advanced dream-state processor for memory consolidation
-    
+
     Implements multiple types of sleep cycles with different consolidation strategies:
     - Light Sleep: Basic STM decay and maintenance
-    - Deep Sleep: Intensive memory consolidation and clustering    - REM Sleep: Creative associations and neural replay
+    - Deep Sleep: Intensive memory consolidation and clustering
+    - REM Sleep: Creative associations and neural replay
     """
     
     def __init__(
@@ -106,7 +108,7 @@ class DreamProcessor:
         
         # Processing state
         self.last_dream_cycle = None
-        self.consolidation_history = []
+        self.consolidation_history = deque(maxlen=100)
         self.is_dreaming = False
         self.dream_statistics = {
             'total_cycles': 0,
@@ -114,8 +116,11 @@ class DreamProcessor:
             'associations_created': 0,
             'clusters_formed': 0
         }
+        self._dream_state_lock = Lock()
         
         # Scheduling
+        self._scheduler = schedule.Scheduler() if enable_scheduling else None
+        self._scheduler_stop_event = Event()
         self.scheduler_thread = None
         if enable_scheduling:
             self._setup_dream_schedule()
@@ -124,14 +129,17 @@ class DreamProcessor:
     
     def _setup_dream_schedule(self):
         """Setup automatic dream cycle scheduling"""
+        if self._scheduler is None:
+            self._scheduler = schedule.Scheduler()
+
         # Light sleep every 2 hours during active period
-        schedule.every(2).hours.do(self._scheduled_light_sleep)
+        self._scheduler.every(2).hours.do(self._scheduled_light_sleep)
         
         # Deep sleep every 8 hours
-        schedule.every(8).hours.do(self._scheduled_deep_sleep)
+        self._scheduler.every(8).hours.do(self._scheduled_deep_sleep)
         
         # REM sleep every 6 hours
-        schedule.every(6).hours.do(self._scheduled_rem_sleep)
+        self._scheduler.every(6).hours.do(self._scheduled_rem_sleep)
         
         # Start scheduler thread
         self.scheduler_thread = Thread(target=self._run_scheduler, daemon=True)
@@ -141,9 +149,10 @@ class DreamProcessor:
     
     def _run_scheduler(self):
         """Run the dream cycle scheduler"""
-        while True:
-            schedule.run_pending()
-            time.sleep(60)  # Check every minute
+        while not self._scheduler_stop_event.is_set():
+            if self._scheduler is not None:
+                self._scheduler.run_pending()
+            self._scheduler_stop_event.wait(60)
 
     def _launch_dream_cycle(self, cycle_type: str) -> None:
         """Start a dream cycle, handling both async and non-async contexts."""
@@ -196,9 +205,12 @@ class DreamProcessor:
 
         # Perceive
         tick.assert_step(CognitiveStep.PERCEIVE)
-        if self.is_dreaming:
-            logger.warning("Already in dream state, skipping cycle")
-            return {"error": "already_dreaming"}
+        with self._dream_state_lock:
+            if self.is_dreaming:
+                logger.warning("Already in dream state, skipping cycle")
+                return {"error": "already_dreaming"}
+
+            self.is_dreaming = True
 
         cycle_config = self.dream_cycles.get(cycle_type, self.dream_cycles['deep'])
         tick.state["cycle_duration_minutes"] = cycle_config.duration_minutes
@@ -206,7 +218,6 @@ class DreamProcessor:
 
         # Update STM (enter dream-state / reserve resources)
         tick.assert_step(CognitiveStep.UPDATE_STM)
-        self.is_dreaming = True
         logger.info(f"Entering {cycle_type} dream cycle for {cycle_config.duration_minutes} minutes")
         tick.advance(CognitiveStep.UPDATE_STM)
 
@@ -222,7 +233,8 @@ class DreamProcessor:
             return results
 
         finally:
-            self.is_dreaming = False
+            with self._dream_state_lock:
+                self.is_dreaming = False
     
     async def _process_dream_cycle(self, cycle_config: DreamCycle, tick: CognitiveTick | None = None) -> Dict[str, Any]:
         """
@@ -379,7 +391,8 @@ class DreamProcessor:
                     importance_score=clamp01(utility),
                     access_frequency=access_frequency,
                     emotional_salience=emotional_salience,
-                    temporal_relevance=temporal_relevance
+                    temporal_relevance=temporal_relevance,
+                    stm_item=item,
                 )
                 candidates.append(candidate)
         
@@ -395,8 +408,9 @@ class DreamProcessor:
     ) -> List[List[ConsolidationCandidate]]:
         """
         Cluster related memories for coherent consolidation
-        
-        Args:        candidates: List of consolidation candidates
+
+        Args:
+            candidates: List of consolidation candidates
         
         Returns:
             List of memory clusters
@@ -427,17 +441,19 @@ class DreamProcessor:
                             text_parts.extend([str(v) for v in value.values()])
                     texts.append(" ".join(text_parts))
                 else:
-                    texts.append(str(candidate.content))            # Create TF-IDF vectors
+                    texts.append(str(candidate.content))
+
+            # Create TF-IDF vectors
             vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
             X = vectorizer.fit_transform(texts)
             
-            # Convert sparse matrix to dense array  
             # Convert sparse matrix to dense array
             if isinstance(X, csr_matrix):
                 X_dense = X.toarray()  # type: ignore
             else:
                 X_dense = X
-              # Apply HDBSCAN clustering if available
+
+            # Apply HDBSCAN clustering if available
             if HDBSCAN_AVAILABLE and HDBSCAN is not None:
                 try:
                     clusterer = HDBSCAN(min_cluster_size=self.cluster_min_size, metric='cosine')
@@ -537,11 +553,11 @@ class DreamProcessor:
             Number of memories consolidated
         """
         consolidated_count = 0
+        consolidated_ids: set[str] = set()
         
         for candidate in candidates:
             try:
-                # Get the actual memory item from STM
-                stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
+                stm_item = self._get_candidate_stm_item(candidate)
                 if not stm_item:
                     continue
                 
@@ -559,12 +575,16 @@ class DreamProcessor:
                 if success:
                     # Remove from STM
                     self.memory_system.stm.remove_item(candidate.memory_id)
+                    consolidated_ids.add(candidate.memory_id)
                     consolidated_count += 1
                     logger.debug(f"Consolidated memory {candidate.memory_id}")
             
             except Exception as e:
                 logger.error(f"Error consolidating memory {candidate.memory_id}: {e}")
         
+        if consolidated_ids:
+            self._prune_stm_associations(consolidated_ids)
+
         logger.info(f"Consolidated {consolidated_count} memories during {cycle_config.cycle_type} cycle")
         return consolidated_count
     
@@ -583,19 +603,26 @@ class DreamProcessor:
             cycle_config: Dream cycle configuration
         
         Returns:
-            Number of associations created        """
+            Number of associations created
+        """
         associations_created = 0
         
         logger.debug(f"Creating associations for {len(candidates)} candidates and {len(clusters)} clusters")
         
-        try:            # Create intra-cluster associations
+        try:
+            stm_items = {
+                candidate.memory_id: self._get_candidate_stm_item(candidate)
+                for candidate in candidates
+            }
+
+            # Create intra-cluster associations
             logger.debug(f"Processing {len(clusters)} clusters for intra-cluster associations")
             for cluster in clusters:
                 for i, candidate1 in enumerate(cluster):
                     for candidate2 in cluster[i+1:]:
                         # Add mutual associations
-                        stm_item1 = self.memory_system.stm.retrieve(candidate1.memory_id)
-                        stm_item2 = self.memory_system.stm.retrieve(candidate2.memory_id)
+                        stm_item1 = stm_items.get(candidate1.memory_id)
+                        stm_item2 = stm_items.get(candidate2.memory_id)
                         
                         if stm_item1 and stm_item2:
                             if candidate2.memory_id not in stm_item1.associations:
@@ -604,7 +631,9 @@ class DreamProcessor:
                             
                             if candidate1.memory_id not in stm_item2.associations:
                                 stm_item2.associations.append(candidate1.memory_id)
-                                associations_created += 1            # Create temporal associations (enhanced for all cycle types)
+                                associations_created += 1
+
+            # Create temporal associations (enhanced for all cycle types)
             logger.debug(f"Processing temporal associations for {cycle_config.cycle_type} cycle with {len(candidates)} candidates")
             
             # Adjust association criteria based on cycle type
@@ -624,8 +653,8 @@ class DreamProcessor:
             for i, candidate1 in enumerate(candidates):
                 for candidate2 in candidates[i+1:]:
                     # Check temporal proximity
-                    stm_item1 = self.memory_system.stm.retrieve(candidate1.memory_id)
-                    stm_item2 = self.memory_system.stm.retrieve(candidate2.memory_id)
+                    stm_item1 = stm_items.get(candidate1.memory_id)
+                    stm_item2 = stm_items.get(candidate2.memory_id)
                     
                     if stm_item1 and stm_item2:
                         time_diff = abs((stm_item1.encoding_time - stm_item2.encoding_time).total_seconds())
@@ -685,7 +714,8 @@ class DreamProcessor:
         Args:
             candidates: Consolidation candidates
             cycle_config: Dream cycle configuration
-          Returns:
+
+                Returns:
             Replay results
         """
         replay_results = {
@@ -703,7 +733,7 @@ class DreamProcessor:
                 u = utility_score(benefit=candidate.importance_score, cost=0.35 * replay_cost)
                 if u < 0.35:
                     continue
-                stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
+                stm_item = self._get_candidate_stm_item(candidate)
                 if stm_item:
                     # Strengthen memory through replay
                     strength_boost = float(cycle_config.replay_intensity) * 0.1 * clamp01(u)
@@ -711,7 +741,8 @@ class DreamProcessor:
                     
                     replay_results["memories_replayed"] += 1
                     replay_results["strength_increased"] += strength_boost
-              # Integrate with DPAD neural network for actual replay
+
+                        # Integrate with DPAD neural network for actual replay
             await self._dpad_neural_replay(candidates, cycle_config, replay_results)
             
             logger.debug(f"Neural replay completed: {replay_results}")
@@ -745,7 +776,7 @@ class DreamProcessor:
             importance_scores = []
             
             for candidate in candidates:
-                stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
+                stm_item = self._get_candidate_stm_item(candidate)
                 if stm_item and hasattr(stm_item, 'embedding') and stm_item.embedding is not None:
                     # Convert embedding to torch tensor
                     if isinstance(stm_item.embedding, np.ndarray):
@@ -772,7 +803,7 @@ class DreamProcessor:
             )
             
             # Update replay results with neural network information
-            if 'error' not in neural_replay_results:
+            if neural_replay_results.get('status') != 'error':
                 replay_results.update({
                     'neural_replay_enabled': True,
                     'neural_consolidation_strength': neural_replay_results.get('consolidation_strength', 0.0),
@@ -785,7 +816,7 @@ class DreamProcessor:
                 consolidation_strength = float(neural_replay_results.get('consolidation_strength', 0.0) or 0.0)
                 replay_cost = clamp01(getattr(cycle_config, "replay_intensity", 0.5))
                 for candidate in candidates:
-                    stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
+                    stm_item = self._get_candidate_stm_item(candidate)
                     if not stm_item:
                         continue
 
@@ -801,11 +832,14 @@ class DreamProcessor:
                     stm_item.importance = min(1.0, stm_item.importance + neural_boost)
                     replay_results["strength_increased"] += neural_boost
                 
-                logger.debug(f"DPAD neural replay: {neural_replay_results.get('replayed_memories', 0)} memories, "
-                           f"quality: {neural_replay_results.get('reconstruction_quality', 0.0):.3f}")
+                logger.debug(
+                    f"DPAD neural replay: {neural_replay_results.get('replayed_memories', 0)} memories, "
+                    f"quality: {neural_replay_results.get('reconstruction_quality', 0.0):.3f}"
+                )
             else:
-                logger.warning(f"DPAD neural replay error: {neural_replay_results['error']}")
-                replay_results['neural_replay_error'] = neural_replay_results['error']
+                replay_error = neural_replay_results.get('error', 'unknown error')
+                logger.warning(f"DPAD neural replay error: {replay_error}")
+                replay_results['neural_replay_error'] = replay_error
                 
         except Exception as e:
             logger.error(f"Error in DPAD neural replay: {e}")
@@ -837,14 +871,22 @@ class DreamProcessor:
                 if item.importance < weak_threshold and item.access_count == 0:
                     items_to_remove.append(item.id)
             
+            removed_ids = set(items_to_remove)
             for item_id in items_to_remove:
                 self.memory_system.stm.remove_item(item_id)
                 cleanup_results["weak_memories_removed"] += 1
             
             # Clean duplicate associations
-            for item in all_memories:
+            remaining_memories = self.memory_system.stm.get_all_memories()
+            allowed_ids = {memory.id for memory in remaining_memories}
+            for item in remaining_memories:
                 original_count = len(item.associations)
-                item.associations = list(set(item.associations))  # Remove duplicates
+                filtered_associations = [
+                    association_id
+                    for association_id in item.associations
+                    if association_id not in removed_ids and association_id in allowed_ids
+                ]
+                item.associations = list(dict.fromkeys(filtered_associations))
                 cleaned_count = original_count - len(item.associations)
                 cleanup_results["duplicate_associations_cleaned"] += cleaned_count
             
@@ -860,16 +902,52 @@ class DreamProcessor:
             logger.error(f"Error in dream cleanup: {e}")
         
         return cleanup_results
+
+    def _get_candidate_stm_item(self, candidate: ConsolidationCandidate) -> Any:
+        if candidate.stm_item is not None:
+            return candidate.stm_item
+
+        candidate.stm_item = self.memory_system.stm.retrieve(candidate.memory_id)
+        return candidate.stm_item
+
+    def _prune_stm_associations(self, removed_ids: set[str]) -> None:
+        if not removed_ids:
+            return
+
+        try:
+            remaining_items = self.memory_system.stm.get_all_memories()
+        except Exception as exc:
+            logger.error(f"Error pruning STM associations after consolidation: {exc}")
+            return
+
+        for item in remaining_items:
+            item.associations = [
+                association_id
+                for association_id in item.associations
+                if association_id not in removed_ids
+            ]
+
+    def _serialize_dream_value(self, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {key: self._serialize_dream_value(inner_value) for key, inner_value in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_dream_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_dream_value(item) for item in value]
+        return value
     
     def get_dream_statistics(self) -> Dict[str, Any]:
         """Get comprehensive dream processing statistics"""
+        recent_cycles = list(self.consolidation_history)[-5:] if self.consolidation_history else []
         return {
             "statistics": self.dream_statistics.copy(),
-            "last_dream_cycle": self.last_dream_cycle,
+            "last_dream_cycle": self._serialize_dream_value(self.last_dream_cycle),
             "consolidation_history_length": len(self.consolidation_history),
             "is_currently_dreaming": self.is_dreaming,
             "scheduling_enabled": self.enable_scheduling,
-            "recent_cycles": self.consolidation_history[-5:] if self.consolidation_history else []
+            "recent_cycles": self._serialize_dream_value(recent_cycles),
         }
     
     def force_dream_cycle(self, cycle_type: str = 'deep') -> None:
@@ -881,11 +959,13 @@ class DreamProcessor:
     
     def shutdown(self):
         """Shutdown the dream processor"""
-        if self.scheduler_thread and self.scheduler_thread.is_alive():
-            # Note: In a production system, you'd want a more graceful shutdown
-            logger.info("Dream processor shutting down")
+        self._scheduler_stop_event.set()
 
-        if self.neural_integration:
-            self.neural_integration.shutdown()
+        if self.scheduler_thread and self.scheduler_thread.is_alive():
+            logger.info("Dream processor shutting down")
+            self.scheduler_thread.join(timeout=1.0)
+
+        if self._scheduler is not None:
+            self._scheduler.clear()
         
         logger.info("Dream processor shutdown complete")
