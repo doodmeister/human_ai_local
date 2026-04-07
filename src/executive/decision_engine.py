@@ -19,13 +19,15 @@ ENHANCED FEATURES (Phase 1):
 See src/executive/decision/ for enhanced implementations.
 """
 
-from typing import Dict, List, Optional, Any, Callable, Tuple
-from dataclasses import dataclass, field
+from typing import Deque, Dict, List, Optional, Any, Callable, Tuple
+from dataclasses import dataclass, field, replace
+from collections import deque
 from datetime import datetime
 from enum import Enum
 import uuid
 from abc import ABC, abstractmethod
 import logging
+import inspect
 
 # Enhanced decision imports (with graceful fallback)
 try:
@@ -350,6 +352,8 @@ class WeightedScoringStrategy(DecisionStrategy):
 
 class AHPStrategy(DecisionStrategy):
     """Analytic Hierarchy Process decision strategy"""
+
+    _fallback_warning_emitted = False
     
     def decide(
         self,
@@ -372,6 +376,13 @@ class AHPStrategy(DecisionStrategy):
         - Dealing with complex hierarchical decisions
         - Require mathematical consistency checks
         """
+        if not self.__class__._fallback_warning_emitted:
+            logger.warning(
+                "Legacy 'ahp' strategy currently falls back to weighted scoring; "
+                "use 'ahp_enhanced' for full AHP behavior."
+            )
+            self.__class__._fallback_warning_emitted = True
+
         # For now, fall back to weighted scoring
         weighted_strategy = WeightedScoringStrategy()
         result = weighted_strategy.decide(options, criteria, context)
@@ -387,21 +398,53 @@ class EnhancedDecisionAdapter:
     EnhancedDecisionContext. Provides feature-flag controlled rollout with
     fallback to legacy strategies on errors.
     """
+
+    _criteria_child_param_name: Optional[str] = None
+    _criteria_child_param_name_loaded = False
+    _enhanced_context_params: Optional[set[str]] = None
     
     def __init__(self):
         self.context_analyzer = None
         self.ml_model = None
-        self.feature_flags = None
         
         if ENHANCED_DECISION_AVAILABLE and ContextAnalyzer and MLDecisionModel and get_feature_flags:
             try:
                 self.context_analyzer = ContextAnalyzer()
                 self.ml_model = MLDecisionModel()
-                self.feature_flags = get_feature_flags()
             except Exception as e:
                 logging.warning(f"Failed to initialize enhanced decision components: {e}")
         
         self.logger = logging.getLogger(__name__)
+
+    def _get_feature_flags(self) -> Any:
+        """Fetch a fresh feature-flag snapshot so runtime changes are honored."""
+        if not get_feature_flags:
+            return None
+
+        try:
+            return get_feature_flags()
+        except Exception as exc:
+            self.logger.debug(f"Failed to load feature flags: {exc}")
+            return None
+
+    @classmethod
+    def _get_criteria_child_param_name(cls, criteria_hierarchy_cls: Any) -> Optional[str]:
+        """Resolve the CriteriaHierarchy child parameter once per process."""
+        if not cls._criteria_child_param_name_loaded:
+            crit_params = inspect.signature(criteria_hierarchy_cls).parameters
+            cls._criteria_child_param_name = next(
+                (p for p in ('criteria', 'children', 'subcriteria', 'sub_criteria') if p in crit_params),
+                None,
+            )
+            cls._criteria_child_param_name_loaded = True
+        return cls._criteria_child_param_name
+
+    @classmethod
+    def _get_enhanced_context_params(cls, enhanced_context_cls: Any) -> set[str]:
+        """Cache EnhancedDecisionContext constructor parameters."""
+        if cls._enhanced_context_params is None:
+            cls._enhanced_context_params = set(inspect.signature(enhanced_context_cls).parameters.keys())
+        return cls._enhanced_context_params
     
     def to_enhanced_context(
         self,
@@ -411,7 +454,6 @@ class EnhancedDecisionAdapter:
     ) -> Any:
         """Convert legacy decision parameters to enhanced context."""
         from .decision.base import EnhancedDecisionContext, CriteriaHierarchy
-        import inspect  # dynamic signature mapping to avoid unknown kwargs
 
         # Build alternatives dict safely
         alternatives_map = {}
@@ -448,11 +490,7 @@ class EnhancedDecisionAdapter:
             }
 
         # Build criteria hierarchy with dynamic child parameter detection
-        crit_params = inspect.signature(CriteriaHierarchy).parameters
-        child_param_name = next(
-            (p for p in ('criteria', 'children', 'subcriteria', 'sub_criteria') if p in crit_params),
-            None
-        )
+        child_param_name = self._get_criteria_child_param_name(CriteriaHierarchy)
 
         def _build_criteria_node(name: str, weight: float, children_map: Dict[str, Any]):
             kwargs = {'name': name, 'weight': weight}
@@ -473,7 +511,7 @@ class EnhancedDecisionAdapter:
         ctx = context or {}
 
         # Dynamically map kwargs to EnhancedDecisionContext signature
-        params = set(inspect.signature(EnhancedDecisionContext).parameters.keys())
+        params = self._get_enhanced_context_params(EnhancedDecisionContext)
         kwargs: Dict[str, Any] = {}
 
         # alternatives synonyms
@@ -557,8 +595,10 @@ class EnhancedDecisionAdapter:
     ) -> Dict[str, Any]:
         """Apply AHP strategy with enhanced implementation."""
         try:
+            feature_flags = self._get_feature_flags()
+
             # Check feature flag
-            if not (self.feature_flags and self.feature_flags.use_ahp):
+            if not (feature_flags and feature_flags.use_ahp):
                 raise RuntimeError("AHP feature disabled")
             
             # Convert to enhanced context
@@ -571,7 +611,7 @@ class EnhancedDecisionAdapter:
             result = self._invoke_enhanced_decide(strategy, options, criteria, enhanced_ctx, context)
             
             # Record outcome for ML if enabled
-            if self.feature_flags.use_ml_learning and self.ml_model:
+            if feature_flags.use_ml_learning and self.ml_model:
                 # Will be recorded after actual outcome is known
                 pass
             
@@ -589,8 +629,10 @@ class EnhancedDecisionAdapter:
     ) -> Dict[str, Any]:
         """Apply Pareto optimization strategy."""
         try:
+            feature_flags = self._get_feature_flags()
+
             # Check feature flag
-            if not (self.feature_flags and self.feature_flags.use_pareto):
+            if not (feature_flags and feature_flags.use_pareto):
                 raise RuntimeError("Pareto feature disabled")
             
             # Convert to enhanced context
@@ -621,7 +663,12 @@ class DecisionEngine:
     - ML learning from outcomes
     """
     
-    def __init__(self, enable_ml_predictions: bool = True, experiment_manager: Optional[Any] = None):
+    def __init__(
+        self,
+        enable_ml_predictions: bool = True,
+        experiment_manager: Optional[Any] = None,
+        max_history: int = 1000,
+    ):
         """
         Initialize decision engine
         
@@ -633,7 +680,10 @@ class DecisionEngine:
             'weighted_scoring': WeightedScoringStrategy(),
             'ahp': AHPStrategy()
         }
-        self.decision_history: List[DecisionResult] = []
+        self.max_history = max(1, int(max_history))
+        self.decision_history: Deque[DecisionResult] = deque()
+        self._decision_history_index: Dict[str, DecisionResult] = {}
+        self._experiment_assignment_index: Dict[str, DecisionResult] = {}
         self.criterion_templates: Dict[str, List[DecisionCriterion]] = {}
         self._load_default_criteria()
         
@@ -658,12 +708,51 @@ class DecisionEngine:
         if self._enable_experiments:
             logger.info("A/B testing enabled for DecisionEngine")
         
-        # Add enhanced strategies if available
-        if self.enhanced_adapter and self.enhanced_adapter.feature_flags:
-            if self.enhanced_adapter.feature_flags.use_ahp:
-                self.strategies['ahp_enhanced'] = self._make_enhanced_strategy('ahp')
-            if self.enhanced_adapter.feature_flags.use_pareto:
-                self.strategies['pareto'] = self._make_enhanced_strategy('pareto')
+        self._refresh_enhanced_strategies()
+
+    def _refresh_enhanced_strategies(self) -> None:
+        """Synchronize enhanced strategy availability with current feature flags."""
+        if not self.enhanced_adapter:
+            self.strategies.pop('ahp_enhanced', None)
+            self.strategies.pop('pareto', None)
+            return
+
+        feature_flags = self.enhanced_adapter._get_feature_flags()
+        if feature_flags and feature_flags.use_ahp:
+            self.strategies['ahp_enhanced'] = self._make_enhanced_strategy('ahp')
+        else:
+            self.strategies.pop('ahp_enhanced', None)
+
+        if feature_flags and feature_flags.use_pareto:
+            self.strategies['pareto'] = self._make_enhanced_strategy('pareto')
+        else:
+            self.strategies.pop('pareto', None)
+
+    def _is_ml_learning_enabled(self) -> bool:
+        """Return whether enhanced ML outcome learning is currently enabled."""
+        if not self.enhanced_adapter or not self.enhanced_adapter.ml_model:
+            return False
+
+        feature_flags = self.enhanced_adapter._get_feature_flags()
+        return bool(feature_flags and feature_flags.use_ml_learning)
+
+    def _append_decision_history(self, result: DecisionResult) -> None:
+        """Store bounded decision history plus O(1) lookup indexes."""
+        self.decision_history.append(result)
+        self._decision_history_index[result.decision_id] = result
+
+        assignment_id = result.metadata.get('experiment_assignment', {}).get('assignment_id')
+        if assignment_id:
+            self._experiment_assignment_index[assignment_id] = result
+
+        while len(self.decision_history) > self.max_history:
+            expired = self.decision_history.popleft()
+            if self._decision_history_index.get(expired.decision_id) is expired:
+                self._decision_history_index.pop(expired.decision_id, None)
+
+            expired_assignment_id = expired.metadata.get('experiment_assignment', {}).get('assignment_id')
+            if expired_assignment_id and self._experiment_assignment_index.get(expired_assignment_id) is expired:
+                self._experiment_assignment_index.pop(expired_assignment_id, None)
     
     def _load_default_criteria(self) -> None:
         """Load default criterion templates"""
@@ -761,6 +850,7 @@ class DecisionEngine:
                     return DecisionResult(
                         decision_id=str(uuid.uuid4()),
                         recommended_option=result_dict['selected_option'],
+                        option_scores=dict(result_dict.get('scores', {})),
                         rationale=result_dict['reasoning'],
                         confidence=result_dict['confidence'],
                         timestamp=datetime.now(),
@@ -916,12 +1006,17 @@ class DecisionEngine:
             # Apply boost (cap at 0.95 max confidence)
             original_confidence = result.confidence
             boosted_confidence = min(0.95, max(0.05, result.confidence + confidence_boost))
-            
-            # Update result
-            result.confidence = boosted_confidence
-            result.metadata['ml_predictions'] = ml_metadata
-            result.metadata['ml_confidence_boost'] = confidence_boost
-            result.metadata['original_confidence'] = original_confidence
+
+            updated_metadata = dict(result.metadata)
+            updated_metadata['ml_predictions'] = ml_metadata
+            updated_metadata['ml_confidence_boost'] = confidence_boost
+            updated_metadata['original_confidence'] = original_confidence
+
+            result = replace(
+                result,
+                confidence=boosted_confidence,
+                metadata=updated_metadata,
+            )
             
             logger.debug(
                 f"ML confidence boost: {original_confidence:.3f} -> {boosted_confidence:.3f} "
@@ -935,6 +1030,8 @@ class DecisionEngine:
 
     def _sanitize_learning_value(self, value: Any) -> Any:
         """Convert context values into metadata-safe structures for later ML replay."""
+        if isinstance(value, Enum):
+            return self._sanitize_learning_value(value.value)
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, datetime):
@@ -1066,6 +1163,8 @@ class DecisionEngine:
                 decision_id=str(uuid.uuid4()),
                 rationale="No options provided"
             )
+
+        self._refresh_enhanced_strategies()
         
         # Check if we're in experiment mode
         assignment = None
@@ -1114,16 +1213,16 @@ class DecisionEngine:
         # Boost confidence with ML predictions if available
         result = self._boost_confidence_with_ml(result, strategy, context)
 
-        # Preserve the original decision context for later ML outcome learning.
-        result.metadata['decision_context_snapshot'] = self._build_decision_context_snapshot(
-            options,
-            criteria,
-            context,
-            strategy,
-        )
+        if self._is_ml_learning_enabled():
+            result.metadata['decision_context_snapshot'] = self._build_decision_context_snapshot(
+                options,
+                criteria,
+                context,
+                strategy,
+            )
         
         # Store in history
-        self.decision_history.append(result)
+        self._append_decision_history(result)
         
         return result
     
@@ -1151,11 +1250,8 @@ class DecisionEngine:
         
         try:
             # Find decision confidence from history
-            decision_confidence = 0.0
-            for decision in reversed(self.decision_history):
-                if decision.metadata.get('experiment_assignment', {}).get('assignment_id') == assignment_id:
-                    decision_confidence = decision.confidence
-                    break
+            decision = self._experiment_assignment_index.get(assignment_id)
+            decision_confidence = decision.confidence if decision else 0.0
             
             self._experiment_manager.record_outcome(
                 assignment_id=assignment_id,
@@ -1284,27 +1380,19 @@ class DecisionEngine:
             for goal in goals
         ]
         
-        # Evaluate each option
-        results = []
-        for option in options:
-            total_score = 0.0
-            max_possible = 0.0
-            
-            for criterion in criteria:
-                raw_score = criterion.evaluate(option.data['goal'])
-                weighted_score = raw_score * criterion.weight
-                total_score += weighted_score
-                max_possible += criterion.weight
-            
-            final_score = total_score / max_possible if max_possible > 0 else 0.0
-            results.append((option.data['goal'], final_score))
-        
-        # Sort by score
-        return sorted(results, key=lambda x: x[1], reverse=True)
+        weighted_result = WeightedScoringStrategy().decide(options, criteria, context or {})
+
+        ranked_goals = [
+            (option.data['goal'], weighted_result.option_scores.get(option.id, 0.0))
+            for option in options
+        ]
+        return sorted(ranked_goals, key=lambda item: item[1], reverse=True)
     
     def get_decision_history(self, limit: int = 10) -> List[DecisionResult]:
         """Get recent decision history"""
-        return self.decision_history[-limit:]
+        if limit <= 0:
+            return []
+        return list(self.decision_history)[-limit:]
     
     def get_decision_statistics(self) -> Dict[str, Any]:
         """Get decision-making statistics"""
@@ -1352,16 +1440,12 @@ class DecisionEngine:
             logger.debug("ML learning not available, skipping outcome recording")
             return
         
-        if not self.enhanced_adapter.feature_flags or not self.enhanced_adapter.feature_flags.use_ml_learning:
+        if not self._is_ml_learning_enabled():
             logger.debug("ML learning disabled via feature flag")
             return
         
         # Find the decision in history
-        decision = None
-        for d in self.decision_history:
-            if d.decision_id == decision_id:
-                decision = d
-                break
+        decision = self._decision_history_index.get(decision_id)
         
         if not decision:
             logger.warning(f"Decision {decision_id} not found in history")
