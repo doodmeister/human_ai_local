@@ -932,6 +932,113 @@ class DecisionEngine:
             logger.debug(f"ML confidence boost failed: {e}")
         
         return result
+
+    def _sanitize_learning_value(self, value: Any) -> Any:
+        """Convert context values into metadata-safe structures for later ML replay."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {
+                str(key): self._sanitize_learning_value(subvalue)
+                for key, subvalue in value.items()
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [self._sanitize_learning_value(item) for item in value]
+        return str(value)
+
+    def _extract_learning_preferences(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize preference-like context fields into the enhanced context shape."""
+        preferences: Dict[str, Any] = {}
+
+        for key in ('user_preferences', 'preferences'):
+            raw_preferences = context.get(key)
+            if isinstance(raw_preferences, dict):
+                preferences.update(self._sanitize_learning_value(raw_preferences))
+
+        for key in ('criterion_preferences', 'objective_weights'):
+            raw_mapping = context.get(key)
+            if isinstance(raw_mapping, dict):
+                preferences[key] = self._sanitize_learning_value(raw_mapping)
+
+        return preferences
+
+    def _build_decision_context_snapshot(
+        self,
+        options: List[DecisionOption],
+        criteria: List[DecisionCriterion],
+        context: Dict[str, Any],
+        strategy: str,
+    ) -> Dict[str, Any]:
+        """Capture the minimum serializable context needed for later outcome learning."""
+        raw_constraints = context.get('constraints', [])
+        if isinstance(raw_constraints, dict):
+            constraints = [self._sanitize_learning_value(raw_constraints)]
+        elif isinstance(raw_constraints, list):
+            constraints = self._sanitize_learning_value(raw_constraints)
+        else:
+            constraints = []
+
+        raw_domain_knowledge = context.get('domain_knowledge', {})
+        if isinstance(raw_domain_knowledge, dict):
+            domain_knowledge = self._sanitize_learning_value(raw_domain_knowledge)
+        else:
+            domain_knowledge = {'raw_domain_knowledge': self._sanitize_learning_value(raw_domain_knowledge)}
+
+        domain_knowledge.update({
+            'strategy': strategy,
+            'num_options': len(options),
+            'num_criteria': len(criteria),
+            'option_ids': [option.id for option in options],
+            'option_names': [option.name for option in options],
+            'criteria': [criterion.name for criterion in criteria],
+            'criterion_ids': [criterion.id for criterion in criteria],
+        })
+
+        available_resources = context.get('available_resources', [])
+        if not isinstance(available_resources, list):
+            available_resources = [available_resources]
+
+        return {
+            'cognitive_load': self._coerce_context_float(context.get('cognitive_load'), 0.5),
+            'time_pressure': self._coerce_context_float(context.get('time_pressure'), 0.5),
+            'risk_tolerance': self._coerce_context_float(context.get('risk_tolerance'), 0.5),
+            'available_resources': self._sanitize_learning_value(available_resources),
+            'constraints': constraints,
+            'user_preferences': self._extract_learning_preferences(context),
+            'domain_knowledge': domain_knowledge,
+        }
+
+    def _restore_enhanced_context_from_snapshot(
+        self,
+        snapshot: Optional[Dict[str, Any]],
+    ) -> Optional[Any]:
+        """Rebuild EnhancedDecisionContext from a stored metadata snapshot."""
+        if EnhancedDecisionContext is None or not isinstance(snapshot, dict):
+            return None
+
+        try:
+            return EnhancedDecisionContext(
+                cognitive_load=self._coerce_context_float(snapshot.get('cognitive_load'), 0.5),
+                time_pressure=self._coerce_context_float(snapshot.get('time_pressure'), 0.5),
+                risk_tolerance=self._coerce_context_float(snapshot.get('risk_tolerance'), 0.5),
+                available_resources=snapshot.get('available_resources', []),
+                constraints=snapshot.get('constraints', []),
+                user_preferences=snapshot.get('user_preferences', {}),
+                domain_knowledge=snapshot.get('domain_knowledge', {}),
+            )
+        except Exception as exc:
+            logger.debug(f"Failed to restore enhanced decision context from snapshot: {exc}")
+            return None
+
+    def _coerce_context_float(self, value: Any, default: float) -> float:
+        """Parse a bounded float value used by EnhancedDecisionContext."""
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return default
+        return min(1.0, max(0.0, parsed))
     
     def make_decision(
         self,
@@ -1006,6 +1113,14 @@ class DecisionEngine:
         
         # Boost confidence with ML predictions if available
         result = self._boost_confidence_with_ml(result, strategy, context)
+
+        # Preserve the original decision context for later ML outcome learning.
+        result.metadata['decision_context_snapshot'] = self._build_decision_context_snapshot(
+            options,
+            criteria,
+            context,
+            strategy,
+        )
         
         # Store in history
         self.decision_history.append(result)
@@ -1265,12 +1380,29 @@ class DecisionEngine:
                 'predicted_outcome': float(decision.confidence),
             }
 
+            for key, value in meta.items():
+                if key == 'success_threshold' or isinstance(value, bool):
+                    continue
+                if isinstance(value, (int, float)):
+                    outcome_metrics[key] = float(value)
+
+            feedback_parts = []
+            for key, value in meta.items():
+                if isinstance(value, str):
+                    feedback_parts.append(f"{key}={value}")
+
+            context_at_decision = self._restore_enhanced_context_from_snapshot(
+                decision.metadata.get('decision_context_snapshot')
+            )
+
             outcome = DecisionOutcome(
                 decision_id=decision_id,
                 option_chosen=decision.recommended_option.id if decision.recommended_option else "unknown",
                 outcome_metrics=outcome_metrics,
                 success=success,
+                feedback='; '.join(feedback_parts),
                 timestamp=datetime.now(),
+                context_at_decision=context_at_decision,
             )
 
             self.enhanced_adapter.ml_model.record_outcome(outcome)

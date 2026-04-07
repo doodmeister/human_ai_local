@@ -139,6 +139,8 @@ def calculate_confidence_interval(
     
     n = len(data)
     mean = np.mean(data)
+    if n < 2:
+        return (float(mean), float(mean))
     std_err = stats.sem(data)  # Standard error of mean
     
     # t-distribution for small samples
@@ -203,10 +205,12 @@ def cohens_d(group_a: List[float], group_b: List[float]) -> float:
     n_b = len(group_b)
     var_a = np.var(group_a, ddof=1) if n_a > 1 else 0.0
     var_b = np.var(group_b, ddof=1) if n_b > 1 else 0.0
-    
+    if n_a + n_b - 2 <= 0:
+        return 0.0
+
     pooled_std = np.sqrt(((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2))
-    
-    if pooled_std == 0:
+
+    if np.isnan(pooled_std) or np.isclose(pooled_std, 0.0):
         return 0.0
     
     return (mean_a - mean_b) / pooled_std
@@ -238,7 +242,9 @@ def chi_square_test(
     strategy_a_failures: int,
     strategy_b_successes: int,
     strategy_b_failures: int,
-    alpha: float = 0.05
+    alpha: float = 0.05,
+    strategy_a_name: str = "Strategy A",
+    strategy_b_name: str = "Strategy B",
 ) -> ComparisonResult:
     """
     Perform chi-square test for categorical outcomes.
@@ -282,7 +288,7 @@ def chi_square_test(
     # Determine winner
     winner = None
     if is_significant:
-        winner = "Strategy A" if rate_a > rate_b else "Strategy B"
+        winner = strategy_a_name if rate_a > rate_b else strategy_b_name
     
     # Interpretation
     if is_significant:
@@ -297,8 +303,8 @@ def chi_square_test(
         )
     
     return ComparisonResult(
-        strategy_a="Strategy A",
-        strategy_b="Strategy B",
+        strategy_a=strategy_a_name,
+        strategy_b=strategy_b_name,
         test_type=SignificanceTest.CHI_SQUARE,
         test_statistic=chi2,
         p_value=p_value,
@@ -314,7 +320,9 @@ def chi_square_test(
 def t_test(
     strategy_a_scores: List[float],
     strategy_b_scores: List[float],
-    alpha: float = 0.05
+    alpha: float = 0.05,
+    strategy_a_name: str = "Strategy A",
+    strategy_b_name: str = "Strategy B",
 ) -> ComparisonResult:
     """
     Perform independent samples t-test for continuous metrics.
@@ -350,7 +358,7 @@ def t_test(
     # Determine winner
     winner = None
     if is_significant:
-        winner = "Strategy A" if mean_a > mean_b else "Strategy B"
+        winner = strategy_a_name if mean_a > mean_b else strategy_b_name
     
     # Interpretation
     if is_significant:
@@ -365,8 +373,8 @@ def t_test(
         )
     
     return ComparisonResult(
-        strategy_a="Strategy A",
-        strategy_b="Strategy B",
+        strategy_a=strategy_a_name,
+        strategy_b=strategy_b_name,
         test_type=SignificanceTest.T_TEST,
         test_statistic=t_stat,
         p_value=p_value,
@@ -382,7 +390,9 @@ def t_test(
 def mann_whitney_test(
     strategy_a_scores: List[float],
     strategy_b_scores: List[float],
-    alpha: float = 0.05
+    alpha: float = 0.05,
+    strategy_a_name: str = "Strategy A",
+    strategy_b_name: str = "Strategy B",
 ) -> ComparisonResult:
     """
     Perform Mann-Whitney U test for continuous metrics.
@@ -421,7 +431,7 @@ def mann_whitney_test(
     # Determine winner
     winner = None
     if is_significant:
-        winner = "Strategy A" if median_a > median_b else "Strategy B"
+        winner = strategy_a_name if median_a > median_b else strategy_b_name
     
     # Interpretation
     if is_significant:
@@ -436,8 +446,8 @@ def mann_whitney_test(
         )
     
     return ComparisonResult(
-        strategy_a="Strategy A",
-        strategy_b="Strategy B",
+        strategy_a=strategy_a_name,
+        strategy_b=strategy_b_name,
         test_type=SignificanceTest.MANN_WHITNEY,
         test_statistic=u_stat,
         p_value=p_value,
@@ -512,25 +522,25 @@ def recommend_strategy(
         chi_result = chi_square_test(
             perf_a.success_count, perf_a.failure_count,
             perf_b.success_count, perf_b.failure_count,
-            alpha=alpha
+            alpha=alpha,
+            strategy_a_name=strategies[0],
+            strategy_b_name=strategies[1],
         )
-        chi_result.strategy_a = strategies[0]
-        chi_result.strategy_b = strategies[1]
         
         # t-test for outcome scores (if available)
         t_result = None
         if perf_a.outcome_scores and perf_b.outcome_scores:
-            t_result = t_test(perf_a.outcome_scores, perf_b.outcome_scores, alpha=alpha)
-            t_result.strategy_a = strategies[0]
-            t_result.strategy_b = strategies[1]
+            t_result = t_test(
+                perf_a.outcome_scores,
+                perf_b.outcome_scores,
+                alpha=alpha,
+                strategy_a_name=strategies[0],
+                strategy_b_name=strategies[1],
+            )
         
         # Determine recommendation
         if chi_result.is_significant and chi_result.winner:
-            # Parse winner string to get actual strategy name
-            if "Strategy A" in chi_result.winner:
-                recommended = strategies[0]
-            else:
-                recommended = strategies[1]
+            recommended = chi_result.winner
             confidence = 'high' if chi_result.effect_size > 0.5 else 'medium'
             reason = chi_result.interpretation
         else:
@@ -561,6 +571,7 @@ def recommend_strategy(
         # Check if best is significantly better than others
         significant_wins = 0
         comparisons = []
+        corrected_alpha = alpha / max(1, len(strategies) - 1)
         
         for strategy_name, perf in performances.items():
             if strategy_name == best_strategy[0]:
@@ -569,14 +580,14 @@ def recommend_strategy(
             chi_result = chi_square_test(
                 best_strategy[1].success_count, best_strategy[1].failure_count,
                 perf.success_count, perf.failure_count,
-                alpha=alpha
+                alpha=corrected_alpha,
+                strategy_a_name=best_strategy[0],
+                strategy_b_name=strategy_name,
             )
-            chi_result.strategy_a = best_strategy[0]
-            chi_result.strategy_b = strategy_name
             
             comparisons.append(chi_result.to_dict())
             
-            if chi_result.is_significant and chi_result.winner and chi_result.winner.endswith("A"):
+            if chi_result.is_significant and chi_result.winner == best_strategy[0]:
                 significant_wins += 1
         
         # Determine confidence
@@ -594,6 +605,12 @@ def recommend_strategy(
             'recommended_strategy': best_strategy[0],
             'confidence': confidence,
             'reason': reason,
+            'multiple_comparison_correction': {
+                'method': 'bonferroni',
+                'base_alpha': alpha,
+                'corrected_alpha': corrected_alpha,
+                'comparisons': len(strategies) - 1,
+            },
             'comparisons': comparisons,
             'strategy_performances': {
                 name: perf.to_dict() for name, perf in performances.items()

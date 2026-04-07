@@ -13,7 +13,7 @@ Key responsibilities:
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Tuple
@@ -66,6 +66,11 @@ class FeatureVector:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for export."""
+        def _json_safe(value: Any) -> Any:
+            if isinstance(value, float) and np.isnan(value):
+                return None
+            return value
+
         result = {
             'record_id': self.record_id,
             'goal_id': self.goal_id,
@@ -74,17 +79,17 @@ class FeatureVector:
             # Decision features
             'decision_strategy': self.decision_strategy,
             'decision_confidence': self.decision_confidence,
-            'decision_time_ms': self.decision_time_ms,
+            'decision_time_ms': _json_safe(self.decision_time_ms),
             
             # Planning features
             'plan_length': self.plan_length,
             'plan_cost': self.plan_cost,
-            'planning_time_ms': self.planning_time_ms,
-            'nodes_expanded': self.nodes_expanded,
+            'planning_time_ms': _json_safe(self.planning_time_ms),
+            'nodes_expanded': _json_safe(self.nodes_expanded),
             
             # Scheduling features
             'predicted_makespan_minutes': self.predicted_makespan_minutes,
-            'task_count': self.task_count,
+            'task_count': _json_safe(self.task_count),
             
             # Context features
             'hour_of_day': self.hour_of_day,
@@ -167,7 +172,7 @@ class FeatureExtractor:
         
         # Extract scheduling features
         predicted_makespan = record.predicted_makespan_minutes
-        task_count = record.plan_length  # Approximate task count from plan length
+        task_count = float(record.task_count) if record.task_count is not None else np.nan
         
         # Extract context features
         hour_of_day = record.start_time.hour
@@ -186,11 +191,11 @@ class FeatureExtractor:
             timestamp=record.timestamp,
             decision_strategy=decision_strategy,
             decision_confidence=decision_confidence,
-            decision_time_ms=0.0,  # Not available in OutcomeRecord yet
+            decision_time_ms=record.decision_time_ms if record.decision_time_ms is not None else np.nan,
             plan_length=plan_length,
             plan_cost=plan_cost,
-            planning_time_ms=0.0,  # Not available in OutcomeRecord yet
-            nodes_expanded=0,  # Not available in OutcomeRecord yet
+            planning_time_ms=record.planning_time_ms if record.planning_time_ms is not None else np.nan,
+            nodes_expanded=float(record.nodes_expanded) if record.nodes_expanded is not None else np.nan,
             predicted_makespan_minutes=predicted_makespan,
             task_count=task_count,
             hour_of_day=hour_of_day,
@@ -405,10 +410,12 @@ class FeatureExtractor:
             Tuple of (normalized_features, normalization_params)
         """
         df = self.to_dataframe(feature_vectors, include_targets=True)
+        if df.empty:
+            return feature_vectors, {'method': method, 'columns': [], 'params': {}}
         
         # Identify numeric columns to normalize
         numeric_cols = [col for col in self.feature_names if col in df.columns]
-        numeric_cols = [col for col in numeric_cols if df[col].dtype in [np.float64, np.int64]]
+        numeric_cols = [col for col in numeric_cols if pd.api.types.is_numeric_dtype(df[col])]
         
         normalization_params = {
             'method': method,
@@ -437,11 +444,8 @@ class FeatureExtractor:
         else:
             raise ValueError(f"Unknown normalization method: {method}")
         
-        # Convert back to feature vectors
-        # Note: This is simplified - in practice you'd update the original objects
-        # For now we just return the originals with the params
         logger.info(f"Normalized {len(numeric_cols)} features using {method} method")
-        return feature_vectors, normalization_params
+        return self._replace_feature_values(feature_vectors, df, numeric_cols), normalization_params
     
     def handle_missing_values(
         self,
@@ -459,6 +463,8 @@ class FeatureExtractor:
             List of FeatureVector instances with missing values filled
         """
         df = self.to_dataframe(feature_vectors, include_targets=True)
+        if df.empty:
+            return feature_vectors
         
         # Identify columns with missing values
         missing_cols = df.columns[df.isna().any()].tolist()
@@ -483,9 +489,26 @@ class FeatureExtractor:
             df[col] = df[col].fillna(fill_value)
         
         logger.info(f"Filled missing values in {len(missing_cols)} columns using {strategy} strategy")
-        
-        # Note: This is simplified - in practice you'd update the original objects
-        return feature_vectors
+        return self._replace_feature_values(feature_vectors, df, missing_cols)
+
+    def _replace_feature_values(
+        self,
+        feature_vectors: List[FeatureVector],
+        dataframe: pd.DataFrame,
+        columns: List[str],
+    ) -> List[FeatureVector]:
+        """Return copies of feature vectors with selected columns updated from a DataFrame."""
+        updated_vectors: List[FeatureVector] = []
+
+        for feature_vector, row in zip(feature_vectors, dataframe.to_dict(orient='records')):
+            updates = {
+                column: row[column]
+                for column in columns
+                if column in row and hasattr(feature_vector, column)
+            }
+            updated_vectors.append(replace(feature_vector, **updates))
+
+        return updated_vectors
 
 
 def create_feature_extractor() -> FeatureExtractor:

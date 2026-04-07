@@ -21,30 +21,11 @@ from .base import (
     EnhancedDecisionContext,
     EnhancedDecisionResult,
     DecisionStrategy,
+    get_metrics_registry,
 )
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-# Metrics tracking (lazy import to avoid circular dependency)
-_metrics_registry = None
-
-def get_metrics_registry():
-    """Lazy import of metrics registry from chat system"""
-    global _metrics_registry
-    if _metrics_registry is None:
-        try:
-            from src.memory.metrics import metrics_registry
-            _metrics_registry = metrics_registry
-        except ImportError:
-            # Fallback to dummy metrics if chat system unavailable
-            class DummyMetrics:
-                def inc(self, name, value=1): pass
-                def observe(self, name, ms): pass
-                def observe_hist(self, name, value, max_len=500): pass
-            _metrics_registry = DummyMetrics()
-    return _metrics_registry
-
 
 @dataclass
 class ParetoFrontier:
@@ -62,7 +43,7 @@ class ParetoFrontier:
     frontier: List[ParetoSolution]
     ideal_point: Dict[str, float]
     nadir_point: Dict[str, float]
-    hypervolume: float = 0.0
+    hypervolume: Optional[float] = None
 
 
 class ParetoOptimizer:
@@ -167,7 +148,7 @@ class ParetoOptimizer:
         self,
         frontier: List[ParetoSolution],
         reference_point: Dict[str, float]
-    ) -> float:
+    ) -> Optional[float]:
         """
         Calculate hypervolume indicator
         
@@ -201,23 +182,17 @@ class ParetoOptimizer:
                 prev_x = x
             
             return area
-        else:
-            # For higher dimensions, use approximation
-            # Sum of volumes of hypercubes
-            total_volume = 0.0
-            for sol in frontier:
-                volume = 1.0
-                for obj in obj_names:
-                    diff = abs(sol.objectives[obj] - reference_point[obj])
-                    volume *= diff
-                total_volume += volume
-            return total_volume
+        logger.warning(
+            "Hypervolume is only implemented for 2 objectives; returning None for %d objectives",
+            len(obj_names),
+        )
+        return None
     
     def select_from_frontier(
         self,
         frontier: ParetoFrontier,
         preference_weights: Optional[Dict[str, float]] = None
-    ) -> str:
+    ) -> Optional[str]:
         """
         Select single solution from Pareto frontier
         
@@ -229,15 +204,15 @@ class ParetoOptimizer:
             preference_weights: Optional weights for objectives
             
         Returns:
-            ID of selected solution
+            ID of selected solution, or None if the frontier is empty
         """
         if not frontier.frontier:
-            return "no_solution"
+            return None
         
         if preference_weights:
             # Weighted sum approach
             best_score = -float('inf')
-            best_id = "no_solution"
+            best_id = None
             
             for sol in frontier.frontier:
                 score = sum(
@@ -351,7 +326,8 @@ class ParetoStrategy(DecisionStrategy):
             metrics.inc('pareto_decisions_total')
             metrics.observe_hist('pareto_frontier_size', len(frontier.frontier))
             metrics.observe_hist('pareto_frontier_ratio', len(frontier.frontier) / max(len(frontier.solutions), 1))
-            metrics.observe_hist('pareto_hypervolume', frontier.hypervolume)
+            if frontier.hypervolume is not None:
+                metrics.observe_hist('pareto_hypervolume', frontier.hypervolume)
             
             # Extract preference weights from context
             preference_weights = context.user_preferences.get('objective_weights', None)
@@ -411,7 +387,7 @@ class ParetoStrategy(DecisionStrategy):
                 recommended_option_id=best_option_id,
                 option_scores=option_scores,
                 criterion_weights={},  # Pareto doesn't use explicit weights
-                pareto_frontier=[sol for sol in frontier.frontier],
+                pareto_frontier=list(frontier.frontier),
                 rationale=rationale,
                 confidence=confidence,
                 trade_offs=trade_offs,
@@ -481,7 +457,7 @@ class ParetoStrategy(DecisionStrategy):
     def _calculate_confidence(
         self,
         frontier: ParetoFrontier,
-        best_option_id: str
+        best_option_id: Optional[str]
     ) -> float:
         """Calculate confidence based on frontier characteristics"""
         # Confidence is higher when:
@@ -495,7 +471,7 @@ class ParetoStrategy(DecisionStrategy):
         )
         
         if not best_solution:
-            return 0.5
+            return 0.0
         
         # Factor 1: Domination count (normalized)
         max_dom = max(s.domination_count for s in frontier.solutions)
@@ -519,10 +495,13 @@ class ParetoStrategy(DecisionStrategy):
     def _generate_rationale(
         self,
         frontier: ParetoFrontier,
-        best_option_id: str,
+        best_option_id: Optional[str],
         trade_offs: List[Dict[str, Any]]
     ) -> str:
         """Generate rationale for the decision"""
+        if best_option_id is None:
+            return "Pareto analysis found no non-dominated solution to recommend."
+
         best_trade_off = next(
             (t for t in trade_offs if t['option_id'] == best_option_id),
             None

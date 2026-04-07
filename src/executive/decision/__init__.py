@@ -24,6 +24,8 @@ from .base import (
     ParetoSolution,
     FeatureFlags,
     get_feature_flags,
+    reset_feature_flags,
+    set_feature_flags,
 )
 
 from .ahp_engine import (
@@ -59,6 +61,8 @@ __all__ = [
     "ParetoSolution",
     "FeatureFlags",
     "get_feature_flags",
+    "reset_feature_flags",
+    "set_feature_flags",
     # AHP
     "AHPEngine",
     "AHPStrategy",

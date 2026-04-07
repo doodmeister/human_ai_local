@@ -65,6 +65,7 @@ class ModelPredictor:
         # Lazy-loaded models
         self._models: Dict[ModelType, Any] = {}
         self._metadata: Dict[ModelType, ModelMetadata] = {}
+        self._cache_signatures: Dict[ModelType, Tuple[Path, float, float]] = {}
         
         logger.info(f"ModelPredictor initialized (models_dir={self.models_dir})")
     
@@ -380,20 +381,18 @@ class ModelPredictor:
         """Clear cached models (force reload on next prediction)."""
         self._models.clear()
         self._metadata.clear()
+        self._cache_signatures.clear()
         logger.debug("Cleared model cache")
     
     # Helper methods
     
     def _load_model(self, model_type: ModelType) -> Tuple[Any, ModelMetadata]:
         """Load model and metadata from disk (with caching)."""
-        # Check cache
-        if model_type in self._models:
-            return self._models[model_type], self._metadata[model_type]
-        
         # Find most recent model file
         model_files = sorted(
             self.models_dir.glob(f"{model_type}_*.joblib"),
-            reverse=True
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
         )
         
         if not model_files:
@@ -401,6 +400,20 @@ class ModelPredictor:
         
         model_file = model_files[0]
         metadata_file = model_file.with_suffix('.json')
+
+        if not metadata_file.exists():
+            raise FileNotFoundError(
+                f"Metadata file missing for {model_type}: expected {metadata_file.name} next to {model_file.name}"
+            )
+
+        signature = (
+            model_file,
+            model_file.stat().st_mtime,
+            metadata_file.stat().st_mtime,
+        )
+
+        if model_type in self._models and self._cache_signatures.get(model_type) == signature:
+            return self._models[model_type], self._metadata[model_type]
         
         # Load model
         model = joblib.load(model_file)
@@ -413,6 +426,7 @@ class ModelPredictor:
         # Cache
         self._models[model_type] = model
         self._metadata[model_type] = metadata
+        self._cache_signatures[model_type] = signature
         
         logger.debug(f"Loaded {model_type} from {model_file}")
         

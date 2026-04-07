@@ -231,6 +231,8 @@ class ExperimentManager:
         # In-memory caches
         self.experiments: Dict[str, StrategyExperiment] = {}
         self.assignments: Dict[str, List[ExperimentAssignment]] = {}  # exp_id -> assignments
+        self.assignment_index: Dict[str, str] = {}  # assignment_id -> experiment_id
+        self.assignment_lookup: Dict[str, ExperimentAssignment] = {}  # assignment_id -> assignment
         self.outcomes: Dict[str, StrategyOutcome] = {}  # assignment_id -> outcome
         
         # Load existing experiments
@@ -259,17 +261,35 @@ class ExperimentManager:
     
     def _load_assignments(self, experiment_id: str) -> None:
         """Load assignments for an experiment."""
+        assignments_jsonl = self.storage_dir / f"assignments_{experiment_id}.jsonl"
         assignments_file = self.storage_dir / f"assignments_{experiment_id}.json"
-        if not assignments_file.exists():
+        if not assignments_jsonl.exists() and not assignments_file.exists():
             self.assignments[experiment_id] = []
             return
         
         try:
-            with open(assignments_file, 'r') as f:
-                data = json.load(f)
-            
-            assignments = [ExperimentAssignment.from_dict(a) for a in data]
+            assignments: List[ExperimentAssignment] = []
+
+            if assignments_file.exists():
+                with open(assignments_file, 'r') as f:
+                    data = json.load(f)
+                assignments.extend(ExperimentAssignment.from_dict(a) for a in data)
+
+            if assignments_jsonl.exists():
+                with open(assignments_jsonl, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        assignments.append(ExperimentAssignment.from_dict(json.loads(line)))
+
+            deduped_assignments = {assignment.assignment_id: assignment for assignment in assignments}
+            assignments = list(deduped_assignments.values())
             self.assignments[experiment_id] = assignments
+
+            for assignment in assignments:
+                self.assignment_index[assignment.assignment_id] = experiment_id
+                self.assignment_lookup[assignment.assignment_id] = assignment
             
         except Exception as e:
             logger.error(f"Failed to load assignments for {experiment_id}: {e}")
@@ -299,11 +319,15 @@ class ExperimentManager:
             json.dump(experiment.to_dict(), f, indent=2)
     
     def _save_assignments(self, experiment_id: str) -> None:
-        """Save assignments for an experiment."""
-        assignments_file = self.storage_dir / f"assignments_{experiment_id}.json"
+        """Append the newest assignment for an experiment to disk."""
+        assignments_file = self.storage_dir / f"assignments_{experiment_id}.jsonl"
         assignments = self.assignments.get(experiment_id, [])
-        with open(assignments_file, 'w') as f:
-            json.dump([a.to_dict() for a in assignments], f, indent=2)
+        if not assignments:
+            return
+
+        with open(assignments_file, 'a') as f:
+            json.dump(assignments[-1].to_dict(), f)
+            f.write('\n')
     
     def _save_outcomes(self, experiment_id: str) -> None:
         """Save outcomes for an experiment."""
@@ -470,6 +494,8 @@ class ExperimentManager:
         
         # Store assignment
         self.assignments[experiment_id].append(assignment)
+        self.assignment_index[assignment.assignment_id] = experiment_id
+        self.assignment_lookup[assignment.assignment_id] = assignment
         self._save_assignments(experiment_id)
         
         logger.debug(
@@ -547,15 +573,8 @@ class ExperimentManager:
         Returns:
             Created outcome record
         """
-        # Find assignment
-        assignment = None
-        for assignments in self.assignments.values():
-            for a in assignments:
-                if a.assignment_id == assignment_id:
-                    assignment = a
-                    break
-            if assignment:
-                break
+        experiment_id = self.assignment_index.get(assignment_id)
+        assignment = self.assignment_lookup.get(assignment_id)
         
         if not assignment:
             raise ValueError(f"Assignment {assignment_id} not found")
@@ -572,7 +591,7 @@ class ExperimentManager:
         
         # Store outcome
         self.outcomes[assignment_id] = outcome
-        self._save_outcomes(assignment.experiment_id)
+        self._save_outcomes(experiment_id or assignment.experiment_id)
         
         logger.debug(
             f"Recorded outcome for assignment {assignment_id}: "
@@ -589,36 +608,7 @@ class ExperimentManager:
         if experiment_id not in self.experiments:
             return {}
         
-        experiment = self.experiments[experiment_id]
-        assignments = self.assignments.get(experiment_id, [])
-        
-        # Group by strategy
-        strategy_data: Dict[str, Dict[str, List]] = {
-            strategy: {
-                'successes': [],
-                'scores': [],
-                'times': [],
-                'confidences': []
-            }
-            for strategy in experiment.strategies
-        }
-        
-        # Aggregate outcomes
-        for assignment in assignments:
-            if assignment.assignment_id not in self.outcomes:
-                continue
-            
-            outcome = self.outcomes[assignment.assignment_id]
-            strategy = assignment.assigned_strategy
-            
-            if strategy not in strategy_data:
-                continue
-            
-            strategy_data[strategy]['successes'].append(1 if outcome.success else 0)
-            strategy_data[strategy]['scores'].append(outcome.outcome_score)
-            if outcome.execution_time_seconds is not None:
-                strategy_data[strategy]['times'].append(outcome.execution_time_seconds)
-            strategy_data[strategy]['confidences'].append(outcome.decision_confidence)
+        strategy_data = self._aggregate_strategy_outcomes(experiment_id)
         
         # Calculate metrics
         performance = {}
@@ -703,35 +693,7 @@ class ExperimentManager:
             raise ValueError(f"Experiment {experiment_id} not found")
         
         experiment = self.experiments[experiment_id]
-        assignments = self.assignments.get(experiment_id, [])
-        
-        # Group by strategy
-        strategy_data: Dict[str, Dict[str, Any]] = {
-            strategy: {
-                'successes': [],
-                'scores': [],
-                'times': [],
-                'confidences': []
-            }
-            for strategy in experiment.strategies
-        }
-        
-        # Aggregate outcomes
-        for assignment in assignments:
-            if assignment.assignment_id not in self.outcomes:
-                continue
-            
-            outcome = self.outcomes[assignment.assignment_id]
-            strategy = assignment.assigned_strategy
-            
-            if strategy not in strategy_data:
-                continue
-            
-            strategy_data[strategy]['successes'].append(1 if outcome.success else 0)
-            strategy_data[strategy]['scores'].append(outcome.outcome_score)
-            if outcome.execution_time_seconds is not None:
-                strategy_data[strategy]['times'].append(outcome.execution_time_seconds)
-            strategy_data[strategy]['confidences'].append(outcome.decision_confidence)
+        strategy_data = self._aggregate_strategy_outcomes(experiment_id)
         
         # Build StrategyPerformance objects
         performances = {}
@@ -768,6 +730,41 @@ class ExperimentManager:
             )
         
         return performances
+
+    def _aggregate_strategy_outcomes(
+        self,
+        experiment_id: str,
+    ) -> Dict[str, Dict[str, List[Any]]]:
+        """Collect raw outcome series for each strategy in an experiment."""
+        experiment = self.experiments[experiment_id]
+        assignments = self.assignments.get(experiment_id, [])
+
+        strategy_data: Dict[str, Dict[str, List[Any]]] = {
+            strategy: {
+                'successes': [],
+                'scores': [],
+                'times': [],
+                'confidences': [],
+            }
+            for strategy in experiment.strategies
+        }
+
+        for assignment in assignments:
+            outcome = self.outcomes.get(assignment.assignment_id)
+            if outcome is None:
+                continue
+
+            strategy = assignment.assigned_strategy
+            if strategy not in strategy_data:
+                continue
+
+            strategy_data[strategy]['successes'].append(1 if outcome.success else 0)
+            strategy_data[strategy]['scores'].append(outcome.outcome_score)
+            if outcome.execution_time_seconds is not None:
+                strategy_data[strategy]['times'].append(outcome.execution_time_seconds)
+            strategy_data[strategy]['confidences'].append(outcome.decision_confidence)
+
+        return strategy_data
     
     def analyze_experiment(self, experiment_id: str) -> Dict[str, Any]:
         """

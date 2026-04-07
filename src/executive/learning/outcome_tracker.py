@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
+import uuid
 
 if TYPE_CHECKING:
     from .feature_extractor import FeatureExtractor, FeatureVector
@@ -104,6 +105,12 @@ class OutcomeRecord:
     
     # Accuracy
     accuracy_metrics: AccuracyMetrics
+
+    # Optional execution detail (newer records may include these)
+    decision_time_ms: Optional[float] = None
+    planning_time_ms: Optional[float] = None
+    nodes_expanded: Optional[int] = None
+    task_count: Optional[int] = None
     
     # Issues
     deviations: List[str] = field(default_factory=list)
@@ -159,7 +166,7 @@ class OutcomeTracker:
         accuracy = tracker.analyze_decision_accuracy("strategy_name")
     """
     
-    def __init__(self, storage_dir: Optional[Path] = None):
+    def __init__(self, storage_dir: Optional[Path] = None, max_outcomes: int = 1000):
         """
         Initialize outcome tracker.
         
@@ -168,6 +175,7 @@ class OutcomeTracker:
         """
         self.storage_dir = storage_dir or Path("data/outcomes")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.max_outcomes = max_outcomes
         
         self._outcomes: List[OutcomeRecord] = []
         self._feature_extractor: Optional['FeatureExtractor'] = None
@@ -215,17 +223,16 @@ class OutcomeTracker:
         actual_completion = context.actual_completion_time or context.end_time or datetime.now()
         actual_makespan = (actual_completion - context.start_time).total_seconds() / 60
         
-        # Extract predicted makespan from schedule
-        predicted_makespan = 0.0
-        if context.schedule:
-            if isinstance(context.schedule.makespan, timedelta):
-                predicted_makespan = context.schedule.makespan.total_seconds() / 60
-            else:
-                predicted_makespan = float(context.schedule.makespan)
+        predicted_makespan = self._extract_predicted_makespan_minutes(context)
+        task_count = len(context.schedule.tasks) if context.schedule and context.schedule.tasks else len(context.plan.steps) if context.plan else 0
+        decision_strategy = self._derive_decision_strategy(context)
         
         # Build outcome record
         record = OutcomeRecord(
-            record_id=f"{context.goal_id}_{context.start_time.strftime('%Y%m%d_%H%M%S')}",
+            record_id=(
+                f"{context.goal_id}_{context.start_time.strftime('%Y%m%d_%H%M%S_%f')}_"
+                f"{uuid.uuid4().hex[:8]}"
+            ),
             goal_id=context.goal_id,
             goal_title=context.goal_title,
             start_time=context.start_time,
@@ -233,18 +240,26 @@ class OutcomeTracker:
             actual_completion_time=actual_completion,
             success=context.actual_success if context.actual_success is not None else context.success,
             outcome_score=outcome_score,
-            decision_strategy="unknown",  # DecisionResult doesn't expose strategy
+            decision_strategy=decision_strategy,
             decision_confidence=context.decision_result.confidence if context.decision_result else 0.0,
             selected_option=(
                 context.decision_result.recommended_option.name 
                 if context.decision_result and context.decision_result.recommended_option 
                 else "unknown"
             ),
+            decision_time_ms=context.decision_time_ms if context.decision_time_ms > 0 else None,
             plan_length=len(context.plan.steps) if context.plan else 0,
             plan_cost=context.plan.total_cost if context.plan else 0.0,
             actions_completed=context.actions_completed,
-            predicted_makespan_minutes=float(predicted_makespan) if isinstance(predicted_makespan, (int, float)) else predicted_makespan.total_seconds() / 60,
+            planning_time_ms=(
+                context.planning_time_ms
+                if context.planning_time_ms > 0
+                else context.plan.planning_time_ms if context.plan else None
+            ),
+            nodes_expanded=context.plan.nodes_expanded if context.plan else None,
+            predicted_makespan_minutes=predicted_makespan,
             actual_makespan_minutes=actual_makespan,
+            task_count=task_count,
             accuracy_metrics=accuracy,
             deviations=deviations or context.deviations,
             failure_reason=context.failure_reason,
@@ -254,6 +269,7 @@ class OutcomeTracker:
         # Store
         self._outcomes.append(record)
         self._save_outcome(record)
+        self._trim_outcomes()
         
         logger.info(
             f"Recorded outcome for goal '{context.goal_title}': "
@@ -475,8 +491,8 @@ class OutcomeTracker:
         metrics = AccuracyMetrics()
         
         # Time accuracy
-        if context.schedule and context.schedule.makespan:
-            makespan_minutes = context.schedule.makespan.total_seconds() / 60
+        makespan_minutes = self._extract_predicted_makespan_minutes(context)
+        if makespan_minutes > 0:
             if makespan_minutes > 0:
                 actual_time = (
                     (context.actual_completion_time or context.end_time or datetime.now()) 
@@ -502,7 +518,13 @@ class OutcomeTracker:
     
     def _load_outcomes(self) -> None:
         """Load all outcome records from storage."""
-        outcome_files = list(self.storage_dir.glob("outcome_*.json"))
+        outcome_files = sorted(
+            self.storage_dir.glob("outcome_*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if self.max_outcomes > 0:
+            outcome_files = outcome_files[:self.max_outcomes]
         
         for file_path in outcome_files:
             try:
@@ -512,12 +534,14 @@ class OutcomeTracker:
                     self._outcomes.append(record)
             except Exception as e:
                 logger.warning(f"Failed to load outcome from {file_path}: {e}")
+
+        self._outcomes.sort(key=lambda outcome: outcome.timestamp)
         
         logger.debug(f"Loaded {len(self._outcomes)} outcomes from {self.storage_dir}")
     
     def _save_outcome(self, record: OutcomeRecord) -> None:
         """Save outcome record to storage."""
-        file_path = self.storage_dir / f"outcome_{record.record_id}.json"
+        file_path = self._outcome_file_path(record.record_id)
         
         try:
             with open(file_path, 'w') as f:
@@ -525,6 +549,51 @@ class OutcomeTracker:
             logger.debug(f"Saved outcome to {file_path}")
         except Exception as e:
             logger.error(f"Failed to save outcome to {file_path}: {e}")
+
+    def _trim_outcomes(self) -> None:
+        """Enforce the configured maximum number of retained outcomes."""
+        if self.max_outcomes <= 0 or len(self._outcomes) <= self.max_outcomes:
+            return
+
+        self._outcomes.sort(key=lambda outcome: outcome.timestamp)
+        excess = len(self._outcomes) - self.max_outcomes
+        removed = self._outcomes[:excess]
+        self._outcomes = self._outcomes[excess:]
+
+        for record in removed:
+            file_path = self._outcome_file_path(record.record_id)
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                except Exception as exc:
+                    logger.warning(f"Failed to delete trimmed outcome {file_path}: {exc}")
+
+    def _outcome_file_path(self, record_id: str) -> Path:
+        """Build the storage path for an outcome record."""
+        return self.storage_dir / f"outcome_{record_id}.json"
+
+    def _extract_predicted_makespan_minutes(self, context: Any) -> float:
+        """Extract predicted makespan consistently from schedule objects."""
+        if not context.schedule or context.schedule.makespan in (None, 0):
+            return 0.0
+
+        if isinstance(context.schedule.makespan, timedelta):
+            return context.schedule.makespan.total_seconds() / 60
+
+        return float(context.schedule.makespan)
+
+    def _derive_decision_strategy(self, context: Any) -> str:
+        """Recover the decision strategy used for this execution context."""
+        if context.decision_result and isinstance(context.decision_result.metadata, dict):
+            strategy = context.decision_result.metadata.get('strategy')
+            if isinstance(strategy, str) and strategy:
+                return strategy
+
+        metadata_strategy = context.metadata.get('decision_strategy') if isinstance(context.metadata, dict) else None
+        if isinstance(metadata_strategy, str) and metadata_strategy:
+            return metadata_strategy
+
+        return "unknown"
     
     def clear_history(self) -> int:
         """

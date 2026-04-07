@@ -22,30 +22,12 @@ from .base import (
     EnhancedDecisionContext,
     EnhancedDecisionResult,
     DecisionStrategy,
+    get_metrics_registry,
 )
+from .context_analyzer import ContextAnalyzer
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-# Metrics tracking (lazy import to avoid circular dependency)
-_metrics_registry = None
-
-def get_metrics_registry():
-    """Lazy import of metrics registry from chat system"""
-    global _metrics_registry
-    if _metrics_registry is None:
-        try:
-            from src.memory.metrics import metrics_registry
-            _metrics_registry = metrics_registry
-        except ImportError:
-            # Fallback to dummy metrics if chat system unavailable
-            class DummyMetrics:
-                def inc(self, name, value=1): pass
-                def observe(self, name, ms): pass
-                def observe_hist(self, name, value, max_len=500): pass
-            _metrics_registry = DummyMetrics()
-    return _metrics_registry
-
 
 # AHP fundamental scale for pairwise comparisons
 # 1 = Equal importance
@@ -168,9 +150,14 @@ class AHPEngine:
         max_eigenvalue_idx = np.argmax(eigenvalues)
         lambda_max = eigenvalues[max_eigenvalue_idx]
         principal_eigenvector = eigenvectors[:, max_eigenvalue_idx]
+        principal_eigenvector = np.abs(principal_eigenvector)
         
         # Normalize to get weights (sum to 1.0)
-        weights = principal_eigenvector / np.sum(principal_eigenvector)
+        total = np.sum(principal_eigenvector)
+        if np.isclose(total, 0.0):
+            weights = np.full(len(principal_eigenvector), 1.0 / len(principal_eigenvector))
+        else:
+            weights = principal_eigenvector / total
         
         return weights, lambda_max
     
@@ -308,7 +295,7 @@ class AHPStrategy(DecisionStrategy):
     Applies AHP to compute criterion weights, then scores options.
     """
     
-    def __init__(self, consistency_threshold: float = 0.1):
+    def __init__(self, consistency_threshold: float = 0.1, use_context_adjustment: bool = True):
         """
         Initialize AHP strategy
         
@@ -316,6 +303,7 @@ class AHPStrategy(DecisionStrategy):
             consistency_threshold: Max acceptable consistency ratio
         """
         self.ahp_engine = AHPEngine(consistency_threshold)
+        self.context_analyzer = ContextAnalyzer() if use_context_adjustment else None
         self.last_ahp_result: Optional[AHPResult] = None
     
     def decide(
@@ -345,6 +333,15 @@ class AHPStrategy(DecisionStrategy):
             ahp_duration = (time.time() - ahp_start) * 1000.0
             
             self.last_ahp_result = ahp_result
+
+            original_weights = ahp_result.weights.copy()
+            adjusted_weights = original_weights.copy()
+            adjustments = []
+            if self.context_analyzer is not None:
+                adjusted_weights, adjustments = self.context_analyzer.adjust_weights(
+                    original_weights,
+                    context,
+                )
             
             # Track consistency metrics
             metrics.observe_hist('ahp_consistency_ratio', ahp_result.consistency_ratio)
@@ -357,7 +354,7 @@ class AHPStrategy(DecisionStrategy):
             
             # Score all options
             scoring_start = time.time()
-            option_scores = self.ahp_engine.score_options(options, ahp_result.weights)
+            option_scores = self.ahp_engine.score_options(options, adjusted_weights)
             scoring_duration = (time.time() - scoring_start) * 1000.0
             
             # Find best option
@@ -368,7 +365,7 @@ class AHPStrategy(DecisionStrategy):
             metrics.observe_hist('ahp_confidence', confidence)
             
             # Generate rationale
-            rationale = self._generate_rationale(ahp_result, option_scores, best_option_id)
+            rationale = self._generate_rationale(adjusted_weights, option_scores, best_option_id)
             
             # Track performance metrics
             total_duration = (time.time() - start_time) * 1000.0
@@ -390,8 +387,8 @@ class AHPStrategy(DecisionStrategy):
             return EnhancedDecisionResult(
                 recommended_option_id=best_option_id,
                 option_scores=option_scores,
-                criterion_weights=ahp_result.weights,
-                original_weights=ahp_result.weights.copy(),
+                criterion_weights=adjusted_weights,
+                original_weights=original_weights,
                 rationale=rationale,
                 confidence=confidence,
                 context=context,
@@ -399,6 +396,7 @@ class AHPStrategy(DecisionStrategy):
                     'ahp_consistency_ratio': ahp_result.consistency_ratio,
                     'ahp_is_consistent': ahp_result.is_consistent,
                     'ahp_lambda_max': ahp_result.lambda_max,
+                    'ahp_context_adjustments': len(adjustments),
                     'ahp_latency_ms': total_duration,
                     'ahp_hierarchy_analysis_ms': ahp_duration,
                     'ahp_scoring_ms': scoring_duration,
@@ -473,13 +471,13 @@ class AHPStrategy(DecisionStrategy):
     
     def _generate_rationale(
         self,
-        ahp_result: AHPResult,
+        weights: Dict[str, float],
         option_scores: Dict[str, float],
         best_option_id: str
     ) -> str:
         """Generate rationale for the decision"""
         top_criteria = sorted(
-            ahp_result.weights.items(),
+            weights.items(),
             key=lambda x: x[1],
             reverse=True
         )[:3]
@@ -487,7 +485,7 @@ class AHPStrategy(DecisionStrategy):
         criteria_str = ", ".join([f"{name} ({weight:.2f})" for name, weight in top_criteria])
         
         rationale = (
-            f"Based on AHP analysis with {len(ahp_result.weights)} criteria, "
+            f"Based on AHP analysis with {len(weights)} criteria, "
             f"{best_option_id} scored highest ({option_scores[best_option_id]:.3f}). "
             f"Top weighted criteria: {criteria_str}."
         )

@@ -9,38 +9,21 @@ Implements a simple decision tree that learns from past decisions:
 """
 
 from typing import Dict, List, Optional, Tuple, Any
+import json
 import numpy as np
+import joblib
+from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from dataclasses import dataclass
-import pickle
 import logging
 import time
 
-from .base import DecisionOutcome, EnhancedDecisionContext
+from .base import DecisionOutcome, EnhancedDecisionContext, get_metrics_registry
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-# Metrics tracking (lazy import to avoid circular dependency)
-_metrics_registry = None
-
-def get_metrics_registry():
-    """Lazy import of metrics registry from chat system"""
-    global _metrics_registry
-    if _metrics_registry is None:
-        try:
-            from src.memory.metrics import metrics_registry
-            _metrics_registry = metrics_registry
-        except ImportError:
-            # Fallback to dummy metrics if chat system unavailable
-            class DummyMetrics:
-                def inc(self, name, value=1): pass
-                def observe(self, name, ms): pass
-                def observe_hist(self, name, value, max_len=500): pass
-            _metrics_registry = DummyMetrics()
-    return _metrics_registry
-
 
 @dataclass
 class DecisionFeatures:
@@ -53,14 +36,19 @@ class DecisionFeatures:
         risk_tolerance: Risk acceptance level
         num_options: Number of options considered
         num_criteria: Number of criteria used
-        context_hash: Hash of broader context
+        domain_knowledge_signal: Continuous signal derived from domain knowledge structure
     """
     cognitive_load: float
     time_pressure: float
     risk_tolerance: float
     num_options: int
     num_criteria: int
-    context_hash: int = 0
+    domain_knowledge_signal: float = 0.0
+
+    @property
+    def context_hash(self) -> float:
+        """Backward-compatible alias for older callers expecting the old feature name."""
+        return self.domain_knowledge_signal
     
     def to_array(self) -> np.ndarray:
         """Convert features to numpy array for sklearn"""
@@ -70,7 +58,7 @@ class DecisionFeatures:
             self.risk_tolerance,
             float(self.num_options),
             float(self.num_criteria),
-            float(self.context_hash % 10000) / 10000.0,  # Normalize hash
+            self.domain_knowledge_signal,
         ])
 
 
@@ -82,7 +70,7 @@ class MLDecisionModel:
     criterion weight adjustments based on historical data.
     """
     
-    def __init__(self, min_samples_to_train: int = 10):
+    def __init__(self, min_samples_to_train: int = 10, max_outcomes: int = 1000):
         """
         Initialize ML decision model
         
@@ -90,11 +78,14 @@ class MLDecisionModel:
             min_samples_to_train: Minimum outcomes before training
         """
         self.min_samples_to_train = min_samples_to_train
+        self.max_outcomes = max_outcomes
         self.outcomes: List[DecisionOutcome] = []
         self.model: Optional[DecisionTreeClassifier] = None
         self.scaler = StandardScaler()
         self.is_trained = False
         self.feature_importances: Dict[str, float] = {}
+        self.training_accuracy: Optional[float] = None
+        self.validation_accuracy: Optional[float] = None
     
     def record_outcome(self, outcome: DecisionOutcome) -> None:
         """
@@ -106,6 +97,8 @@ class MLDecisionModel:
         metrics = get_metrics_registry()
         
         self.outcomes.append(outcome)
+        if self.max_outcomes > 0 and len(self.outcomes) > self.max_outcomes:
+            self.outcomes = self.outcomes[-self.max_outcomes:]
         metrics.inc('ml_outcomes_recorded_total')
         metrics.observe_hist('ml_outcomes_count', len(self.outcomes))
         
@@ -143,10 +136,11 @@ class MLDecisionModel:
             
             for outcome in self.outcomes:
                 if outcome.context_at_decision:
+                    num_options, num_criteria = self._infer_decision_shape(outcome)
                     features = self._extract_features(
                         outcome.context_at_decision,
-                        len(outcome.outcome_metrics),  # Proxy for num options
-                        len(outcome.outcome_metrics)   # Proxy for num criteria
+                        num_options,
+                        num_criteria,
                     )
                     X.append(features.to_array())
                     y.append(1 if outcome.success else 0)
@@ -162,12 +156,7 @@ class MLDecisionModel:
             X_scaled = self.scaler.fit_transform(X_array)
             
             # Train decision tree
-            self.model = DecisionTreeClassifier(
-                max_depth=5,
-                min_samples_split=5,
-                min_samples_leaf=2,
-                random_state=42
-            )
+            self.model = self._build_classifier()
             self.model.fit(X_scaled, y_array)
             
             # Store feature importances
@@ -184,9 +173,15 @@ class MLDecisionModel:
                 self.model.feature_importances_
             ))
             
-            # Track accuracy
-            accuracy = self.model.score(X_scaled, y_array)
-            metrics.observe_hist('ml_training_accuracy', accuracy)
+            # Track training and validation accuracy separately.
+            training_accuracy = self.model.score(X_scaled, y_array)
+            validation_accuracy = self._estimate_validation_accuracy(X_array, y_array)
+            self.training_accuracy = float(training_accuracy)
+            self.validation_accuracy = validation_accuracy
+
+            metrics.observe_hist('ml_training_accuracy', training_accuracy)
+            if validation_accuracy is not None:
+                metrics.observe_hist('ml_validation_accuracy', validation_accuracy)
             metrics.inc('ml_training_sessions_total')
             
             # Track training time
@@ -194,10 +189,17 @@ class MLDecisionModel:
             metrics.observe('ml_training_latency_ms', duration)
             
             self.is_trained = True
+
+            validation_accuracy_str = (
+                f"{validation_accuracy:.2%}"
+                if validation_accuracy is not None
+                else "n/a"
+            )
             
             logger.info(
                 f"ML model trained: {len(X)} samples, "
-                f"accuracy={accuracy:.2%}, "
+                f"training_accuracy={training_accuracy:.2%}, "
+                f"validation_accuracy={validation_accuracy_str}, "
                 f"latency={duration:.1f}ms"
             )
             
@@ -314,6 +316,8 @@ class MLDecisionModel:
             'is_trained': True,
             'num_outcomes': len(self.outcomes),
             'success_rate': success_rate,
+            'training_accuracy': self.training_accuracy,
+            'validation_accuracy': self.validation_accuracy,
             'feature_importances': self.feature_importances,
             'most_important_feature': max(
                 self.feature_importances.items(),
@@ -332,41 +336,158 @@ class MLDecisionModel:
             True if successful
         """
         try:
-            with open(filepath, 'wb') as f:
-                pickle.dump({
-                    'model': self.model,
-                    'scaler': self.scaler,
-                    'outcomes': self.outcomes,
-                    'is_trained': self.is_trained,
-                    'feature_importances': self.feature_importances,
-                }, f)
+            joblib.dump({
+                'model': self.model,
+                'scaler': self.scaler,
+                'outcomes': self.outcomes,
+                'is_trained': self.is_trained,
+                'feature_importances': self.feature_importances,
+                'training_accuracy': self.training_accuracy,
+                'validation_accuracy': self.validation_accuracy,
+            }, filepath)
             return True
         except Exception as e:
-            print(f"Error saving model: {e}")
+            logger.error(f"Error saving model to {filepath}: {e}", exc_info=True)
             return False
     
-    def load_model(self, filepath: str) -> bool:
+    def load_model(self, filepath: str, trusted_source: bool = False) -> bool:
         """
-        Load model from file
+        Load model from file.
+
+        Model artifacts are serialized Python objects. Only load them from
+        trusted sources by explicitly opting in with trusted_source=True.
         
         Args:
             filepath: Path to load model from
+            trusted_source: Whether the artifact source is trusted
             
         Returns:
             True if successful
         """
+        if not trusted_source:
+            logger.error(
+                f"Refusing to load model from untrusted source: {filepath}. "
+                "Pass trusted_source=True only for verified local artifacts."
+            )
+            return False
+
         try:
-            with open(filepath, 'rb') as f:
-                data = pickle.load(f)
-                self.model = data['model']
-                self.scaler = data['scaler']
-                self.outcomes = data['outcomes']
-                self.is_trained = data['is_trained']
-                self.feature_importances = data['feature_importances']
+            data = joblib.load(filepath)
+            self.model = data['model']
+            self.scaler = data['scaler']
+            self.outcomes = data['outcomes']
+            self.is_trained = data['is_trained']
+            self.feature_importances = data['feature_importances']
+            self.training_accuracy = data.get('training_accuracy')
+            self.validation_accuracy = data.get('validation_accuracy')
             return True
         except Exception as e:
-            print(f"Error loading model: {e}")
+            logger.error(f"Error loading model from {filepath}: {e}", exc_info=True)
             return False
+
+    def _estimate_validation_accuracy(
+        self,
+        X_array: np.ndarray,
+        y_array: np.ndarray,
+    ) -> Optional[float]:
+        """Estimate generalization accuracy with scaler fitting isolated to each fold."""
+        labels, counts = np.unique(y_array, return_counts=True)
+        if len(labels) < 2:
+            return None
+
+        min_class_count = int(np.min(counts))
+        n_splits = min(5, min_class_count, len(y_array))
+        if n_splits < 2:
+            return None
+
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        validation_pipeline = Pipeline([
+            ('scaler', StandardScaler()),
+            ('model', self._build_classifier()),
+        ])
+        scores = cross_val_score(validation_pipeline, X_array, y_array, cv=cv)
+        return float(np.mean(scores))
+
+    def _build_classifier(self) -> DecisionTreeClassifier:
+        """Create the classifier used for both training and fold-local validation."""
+        return DecisionTreeClassifier(
+            max_depth=5,
+            min_samples_split=5,
+            min_samples_leaf=2,
+            random_state=42,
+        )
+
+    def _infer_decision_shape(self, outcome: DecisionOutcome) -> Tuple[int, int]:
+        """Infer decision dimensions from outcome metadata.
+
+        When no decision-shape metadata is available, the fallback duplicates a
+        conservative proxy based on outcome metric count. That last-resort path
+        is intentionally documented here because the engine needs richer stored
+        decision metadata to infer independent option and criteria counts.
+        """
+        context = outcome.context_at_decision
+        if context is None:
+            return self._fallback_decision_shape(outcome)
+
+        domain_knowledge = context.domain_knowledge or {}
+        user_preferences = context.user_preferences or {}
+
+        num_options = self._coerce_positive_int(
+            domain_knowledge.get('num_options')
+            or domain_knowledge.get('decision_num_options')
+            or user_preferences.get('num_options')
+            or user_preferences.get('decision_num_options')
+        )
+        if num_options is None:
+            alternatives = domain_knowledge.get('alternatives') or user_preferences.get('alternatives')
+            if isinstance(alternatives, dict):
+                num_options = len(alternatives)
+            elif isinstance(alternatives, list):
+                num_options = len(alternatives)
+
+        criteria = (
+            domain_knowledge.get('criteria')
+            or user_preferences.get('criteria')
+            or user_preferences.get('criterion_preferences')
+            or user_preferences.get('objective_weights')
+        )
+        if isinstance(criteria, dict):
+            num_criteria = len(criteria)
+        elif isinstance(criteria, list):
+            num_criteria = len(criteria)
+        else:
+            num_criteria = self._coerce_positive_int(
+                domain_knowledge.get('num_criteria')
+                or domain_knowledge.get('decision_num_criteria')
+                or user_preferences.get('num_criteria')
+                or user_preferences.get('decision_num_criteria')
+            )
+
+        if num_options is not None and num_criteria is not None:
+            return num_options, num_criteria
+        if num_options is not None:
+            return num_options, num_criteria or 1
+        if num_criteria is not None:
+            return 1, num_criteria
+
+        return self._fallback_decision_shape(outcome)
+
+    def _fallback_decision_shape(self, outcome: DecisionOutcome) -> Tuple[int, int]:
+        """Last-resort shape inference when the original decision metadata is unavailable."""
+        fallback = max(1, len(outcome.outcome_metrics))
+        logger.debug(
+            "Falling back to duplicated decision-shape proxy for outcome %s; richer decision metadata is unavailable",
+            outcome.decision_id,
+        )
+        return fallback, fallback
+
+    def _coerce_positive_int(self, value: Any) -> Optional[int]:
+        """Convert a candidate size value into a positive integer when possible."""
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
     
     def _extract_features(
         self,
@@ -375,8 +496,7 @@ class MLDecisionModel:
         num_criteria: int
     ) -> DecisionFeatures:
         """Extract features from context"""
-        # Simple hash of domain knowledge
-        context_hash = hash(str(context.domain_knowledge)) if context.domain_knowledge else 0
+        domain_knowledge_signal = self._extract_domain_knowledge_signal(context.domain_knowledge)
         
         return DecisionFeatures(
             cognitive_load=context.cognitive_load,
@@ -384,5 +504,47 @@ class MLDecisionModel:
             risk_tolerance=context.risk_tolerance,
             num_options=num_options,
             num_criteria=num_criteria,
-            context_hash=context_hash
+            domain_knowledge_signal=domain_knowledge_signal,
         )
+
+    def _extract_domain_knowledge_signal(self, domain_knowledge: Dict[str, Any]) -> float:
+        """Convert domain knowledge structure into a smooth complexity-like feature."""
+        if not domain_knowledge:
+            return 0.0
+
+        normalized_context = json.dumps(
+            domain_knowledge,
+            sort_keys=True,
+            default=str,
+        )
+        breadth = min(1.0, len(domain_knowledge) / 12.0)
+        content_length = min(1.0, len(normalized_context) / 600.0)
+        depth = min(1.0, self._estimate_structure_depth(domain_knowledge) / 6.0)
+
+        return float((0.4 * breadth) + (0.4 * content_length) + (0.2 * depth))
+
+    def _estimate_structure_depth(
+        self,
+        value: Any,
+        current_depth: int = 0,
+        max_depth: int = 32,
+    ) -> int:
+        """Estimate nested depth for dict/list structures used in domain knowledge."""
+        if current_depth >= max_depth:
+            return max_depth
+
+        if isinstance(value, dict):
+            if not value:
+                return current_depth + 1
+            return max(
+                self._estimate_structure_depth(child, current_depth + 1, max_depth)
+                for child in value.values()
+            )
+        if isinstance(value, list):
+            if not value:
+                return current_depth + 1
+            return max(
+                self._estimate_structure_depth(child, current_depth + 1, max_depth)
+                for child in value
+            )
+        return current_depth

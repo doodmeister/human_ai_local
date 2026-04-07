@@ -13,30 +13,10 @@ from dataclasses import dataclass
 import logging
 import time
 
-from .base import EnhancedDecisionContext
+from .base import EnhancedDecisionContext, get_metrics_registry
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-# Metrics tracking (lazy import to avoid circular dependency)
-_metrics_registry = None
-
-def get_metrics_registry():
-    """Lazy import of metrics registry from chat system"""
-    global _metrics_registry
-    if _metrics_registry is None:
-        try:
-            from src.memory.metrics import metrics_registry
-            _metrics_registry = metrics_registry
-        except ImportError:
-            # Fallback to dummy metrics if chat system unavailable
-            class DummyMetrics:
-                def inc(self, name, value=1): pass
-                def observe(self, name, ms): pass
-                def observe_hist(self, name, value, max_len=500): pass
-            _metrics_registry = DummyMetrics()
-    return _metrics_registry
-
 
 @dataclass
 class ContextAdjustment:
@@ -68,8 +48,9 @@ class ContextAnalyzer:
     - User preferences: Apply user-specific adjustments
     """
     
-    def __init__(self):
+    def __init__(self, max_history: int = 1000):
         """Initialize context analyzer"""
+        self.max_history = max_history
         self.adjustment_history: List[ContextAdjustment] = []
     
     def adjust_weights(
@@ -165,6 +146,8 @@ class ContextAnalyzer:
                 metrics.observe_hist('context_max_weight_change', max_change)
             
             self.adjustment_history.extend(adjustments)
+            if self.max_history > 0 and len(self.adjustment_history) > self.max_history:
+                self.adjustment_history = self.adjustment_history[-self.max_history:]
             
             logger.debug(
                 f"Context analysis complete: {len(adjustments)} adjustments, "

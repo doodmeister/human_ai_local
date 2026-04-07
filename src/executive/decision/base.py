@@ -9,7 +9,37 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from abc import ABC, abstractmethod
+import threading
 import uuid
+
+
+class DummyMetrics:
+    """Fallback metrics collector used when the chat metrics system is unavailable."""
+
+    def inc(self, name, value=1):
+        pass
+
+    def observe(self, name, ms):
+        pass
+
+    def observe_hist(self, name, value, max_len=500):
+        pass
+
+
+_metrics_registry = None
+
+
+def get_metrics_registry():
+    """Lazily load the shared metrics registry with a local no-op fallback."""
+    global _metrics_registry
+    if _metrics_registry is None:
+        try:
+            from src.memory.metrics import metrics_registry
+
+            _metrics_registry = metrics_registry
+        except ImportError:
+            _metrics_registry = DummyMetrics()
+    return _metrics_registry
 
 
 @dataclass
@@ -69,7 +99,7 @@ class CriteriaHierarchy:
     name: str
     weight: float = 0.0
     sub_criteria: List['CriteriaHierarchy'] = field(default_factory=list)
-    parent: Optional['CriteriaHierarchy'] = None
+    parent: Optional['CriteriaHierarchy'] = field(default=None, repr=False)
     pairwise_comparisons: Dict[Tuple[str, str], float] = field(default_factory=dict)
     consistency_ratio: float = 0.0
     
@@ -334,11 +364,43 @@ class FeatureFlags:
             'fallback_to_legacy': self.fallback_to_legacy
         }
 
+    def copy(self) -> 'FeatureFlags':
+        """Create an independent copy for callers that should not share mutable state."""
+        flags = FeatureFlags()
+        flags.use_ahp = self.use_ahp
+        flags.use_pareto = self.use_pareto
+        flags.use_ml_learning = self.use_ml_learning
+        flags.use_context_adjustment = self.use_context_adjustment
+        flags.use_goap_planning = self.use_goap_planning
+        flags.fallback_to_legacy = self.fallback_to_legacy
+        return flags
 
-# Global feature flags instance
+
+# Process-level feature flag defaults guarded by a lock.
+_feature_flags_lock = threading.Lock()
 _feature_flags = FeatureFlags()
 
 
 def get_feature_flags() -> FeatureFlags:
-    """Get global feature flags instance"""
-    return _feature_flags
+    """Get an isolated copy of the current feature flags configuration."""
+    with _feature_flags_lock:
+        return _feature_flags.copy()
+
+
+def set_feature_flags(flags: Optional[FeatureFlags] = None, **overrides: bool) -> FeatureFlags:
+    """Replace the process-level feature flag defaults used by new callers."""
+    global _feature_flags
+
+    with _feature_flags_lock:
+        updated_flags = flags.copy() if flags is not None else _feature_flags.copy()
+        for name, value in overrides.items():
+            if not hasattr(updated_flags, name):
+                raise AttributeError(f"Unknown feature flag: {name}")
+            setattr(updated_flags, name, bool(value))
+        _feature_flags = updated_flags
+        return _feature_flags.copy()
+
+
+def reset_feature_flags() -> FeatureFlags:
+    """Restore the default feature flag configuration."""
+    return set_feature_flags(FeatureFlags())

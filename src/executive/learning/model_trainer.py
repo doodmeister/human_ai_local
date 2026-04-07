@@ -66,6 +66,7 @@ class ModelMetadata:
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> 'ModelMetadata':
         """Create from dictionary."""
+        data = data.copy()
         data['training_date'] = datetime.fromisoformat(data['training_date'])
         return ModelMetadata(**data)
 
@@ -77,6 +78,7 @@ class TrainingConfig:
     random_state: int = 42
     cv_folds: int = 5
     n_jobs: int = -1  # Use all CPUs
+    max_saved_versions_per_model: int = 3
     
     # Strategy classifier
     strategy_n_estimators: int = 100
@@ -634,7 +636,7 @@ class ModelTrainer:
     ) -> Tuple[np.ndarray, List[str]]:
         """Extract feature matrix and feature names."""
         features = []
-        feature_names = []
+        feature_names = self._build_feature_names(include_decision, include_targets)
         
         for fv in feature_vectors:
             row = []
@@ -644,16 +646,10 @@ class ModelTrainer:
                 # One-hot encode strategy
                 for strategy in ['weighted_scoring', 'ahp', 'pareto']:
                     row.append(1 if fv.decision_strategy == strategy else 0)
-                    if not feature_names or len(feature_names) < len(row):
-                        feature_names.append(f'strategy_{strategy}')
                 
                 row.append(fv.decision_confidence)
-                if not feature_names or len(feature_names) < len(row):
-                    feature_names.append('decision_confidence')
                 
                 row.append(fv.decision_time_ms)
-                if not feature_names or len(feature_names) < len(row):
-                    feature_names.append('decision_time_ms')
             
             # Planning features
             row.extend([
@@ -662,29 +658,18 @@ class ModelTrainer:
                 fv.planning_time_ms,
                 fv.nodes_expanded,
             ])
-            if not feature_names or len(feature_names) < len(row):
-                feature_names.extend([
-                    'plan_length', 'plan_cost',
-                    'planning_time_ms', 'nodes_expanded'
-                ])
             
             # Scheduling features
             row.extend([
                 fv.predicted_makespan_minutes,
                 fv.task_count,
             ])
-            if not feature_names or len(feature_names) < len(row):
-                feature_names.extend([
-                    'predicted_makespan_minutes', 'task_count'
-                ])
             
             # Context features
             row.extend([
                 fv.hour_of_day,
                 fv.day_of_week,
             ])
-            if not feature_names or len(feature_names) < len(row):
-                feature_names.extend(['hour_of_day', 'day_of_week'])
             
             # Targets (if requested)
             if include_targets:
@@ -694,15 +679,48 @@ class ModelTrainer:
                     fv.time_accuracy_ratio,
                     fv.plan_adherence_score,
                 ])
-                if not feature_names or len(feature_names) < len(row):
-                    feature_names.extend([
-                        'success', 'outcome_score',
-                        'time_accuracy_ratio', 'plan_adherence_score'
-                    ])
             
             features.append(row)
         
         return np.array(features), feature_names
+
+    def _build_feature_names(
+        self,
+        include_decision: bool,
+        include_targets: bool,
+    ) -> List[str]:
+        """Build the feature-name list independent of row extraction."""
+        feature_names: List[str] = []
+
+        if include_decision:
+            feature_names.extend([
+                'strategy_weighted_scoring',
+                'strategy_ahp',
+                'strategy_pareto',
+                'decision_confidence',
+                'decision_time_ms',
+            ])
+
+        feature_names.extend([
+            'plan_length',
+            'plan_cost',
+            'planning_time_ms',
+            'nodes_expanded',
+            'predicted_makespan_minutes',
+            'task_count',
+            'hour_of_day',
+            'day_of_week',
+        ])
+
+        if include_targets:
+            feature_names.extend([
+                'success',
+                'outcome_score',
+                'time_accuracy_ratio',
+                'plan_adherence_score',
+            ])
+
+        return feature_names
     
     def _tune_strategy_classifier(self, X_train, y_train):
         """Tune hyperparameters for strategy classifier."""
@@ -788,7 +806,7 @@ class ModelTrainer:
     
     def _save_model(self, model: Any, metadata: ModelMetadata) -> None:
         """Save model and metadata to disk."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
         model_file = self.models_dir / f"{metadata.model_type}_{timestamp}.joblib"
         metadata_file = self.models_dir / f"{metadata.model_type}_{timestamp}.json"
         
@@ -798,8 +816,30 @@ class ModelTrainer:
         # Save metadata
         with open(metadata_file, 'w') as f:
             json.dump(metadata.to_dict(), f, indent=2)
+
+        self._cleanup_old_model_files(metadata.model_type)
         
         logger.debug(f"Saved model to {model_file}")
+
+    def _cleanup_old_model_files(self, model_type: ModelType) -> None:
+        """Remove older saved model versions beyond the configured retention limit."""
+        max_versions = self.config.max_saved_versions_per_model
+        if max_versions <= 0:
+            return
+
+        model_files = sorted(
+            self.models_dir.glob(f"{model_type}_*.joblib"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+
+        for stale_model_file in model_files[max_versions:]:
+            stale_metadata_file = stale_model_file.with_suffix('.json')
+            try:
+                stale_model_file.unlink(missing_ok=True)
+                stale_metadata_file.unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning(f"Failed to remove stale model version {stale_model_file}: {exc}")
 
 
 def create_model_trainer(
