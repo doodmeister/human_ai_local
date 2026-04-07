@@ -493,12 +493,11 @@ class OutcomeTracker:
         # Time accuracy
         makespan_minutes = self._extract_predicted_makespan_minutes(context)
         if makespan_minutes > 0:
-            if makespan_minutes > 0:
-                actual_time = (
-                    (context.actual_completion_time or context.end_time or datetime.now()) 
-                    - context.start_time
-                ).total_seconds() / 60
-                metrics.time_accuracy_ratio = actual_time / makespan_minutes
+            actual_time = (
+                (context.actual_completion_time or context.end_time or datetime.now()) 
+                - context.start_time
+            ).total_seconds() / 60
+            metrics.time_accuracy_ratio = actual_time / makespan_minutes
         
         # Plan adherence
         if context.plan and len(context.plan.steps) > 0:
