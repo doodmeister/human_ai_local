@@ -1,9 +1,10 @@
 """
 Core configuration settings for the Human-AI Cognition Framework
 """
+import importlib
 import os
 from typing import Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 @dataclass
@@ -142,24 +143,7 @@ class ChatConfig:
     metacog_snapshot_history_size: int = 50
 
     def to_dict(self) -> dict:
-        return {
-            "max_recent_turns": self.max_recent_turns,
-            "max_context_items": self.max_context_items,
-            "stm_activation_min": self.stm_activation_min,
-            "ltm_similarity_threshold": self.ltm_similarity_threshold,
-            "retrieval_timeout_ms": self.retrieval_timeout_ms,
-            "fallback_min_overlap": self.fallback_min_overlap,
-            "streaming_enabled": self.streaming_enabled,
-            "performance_target_p95_ms": self.performance_target_p95_ms,
-            "scoring_version": self.scoring_version,
-            "preview_max_items": self.preview_max_items,
-            "preview_max_content_chars": self.preview_max_content_chars,
-            "consolidation_salience_threshold": self.consolidation_salience_threshold,
-            "consolidation_valence_threshold": self.consolidation_valence_threshold,
-            "throughput_window_seconds": self.throughput_window_seconds,
-            "metacog_turn_interval": self.metacog_turn_interval,
-            "metacog_snapshot_history_size": self.metacog_snapshot_history_size,
-        }
+        return asdict(self)
 
 @dataclass
 class CognitiveConfig:
@@ -192,71 +176,103 @@ class CognitiveConfig:
     # Phase 2: Narrative configuration
     _narrative_config: Optional[Any] = field(default=None, repr=False)
 
+    def _load_optional_config(
+        self,
+        attribute_name: str,
+        module_path: str,
+        class_name: str,
+    ) -> Any:
+        config_value = getattr(self, attribute_name)
+        if config_value is not None:
+            return config_value
+
+        try:
+            module = importlib.import_module(module_path)
+            config_class = getattr(module, class_name)
+        except (ImportError, AttributeError):
+            return None
+
+        config_value = config_class()
+        setattr(self, attribute_name, config_value)
+        return config_value
+
     @property
     def drives(self):
         """Drive system configuration (Phase 2, Layer 0)."""
-        if self._drive_config is None:
-            try:
-                from src.cognition.drives.drive_config import DriveConfig
-                self._drive_config = DriveConfig()
-            except ImportError:
-                return None
-        return self._drive_config
+        return self._load_optional_config(
+            "_drive_config",
+            "src.cognition.drives.drive_config",
+            "DriveConfig",
+        )
+
+    @drives.setter
+    def drives(self, value: Any) -> None:
+        self._drive_config = value
 
     @property
     def felt_sense(self):
         """Felt-sense / mood configuration (Phase 2, Layer 1)."""
-        if self._felt_sense_config is None:
-            try:
-                from src.cognition.felt_sense.felt_sense_config import FeltSenseConfig
-                self._felt_sense_config = FeltSenseConfig()
-            except ImportError:
-                return None
-        return self._felt_sense_config
+        return self._load_optional_config(
+            "_felt_sense_config",
+            "src.cognition.felt_sense.felt_sense_config",
+            "FeltSenseConfig",
+        )
+
+    @felt_sense.setter
+    def felt_sense(self, value: Any) -> None:
+        self._felt_sense_config = value
 
     @property
     def relational(self):
         """Relational-field configuration (Phase 2, Layer 2)."""
-        if self._relational_config is None:
-            try:
-                from src.cognition.relational.relational_config import RelationalConfig
-                self._relational_config = RelationalConfig()
-            except ImportError:
-                return None
-        return self._relational_config
+        return self._load_optional_config(
+            "_relational_config",
+            "src.cognition.relational.relational_config",
+            "RelationalConfig",
+        )
+
+    @relational.setter
+    def relational(self, value: Any) -> None:
+        self._relational_config = value
 
     @property
     def patterns(self):
         """Emergent-patterns configuration (Phase 2, Layer 3)."""
-        if self._pattern_config is None:
-            try:
-                from src.cognition.patterns.pattern_config import PatternConfig
-                self._pattern_config = PatternConfig()
-            except ImportError:
-                return None
-        return self._pattern_config
+        return self._load_optional_config(
+            "_pattern_config",
+            "src.cognition.patterns.pattern_config",
+            "PatternConfig",
+        )
+
+    @patterns.setter
+    def patterns(self, value: Any) -> None:
+        self._pattern_config = value
 
     @property
     def selfmodel(self):
         """Self-model configuration (Phase 2, Layer 4)."""
-        if self._self_model_config is None:
-            try:
-                from src.cognition.selfmodel.self_model_config import SelfModelConfig
-                self._self_model_config = SelfModelConfig()
-            except ImportError:
-                return None
-        return self._self_model_config
+        return self._load_optional_config(
+            "_self_model_config",
+            "src.cognition.selfmodel.self_model_config",
+            "SelfModelConfig",
+        )
+
+    @selfmodel.setter
+    def selfmodel(self, value: Any) -> None:
+        self._self_model_config = value
 
     @property
     def narrative(self):
         """Narrative configuration (Phase 2, Layer 5)."""
-        if self._narrative_config is None:
-            try:
-                from src.cognition.narrative.narrative_config import NarrativeConfig
-                self._narrative_config = NarrativeConfig()
-            except ImportError:
-                return None
-        return self._narrative_config
+        return self._load_optional_config(
+            "_narrative_config",
+            "src.cognition.narrative.narrative_config",
+            "NarrativeConfig",
+        )
+
+    @narrative.setter
+    def narrative(self, value: Any) -> None:
+        self._narrative_config = value
 
     def __post_init__(self):
         """Create data and model directories after initialization"""
@@ -281,6 +297,12 @@ class CognitiveConfig:
             
         if embedding_model := os.getenv("EMBEDDING_MODEL"):
             config.processing.embedding_model = embedding_model
+
+        if embedding_dimension := os.getenv("EMBEDDING_DIMENSION"):
+            try:
+                config.processing.embedding_dimension = int(embedding_dimension)
+            except ValueError:
+                pass
 
         if chroma_persist_dir := os.getenv("CHROMA_PERSIST_DIR"):
             config.memory.chroma_persist_dir = chroma_persist_dir
@@ -337,18 +359,28 @@ class CognitiveConfig:
         if self.chat.max_context_items < 1:
             warnings.append("Max context items must be >= 1")
         
-        if not 0.0 <= self.chat.salience_threshold <= 1.0:
-            warnings.append(f"Chat salience threshold {self.chat.salience_threshold} must be 0.0-1.0")
+        if not 0.0 <= self.chat.stm_activation_min <= 1.0:
+            warnings.append(
+                f"Chat STM activation minimum {self.chat.stm_activation_min} must be 0.0-1.0"
+            )
+
+        if not 0.0 <= self.chat.consolidation_salience_threshold <= 1.0:
+            warnings.append(
+                "Chat consolidation salience threshold "
+                f"{self.chat.consolidation_salience_threshold} must be 0.0-1.0"
+            )
         
         return warnings
 
 
-# Global configuration instance
-config = CognitiveConfig.from_env()
+_global_config: Optional[CognitiveConfig] = None
 
 def get_global_config() -> CognitiveConfig:
     """Return the global cognitive configuration singleton."""
-    return config
+    global _global_config
+    if _global_config is None:
+        _global_config = CognitiveConfig.from_env()
+    return _global_config
 
 def get_chat_config() -> ChatConfig:
     """Return chat configuration (safe fallback)."""
@@ -367,5 +399,11 @@ def validate_config() -> tuple[bool, list[str]]:
     Returns:
         Tuple of (is_valid, list of warnings)
     """
-    warnings = config.validate()
+    warnings = get_global_config().validate()
     return len(warnings) == 0, warnings
+
+
+def __getattr__(name: str) -> Any:
+    if name == "config":
+        return get_global_config()
+    raise AttributeError(name)

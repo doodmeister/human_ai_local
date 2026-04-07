@@ -5,6 +5,7 @@ Provides error recovery, circuit breakers, and retry mechanisms
 for production hardening of the Human-AI Cognition Framework.
 """
 
+from collections import deque
 import time
 import logging
 import functools
@@ -32,7 +33,7 @@ class CircuitBreakerConfig:
     failure_threshold: int = 5          # Failures before opening
     success_threshold: int = 2          # Successes to close from half-open
     timeout_seconds: float = 30.0       # Time before attempting recovery
-    excluded_exceptions: tuple = ()      # Exceptions to not count as failures
+    excluded_exceptions: tuple[type[BaseException], ...] = field(default_factory=tuple)
 
 
 @dataclass
@@ -61,7 +62,7 @@ class CircuitBreaker:
     """
     
     _instances: Dict[str, "CircuitBreaker"] = {}
-    _lock = Lock()
+    _instances_lock = Lock()
     
     def __init__(
         self,
@@ -71,12 +72,12 @@ class CircuitBreaker:
         self.name = name
         self.config = config or CircuitBreakerConfig()
         self._state = CircuitBreakerState()
-        self._lock = Lock()
+        self._state_lock = Lock()
     
     @classmethod
     def get_or_create(cls, name: str, config: Optional[CircuitBreakerConfig] = None) -> "CircuitBreaker":
         """Get existing circuit breaker or create new one."""
-        with cls._lock:
+        with cls._instances_lock:
             if name not in cls._instances:
                 cls._instances[name] = cls(name, config)
             return cls._instances[name]
@@ -84,7 +85,7 @@ class CircuitBreaker:
     @property
     def state(self) -> CircuitState:
         """Get current circuit state, considering timeout."""
-        with self._lock:
+        with self._state_lock:
             if self._state.state == CircuitState.OPEN:
                 # Check if timeout has passed
                 if self._state.last_failure_time:
@@ -109,7 +110,7 @@ class CircuitBreaker:
     
     def record_success(self) -> None:
         """Record a successful call."""
-        with self._lock:
+        with self._state_lock:
             if self._state.state == CircuitState.HALF_OPEN:
                 self._state.success_count += 1
                 if self._state.success_count >= self.config.success_threshold:
@@ -117,11 +118,10 @@ class CircuitBreaker:
     
     def record_failure(self, exception: Exception) -> None:
         """Record a failed call."""
-        # Check if this exception type should be excluded
-        if isinstance(exception, self.config.excluded_exceptions):
-            return
-        
-        with self._lock:
+        with self._state_lock:
+            if isinstance(exception, self.config.excluded_exceptions):
+                return
+
             self._state.failure_count += 1
             self._state.last_failure_time = datetime.now()
             
@@ -154,7 +154,7 @@ class CircuitBreaker:
     
     def get_status(self) -> Dict[str, Any]:
         """Get circuit breaker status for monitoring."""
-        with self._lock:
+        with self._state_lock:
             return {
                 "name": self.name,
                 "state": self._state.state.value,
@@ -220,7 +220,7 @@ def retry_with_backoff(
             
             if last_exception is not None:
                 raise last_exception
-            raise RuntimeError("Unexpected retry loop exit without exception")
+            raise AssertionError("retry_with_backoff exited without returning or capturing an exception")
         
         return wrapper
     return decorator
@@ -300,12 +300,15 @@ class HealthChecker:
     
     def check(self, name: str) -> HealthStatus:
         """Run a specific health check."""
-        if name not in self._checks:
+        with self._lock:
+            check_func = self._checks.get(name)
+
+        if check_func is None:
             return HealthStatus(name=name, healthy=False, message="Unknown check")
         
         start = time.time()
         try:
-            status = self._checks[name]()
+            status = check_func()
             status.latency_ms = (time.time() - start) * 1000
             status.last_check = datetime.now()
         except Exception as e:
@@ -321,21 +324,26 @@ class HealthChecker:
         
         return status
     
-    def check_all(self) -> Dict[str, HealthStatus]:
+    def check_all(self, refresh: bool = True) -> Dict[str, HealthStatus]:
         """Run all health checks."""
+        with self._lock:
+            check_names = list(self._checks)
+            if not refresh and all(name in self._last_results for name in check_names):
+                return {name: self._last_results[name] for name in check_names}
+
         results = {}
-        for name in self._checks:
+        for name in check_names:
             results[name] = self.check(name)
         return results
     
     def is_healthy(self) -> bool:
         """Check if all components are healthy."""
-        results = self.check_all()
+        results = self.check_all(refresh=False)
         return all(status.healthy for status in results.values())
     
     def get_summary(self) -> Dict[str, Any]:
         """Get health summary for API response."""
-        results = self.check_all()
+        results = self.check_all(refresh=False)
         
         return {
             "healthy": all(s.healthy for s in results.values()),
@@ -389,8 +397,8 @@ class TelemetryCollector:
     """
     
     def __init__(self, max_events: int = 1000):
-        self._events: list = []
-        self._max_events = max_events
+        self._max_events = max(1, int(max_events))
+        self._events = deque(maxlen=self._max_events)
         self._lock = Lock()
         self._counters: Dict[str, int] = {}
     
@@ -398,9 +406,7 @@ class TelemetryCollector:
         """Record a telemetry event."""
         with self._lock:
             self._events.append(event)
-            if len(self._events) > self._max_events:
-                self._events = self._events[-self._max_events:]
-            
+
             # Update counters
             key = f"{event.name}_{'success' if event.success else 'failure'}"
             self._counters[key] = self._counters.get(key, 0) + 1
@@ -412,31 +418,32 @@ class TelemetryCollector:
     def get_metrics(self) -> Dict[str, Any]:
         """Get telemetry metrics summary."""
         with self._lock:
-            if not self._events:
+            recorded_events = list(self._events)
+            if not recorded_events:
                 return {"events": 0, "counters": {}}
             
             # Calculate statistics per operation
             by_name: Dict[str, list] = {}
-            for event in self._events:
+            for event in recorded_events:
                 if event.name not in by_name:
                     by_name[event.name] = []
                 by_name[event.name].append(event)
             
             stats = {}
-            for name, events in by_name.items():
-                durations = [e.duration_ms for e in events]
-                successes = sum(1 for e in events if e.success)
+            for name, operation_events in by_name.items():
+                durations = [event.duration_ms for event in operation_events]
+                successes = sum(1 for event in operation_events if event.success)
                 
                 stats[name] = {
-                    "count": len(events),
-                    "success_rate": successes / len(events) if events else 0,
+                    "count": len(operation_events),
+                    "success_rate": successes / len(operation_events) if operation_events else 0,
                     "avg_duration_ms": sum(durations) / len(durations) if durations else 0,
                     "max_duration_ms": max(durations) if durations else 0,
                     "min_duration_ms": min(durations) if durations else 0,
                 }
             
             return {
-                "events": len(self._events),
+                "events": len(recorded_events),
                 "counters": dict(self._counters),
                 "operations": stats
             }
