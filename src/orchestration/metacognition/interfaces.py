@@ -16,6 +16,7 @@ from .models import (
 )
 
 EventHandler = Callable[[Mapping[str, Any]], None]
+Unsubscribe = Callable[[], None]
 
 
 class StateProvider(Protocol):
@@ -64,6 +65,8 @@ class Critic(Protocol):
         workspace: WorkspaceState,
         plan: CognitivePlan,
         result: ExecutionResult,
+        *,
+        cycle_id: str | None = None,
     ) -> CriticReport:
         ...
 
@@ -83,10 +86,13 @@ class CognitiveScheduler(Protocol):
 
 
 class EventBus(Protocol):
-    def subscribe(self, event_name: str, handler: EventHandler) -> None:
+    def subscribe(self, event_name: str, handler: EventHandler) -> Unsubscribe:
         ...
 
-    def publish(self, event_name: str, payload: Mapping[str, Any]) -> None:
+    def unsubscribe(self, event_name: str, handler: EventHandler) -> None:
+        ...
+
+    def publish(self, event_name: str, payload: Mapping[str, Any]) -> int:
         ...
 
 
@@ -122,7 +128,13 @@ class CycleTracer(Protocol):
     def prune_reflection_episodes(self, session_id: str, *, max_episodes: int) -> int:
         ...
 
-    def build_regression_metrics(self, *, session_id: str | None = None, limit: int = 20) -> dict[str, Any]:
+    def build_regression_metrics(
+        self,
+        *,
+        traces: Sequence[Mapping[str, Any]] | None = None,
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
         ...
 
     def load_task_queue(self, session_id: str) -> list[dict[str, Any]]:

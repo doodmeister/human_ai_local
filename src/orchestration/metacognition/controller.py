@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from .enums import ScheduledTaskStatus
 from .critic import DefaultCritic
-from .event_bus import InProcessEventBus
+from .event_bus import InProcessEventBus, MetacognitiveEvent
 from .executor import DefaultPlanExecutor
 from .goal_manager import HeuristicGoalManager
 from .interfaces import (
@@ -61,7 +61,7 @@ class MetacognitiveController:
 
     def run_cycle(self, stimulus: Stimulus) -> MetacognitiveCycleResult:
         cycle_id = f"cycle-{uuid4()}"
-        self._event_bus.publish("metacognition.cycle.started", {"cycle_id": cycle_id, "session_id": stimulus.session_id})
+        self._event_bus.publish(MetacognitiveEvent.CYCLE_STARTED, {"cycle_id": cycle_id, "session_id": stimulus.session_id})
         snapshot = None
         workspace = None
         ranked_goals = ()
@@ -77,7 +77,7 @@ class MetacognitiveController:
         try:
             snapshot = self._state_provider.snapshot(stimulus)
             completed_stages.append("snapshot")
-            self._event_bus.publish("metacognition.snapshot.created", {"cycle_id": cycle_id, "turn_index": snapshot.turn_index})
+            self._event_bus.publish(MetacognitiveEvent.SNAPSHOT_CREATED, {"cycle_id": cycle_id, "turn_index": snapshot.turn_index})
 
             workspace = self._workspace_builder.build(stimulus, snapshot)
             completed_stages.append("workspace")
@@ -94,7 +94,7 @@ class MetacognitiveController:
             execution_result = self._executor.execute(workspace, plan)
             completed_stages.append("execution")
 
-            critic_report = self._critic.evaluate(workspace, plan, execution_result)
+            critic_report = self._critic.evaluate(workspace, plan, execution_result, cycle_id=cycle_id)
             completed_stages.append("critic")
 
             updated_self_model = self._self_model_updater.apply(snapshot.self_model, critic_report)
@@ -144,7 +144,7 @@ class MetacognitiveController:
             metadata=metadata,
         )
         self._event_bus.publish(
-            "metacognition.cycle.completed",
+            MetacognitiveEvent.CYCLE_COMPLETED,
             {
                 "cycle_id": cycle_id,
                 "trace_id": trace_id,
@@ -179,14 +179,20 @@ class MetacognitiveController:
         return self._cycle_tracer.list_reflection_episodes(session_id, limit=limit)
 
     def build_status(self, session_id: str, *, history_limit: int = 10) -> dict[str, Any]:
-        latest_trace = self.get_latest_trace(session_id)
+        latest_trace = None if self._cycle_tracer is not None else self.get_latest_trace(session_id)
         persisted_self_model = self.get_persisted_self_model(session_id)
         reflection_episodes = self.list_reflection_episodes(session_id, limit=history_limit)
         queued_tasks = self.list_tasks(session_id)
         now_ts = time.time()
         metrics: dict[str, Any] = {}
         if self._cycle_tracer is not None:
-            metrics = self._cycle_tracer.build_regression_metrics(session_id=session_id, limit=history_limit)
+            traces = self._cycle_tracer.list_traces(session_id=session_id, limit=history_limit)
+            latest_trace = traces[-1] if traces else None
+            metrics = self._cycle_tracer.build_regression_metrics(
+                traces=traces,
+                session_id=session_id,
+                limit=history_limit,
+            )
         return {
             "available": any((latest_trace, persisted_self_model, reflection_episodes)),
             "session_id": session_id,

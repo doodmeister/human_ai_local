@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -107,6 +108,7 @@ class ExecutionResult:
 class CriticReport:
     cycle_id: str
     success_score: float
+    timestamp: float = field(default_factory=time.time)
     goal_progress: float = 0.0
     follow_up_recommended: bool = False
     contradictions_detected: tuple[str, ...] = field(default_factory=tuple)

@@ -2,7 +2,7 @@ from .controller import MetacognitiveController
 from .critic import DefaultCritic
 from .cycle_tracer import FilesystemCycleTracer
 from .enums import CognitiveActType, CycleStage, GoalKind, ScheduledTaskStatus
-from .event_bus import InProcessEventBus
+from .event_bus import InProcessEventBus, MetacognitiveEvent
 from .executor import DefaultPlanExecutor
 from .goal_manager import HeuristicGoalManager
 from .models import (
@@ -56,6 +56,7 @@ __all__ = [
     "HeuristicPolicyEngine",
     "InProcessEventBus",
     "InternalStateSnapshot",
+    "MetacognitiveEvent",
     "MetacognitiveController",
     "MetacognitiveCycleResult",
     "MetacognitiveScorecard",
