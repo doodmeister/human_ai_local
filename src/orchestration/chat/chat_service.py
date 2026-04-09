@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import asdict, is_dataclass
 from typing import Dict, Any, Optional, Set, Tuple, List, Callable
 from functools import partial
 import asyncio
@@ -70,11 +71,14 @@ class ChatService:
                  session_manager: SessionManager,
                  context_builder: ContextBuilder,
                  consolidator: Optional[Any] = None,
-                 agent: Optional[Any] = None) -> None:
+                 agent: Optional[Any] = None,
+                 metacognitive_controller: Optional[Any] = None) -> None:
         self.sessions = session_manager
         self.context_builder = context_builder
         self.consolidator = consolidator
         self.agent = agent
+        self._metacognitive_controller = metacognitive_controller
+        self._last_metacognitive_cycle = None
         self._capture = MemoryCaptureModule()
         self._capture_cache = MemoryCaptureCache()
         # Production Phase 1: Intent classification and goal detection
@@ -181,12 +185,20 @@ class ChatService:
         session_id: Optional[str] = None,
         flags: Optional[Dict[str, bool]] = None,
     ) -> Dict[str, Any]:
-        return self._turn_pipeline.process_user_message(
+        payload = self._turn_pipeline.process_user_message(
             service=self,
             message=message,
             session_id=session_id,
             flags=flags,
         )
+        cycle = self._run_metacognitive_cycle(
+            message=message,
+            session_id=payload.get("session_id") or session_id,
+            flags=flags,
+        )
+        if cycle is not None:
+            payload["metacognitive_cycle"] = self._summarize_metacognitive_cycle(cycle)
+        return payload
 
     async def process_user_message_stream(
         self,
@@ -585,17 +597,93 @@ class ChatService:
     def get_metacog_status(self, history_limit: int = 10) -> Dict[str, Any]:
         snapshot = self._last_metacog_snapshot
         if not snapshot:
-            return {"available": False}
+            if self._last_metacognitive_cycle is None:
+                return {"available": False}
+            return {
+                "available": True,
+                "last_cycle_summary": self._summarize_metacognitive_cycle(self._last_metacognitive_cycle),
+            }
 
         try:
             history_tail = list(self._metacog_history)[-max(0, history_limit):]
         except Exception:
             history_tail = []
-        return {
+        status = {
             "available": True,
             "snapshot": snapshot,
             "history_tail": history_tail,
         }
+        if self._last_metacognitive_cycle is not None:
+            status["last_cycle_summary"] = self._summarize_metacognitive_cycle(self._last_metacognitive_cycle)
+        return status
+
+    def set_metacognitive_controller(self, controller: Any) -> None:
+        self._metacognitive_controller = controller
+
+    def get_last_cycle_summary(self) -> Dict[str, Any]:
+        cycle = self._last_metacognitive_cycle
+        if cycle is None:
+            return {"available": False}
+        return self._summarize_metacognitive_cycle(cycle)
+
+    def _run_metacognitive_cycle(
+        self,
+        *,
+        message: str,
+        session_id: Optional[str],
+        flags: Optional[Dict[str, bool]],
+    ) -> Any:
+        controller = self._metacognitive_controller
+        if controller is None:
+            return None
+        from src.orchestration.metacognition import Stimulus
+
+        try:
+            cycle = controller.run_cycle(
+                Stimulus(
+                    session_id=session_id or "default",
+                    user_input=message,
+                    input_type="text",
+                    turn_index=self._turn_counter,
+                    metadata={"flags": dict(flags or {})},
+                )
+            )
+        except Exception as exc:
+            logger.debug("Metacognitive cycle skipped in ChatService: %s", exc)
+            return None
+        self._last_metacognitive_cycle = cycle
+        return cycle
+
+    def _summarize_metacognitive_cycle(self, cycle: Any) -> Dict[str, Any]:
+        plan = getattr(cycle, "plan", None)
+        execution_result = getattr(cycle, "execution_result", None)
+        critic_report = getattr(cycle, "critic_report", None)
+        selected_goal = getattr(plan, "selected_goal", None) if plan is not None else None
+        acts = getattr(plan, "acts", ()) if plan is not None else ()
+        return {
+            "available": True,
+            "cycle_id": getattr(cycle, "cycle_id", None),
+            "trace_id": getattr(cycle, "trace_id", None),
+            "selected_goal_id": getattr(selected_goal, "goal_id", None),
+            "selected_goal_kind": getattr(getattr(selected_goal, "kind", None), "value", None),
+            "act_types": [getattr(getattr(act, "act_type", None), "value", None) for act in acts],
+            "success_score": getattr(critic_report, "success_score", None),
+            "follow_up_recommended": getattr(critic_report, "follow_up_recommended", None),
+            "response_text": getattr(execution_result, "response_text", None),
+            "scheduled_tasks": [self._serialize_metacognitive_value(task) for task in getattr(cycle, "scheduled_tasks", ())],
+        }
+
+    @staticmethod
+    def _serialize_metacognitive_value(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if is_dataclass(value):
+            return asdict(value)
+        if hasattr(value, "to_dict"):
+            maybe_mapping = value.to_dict()
+            if isinstance(maybe_mapping, dict):
+                return dict(maybe_mapping)
+        return {"value": value}
 
     def _attempt_fact_answer(self, message: str) -> Optional[str]:
         return self._turn_support.attempt_fact_answer(message)

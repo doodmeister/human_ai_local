@@ -24,6 +24,7 @@ class AppRuntime:
     def __init__(self) -> None:
         self._agent_instance: Any | None = None
         self._chat_service: Any | None = None
+        self._metacognitive_controller: Any | None = None
         self._prospective = get_inmemory_prospective_memory()
 
     def get_agent(
@@ -37,6 +38,9 @@ class AppRuntime:
                 config=config,
                 system_prompt=system_prompt,
             )
+        controller = self.build_metacognitive_controller(agent=self._agent_instance)
+        if controller is not None and hasattr(self._agent_instance, "set_metacognitive_controller"):
+            self._agent_instance.set_metacognitive_controller(controller)
         return self._agent_instance
 
     def has_agent(self) -> bool:
@@ -45,10 +49,90 @@ class AppRuntime:
     def get_prospective(self) -> Any:
         return self._prospective
 
+    def get_metacognitive_controller(self) -> Any:
+        if self._metacognitive_controller is None:
+            self._metacognitive_controller = self.build_metacognitive_controller(agent=self.get_agent())
+        return self._metacognitive_controller
+
     def get_chat_service(self) -> Any:
         if self._chat_service is None:
             self._chat_service = self.build_chat_service(agent=self.get_agent())
         return self._chat_service
+
+    def build_metacognitive_controller(
+        self,
+        *,
+        agent: Optional[Any] = None,
+        memory: Optional[Any] = None,
+        attention: Optional[Any] = None,
+        executive: Optional[Any] = None,
+        prospective: Optional[Any] = None,
+    ) -> Any:
+        """Build a deterministic metacognitive controller using available runtime seams."""
+        MetacognitiveController = _lazy_import(
+            "src.orchestration.metacognition",
+            "MetacognitiveController",
+        )
+        DefaultStateProvider = _lazy_import(
+            "src.orchestration.metacognition",
+            "DefaultStateProvider",
+        )
+        DefaultWorkspaceBuilder = _lazy_import(
+            "src.orchestration.metacognition",
+            "DefaultWorkspaceBuilder",
+        )
+        FilesystemCycleTracer = _lazy_import(
+            "src.orchestration.metacognition",
+            "FilesystemCycleTracer",
+        )
+        if not (MetacognitiveController and DefaultStateProvider and DefaultWorkspaceBuilder and FilesystemCycleTracer):
+            return None
+
+        if agent is not None:
+            memory = memory or getattr(agent, "memory", None)
+            attention = attention or getattr(agent, "attention", None)
+            executive = executive or getattr(agent, "performance_optimizer", None)
+        if prospective is None:
+            prospective = self.get_prospective()
+
+        state_provider = DefaultStateProvider(
+            memory=memory,
+            attention=attention,
+            executive=executive,
+            self_model_provider=(lambda session_id: agent.get_self_model(session_id)) if agent is not None and hasattr(agent, "get_self_model") else None,
+            task_provider=(lambda session_id: agent.list_cognitive_tasks(session_id)) if agent is not None and hasattr(agent, "list_cognitive_tasks") else None,
+        )
+
+        def memory_context_provider(query: str, session_id: str) -> Any:
+            if memory is not None and hasattr(memory, "get_context_for_query"):
+                try:
+                    return memory.get_context_for_query(query)
+                except Exception:
+                    return {}
+            return {}
+
+        def contradiction_provider(session_id: str) -> list[dict[str, Any]]:
+            if memory is not None and hasattr(memory, "get_unresolved_conflicts"):
+                try:
+                    conflicts = memory.get_unresolved_conflicts(session_id)
+                except Exception:
+                    conflicts = []
+                if isinstance(conflicts, list):
+                    return [conflict for conflict in conflicts if isinstance(conflict, dict)]
+            return []
+
+        workspace_builder = DefaultWorkspaceBuilder(
+            memory_context_provider=memory_context_provider,
+            contradiction_provider=contradiction_provider,
+        )
+        tracer = FilesystemCycleTracer()
+        controller = MetacognitiveController(
+            state_provider=state_provider,
+            workspace_builder=workspace_builder,
+            cycle_tracer=tracer,
+        )
+        self._metacognitive_controller = controller
+        return controller
 
     def build_chat_service(
         self,
@@ -61,6 +145,7 @@ class AppRuntime:
         attention: Optional[Any] = None,
         executive: Optional[Any] = None,
         prospective: Optional[Any] = None,
+        metacognitive_controller: Optional[Any] = None,
     ) -> Any:
         """Build a ChatService using explicit dependencies or runtime fallbacks."""
         from src.orchestration.chat.chat_service import ChatService
@@ -141,6 +226,15 @@ class AppRuntime:
         if prospective is None:
             prospective = self.get_prospective()
 
+        if metacognitive_controller is None:
+            metacognitive_controller = self.build_metacognitive_controller(
+                agent=agent,
+                memory=getattr(agent, "memory", None) if agent is not None else None,
+                attention=attention,
+                executive=executive,
+                prospective=prospective,
+            )
+
         cfg_obj = get_chat_config()
         cfg = cfg_obj.to_dict()
         cfg.setdefault("retrieval_timeout_ms", cfg_obj.retrieval_timeout_ms)
@@ -177,6 +271,7 @@ class AppRuntime:
             builder,
             consolidator=consolidator,
             agent=agent,
+            metacognitive_controller=metacognitive_controller,
         )
 
 

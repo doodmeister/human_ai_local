@@ -525,6 +525,46 @@ def fetch_execution_outcomes(base_url: str, limit: int = 20) -> List[Dict[str, A
         return []
 
 
+def fetch_metacognition_dashboard(
+    base_url: str,
+    *,
+    history_limit: int = 10,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Fetch the aggregated metacognition dashboard payload."""
+    try:
+        resp = requests.get(
+            f"{base_url}/agent/metacog/dashboard",
+            params={"history_limit": history_limit, "limit": limit},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        st.error(f"Failed to fetch metacognition dashboard: {exc}")
+        return {}
+
+
+def fetch_metacognition_tasks(base_url: str) -> List[Dict[str, Any]]:
+    """Fetch current metacognitive tasks."""
+    try:
+        resp = requests.get(f"{base_url}/agent/metacog/tasks", timeout=10)
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+    except requests.RequestException:
+        return []
+
+
+def fetch_metacognition_reflections(base_url: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """Fetch recent metacognitive reflection episodes."""
+    try:
+        resp = requests.get(f"{base_url}/agent/metacog/reflections", params={"limit": limit}, timeout=10)
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+    except requests.RequestException:
+        return []
+
+
 def render_learning_dashboard(base_url: str) -> None:
     """Render the learning dashboard interface."""
     st.header("📊 Learning Dashboard")
@@ -599,6 +639,167 @@ def render_learning_dashboard(base_url: str) -> None:
     
     with tab_outcomes:
         render_recent_outcomes(base_url)
+
+
+def render_metacognition_dashboard(base_url: str) -> None:
+    """Render a UI for metacognition status, background work, and scorecards."""
+    st.header("🧭 Metacognition Dashboard")
+    st.write("Inspect the controller loop, background cognition, and persisted tuning signals.")
+
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        refresh = st.button("🔄 Refresh", key="metacog_refresh")
+
+    if refresh or "metacog_dashboard_cache" not in st.session_state:
+        with st.spinner("Loading metacognition data..."):
+            st.session_state.metacog_dashboard_cache = fetch_metacognition_dashboard(base_url)
+            st.session_state.metacog_tasks_cache = fetch_metacognition_tasks(base_url)
+            st.session_state.metacog_reflections_cache = fetch_metacognition_reflections(base_url)
+
+    dashboard = st.session_state.get("metacog_dashboard_cache", {})
+    tasks = st.session_state.get("metacog_tasks_cache", [])
+    reflections = st.session_state.get("metacog_reflections_cache", [])
+
+    if not dashboard or not dashboard.get("available"):
+        st.info("No metacognitive trace data is available yet. Run a few chat turns or background cycles first.")
+        return
+
+    status = dashboard.get("status", {})
+    background = dashboard.get("background", {})
+    scorecard = dashboard.get("scorecard", {})
+    summary = scorecard.get("summary", {})
+    contradictions = scorecard.get("contradictions", {})
+    self_model = scorecard.get("self_model", {})
+    goals = scorecard.get("goals", {})
+
+    st.subheader("Overview")
+    metric_cols = st.columns(4)
+    with metric_cols[0]:
+        cycle_success = summary.get("cycle_success_avg")
+        st.metric("Cycle Success", f"{cycle_success:.0%}" if cycle_success is not None else "N/A")
+    with metric_cols[1]:
+        contradiction_rate = contradictions.get("contradiction_rate")
+        st.metric("Contradiction Rate", f"{contradiction_rate:.0%}" if contradiction_rate is not None else "N/A")
+    with metric_cols[2]:
+        drift = self_model.get("self_model_drift_avg")
+        st.metric("Self-Model Drift", f"{drift:.2f}" if drift is not None else "N/A")
+    with metric_cols[3]:
+        churn = goals.get("goal_churn_rate")
+        st.metric("Goal Churn", f"{churn:.0%}" if churn is not None else "N/A")
+
+    background_cols = st.columns(4)
+    with background_cols[0]:
+        st.metric("Pending Tasks", background.get("pending_task_count", 0))
+    with background_cols[1]:
+        st.metric("Due Tasks", background.get("due_task_count", 0))
+    with background_cols[2]:
+        st.metric("Open Contradictions", background.get("unresolved_contradiction_count", 0))
+    with background_cols[3]:
+        st.metric("Idle Reflections", background.get("idle_reflection_count", 0))
+
+    overview_tab, tasks_tab, reflections_tab, self_model_tab = st.tabs(
+        ["🧠 Status", "🗂 Tasks", "🪞 Reflections", "🧬 Self-Model"]
+    )
+
+    with overview_tab:
+        session_id = dashboard.get("session_id") or status.get("session_id") or "unknown"
+        st.caption(f"Session: {session_id}")
+
+        status_cols = st.columns(3)
+        with status_cols[0]:
+            scheduler_running = background.get("scheduler_running", False)
+            st.metric("Scheduler", "running" if scheduler_running else "stopped")
+        with status_cols[1]:
+            st.metric("Trace Count", scorecard.get("trace_count", 0))
+        with status_cols[2]:
+            follow_up_rate = summary.get("follow_up_rate")
+            st.metric("Follow-Up Rate", f"{follow_up_rate:.0%}" if follow_up_rate is not None else "N/A")
+
+        last_cycle = status.get("last_cycle") or {}
+        if last_cycle:
+            with st.expander("Last Cycle", expanded=True):
+                cycle_cols = st.columns(3)
+                with cycle_cols[0]:
+                    st.caption(f"Cycle ID: {last_cycle.get('cycle_id', 'N/A')}")
+                with cycle_cols[1]:
+                    selected_goal_kind = last_cycle.get("selected_goal_kind") or last_cycle.get("plan", {}).get("selected_goal", {}).get("kind")
+                    st.caption(f"Goal Kind: {selected_goal_kind or 'N/A'}")
+                with cycle_cols[2]:
+                    last_success = last_cycle.get("success_score")
+                    st.caption(f"Success Score: {last_success:.2f}" if last_success is not None else "Success Score: N/A")
+                st.json(last_cycle)
+
+        goal_kind_counts = goals.get("selected_goal_kind_counts", {})
+        if goal_kind_counts:
+            st.markdown("#### Goal Selection Mix")
+            for goal_kind, count in goal_kind_counts.items():
+                st.caption(f"{goal_kind}: {count}")
+
+        with st.expander("Raw Dashboard Payload", expanded=False):
+            st.json(dashboard)
+
+    with tasks_tab:
+        if not tasks:
+            st.info("No metacognitive tasks queued.")
+        else:
+            st.caption(f"{len(tasks)} task(s) currently persisted.")
+            for task in tasks:
+                task_id = task.get("task_id", "task")
+                title = task.get("task_type") or (task.get("metadata") or {}).get("reason") or "task"
+                with st.expander(f"{title} [{task_id}]", expanded=False):
+                    col_a, col_b, col_c = st.columns(3)
+                    with col_a:
+                        st.caption(f"Status: {task.get('status', 'unknown')}")
+                    with col_b:
+                        priority = task.get("priority")
+                        st.caption(f"Priority: {priority:.2f}" if isinstance(priority, (float, int)) else "Priority: N/A")
+                    with col_c:
+                        st.caption(f"Due: {task.get('due_at', 'N/A')}")
+                    metadata = task.get("metadata") or {}
+                    if metadata:
+                        st.json(metadata)
+
+    with reflections_tab:
+        if not reflections:
+            st.info("No reflection episodes recorded yet.")
+        else:
+            st.caption(f"{len(reflections)} recent reflection episode(s).")
+            for report in reflections:
+                summary_text = report.get("summary") or report.get("timestamp") or "reflection"
+                trigger = (report.get("metadata") or {}).get("trigger")
+                label = summary_text if len(summary_text) < 80 else f"{summary_text[:77]}..."
+                if trigger:
+                    label = f"{label} [{trigger}]"
+                with st.expander(label, expanded=False):
+                    st.caption(f"Timestamp: {report.get('timestamp', 'N/A')}")
+                    st.json(report)
+
+    with self_model_tab:
+        persisted_self_model = status.get("persisted_self_model") or {}
+        if not persisted_self_model:
+            st.info("No persisted self-model snapshot is available yet.")
+        else:
+            confidence = persisted_self_model.get("confidence")
+            if confidence is not None:
+                st.metric("Confidence", f"{confidence:.2f}")
+            traits = persisted_self_model.get("traits") or {}
+            beliefs = persisted_self_model.get("beliefs") or []
+            if traits:
+                st.markdown("#### Traits")
+                for trait_name, trait_value in traits.items():
+                    display = f"{trait_value:.2f}" if isinstance(trait_value, (float, int)) else str(trait_value)
+                    st.caption(f"{trait_name}: {display}")
+            if beliefs:
+                st.markdown("#### Beliefs")
+                for belief in beliefs:
+                    st.caption(f"- {belief}")
+            st.markdown("#### Drift Summary")
+            st.caption(
+                f"Average confidence drift: {self_model.get('confidence_drift_avg', 'N/A')} | "
+                f"Average structure drift: {self_model.get('self_model_drift_avg', 'N/A')}"
+            )
+            with st.expander("Persisted Self-Model Payload", expanded=False):
+                st.json(persisted_self_model)
 
 
 def render_strategy_performance(metrics: Dict[str, Any]) -> None:
@@ -829,6 +1030,12 @@ def ensure_state() -> None:
     # Learning dashboard settings
     if "learning_metrics_cache" not in st.session_state:
         st.session_state.learning_metrics_cache = {}
+    if "metacog_dashboard_cache" not in st.session_state:
+        st.session_state.metacog_dashboard_cache = {}
+    if "metacog_tasks_cache" not in st.session_state:
+        st.session_state.metacog_tasks_cache = []
+    if "metacog_reflections_cache" not in st.session_state:
+        st.session_state.metacog_reflections_cache = []
 
 
 def create_goal_remote(
@@ -1630,11 +1837,13 @@ def main() -> None:
     # Create tabs - add Goal Details tab when a goal is selected
     viewing_goal = st.session_state.get("selected_goal_id")
     if viewing_goal:
-        tab_chat, tab_goal, tab_memory, tab_learning = st.tabs(
-            ["💬 Chat", "📋 Goal Details", "🧠 Memory Browser", "📊 Learning"]
+        tab_chat, tab_goal, tab_memory, tab_learning, tab_metacog = st.tabs(
+            ["💬 Chat", "📋 Goal Details", "🧠 Memory Browser", "📊 Learning", "🧭 Metacognition"]
         )
     else:
-        tab_chat, tab_memory, tab_learning = st.tabs(["💬 Chat", "🧠 Memory Browser", "📊 Learning"])
+        tab_chat, tab_memory, tab_learning, tab_metacog = st.tabs(
+            ["💬 Chat", "🧠 Memory Browser", "📊 Learning", "🧭 Metacognition"]
+        )
         tab_goal = None
     
     with tab_chat:
@@ -1723,6 +1932,12 @@ def main() -> None:
             render_learning_dashboard(base_url)
         else:
             st.warning("Start the backend with `python main.py api` to view learning metrics.")
+
+    with tab_metacog:
+        if backend_ok:
+            render_metacognition_dashboard(base_url)
+        else:
+            st.warning("Start the backend with `python main.py api` to inspect metacognition.")
 
 
 if __name__ == "__main__":

@@ -2,10 +2,13 @@
 Core Cognitive Agent - Central orchestrator for the cognitive architecture
 """
 
+from dataclasses import asdict, is_dataclass
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dotenv import load_dotenv
 import logging
+import threading
+import time
 
 from ..core.config import CognitiveConfig
 from ..memory.autobiographical import AutobiographicalGraphStore
@@ -52,6 +55,15 @@ class CognitiveAgent:
         # Temporary simple session ID
         self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self._turn_counter = 0
+        self._metacognitive_controller = None
+        self._last_metacognitive_cycle = None
+        self._background_cognition_thread = None
+        self._background_cognition_running = False
+        self._background_cognition_interval_seconds = None
+        self._background_cognition_limit = 5
+        self._idle_reflection_interval_seconds = 60.0
+        self._last_metacognitive_activity_ts = time.time()
+        self._last_idle_reflection_ts = 0.0
         try:
             self._autobiographical_store = AutobiographicalGraphStore()
         except Exception:
@@ -76,7 +88,11 @@ class CognitiveAgent:
         )
         
         # Reflection state
-        self._reflection_service = CognitiveReflectionService(get_memory=lambda: self.memory)
+        self._reflection_service = CognitiveReflectionService(
+            get_memory=lambda: self.memory,
+            persist_report=lambda report: self._persist_reflection_report(report),
+            load_reports=lambda limit: self._load_persisted_reflection_reports(limit),
+        )
         self._maintenance_service = CognitiveMaintenanceService(
             get_session_id=lambda: self.session_id,
             get_current_fatigue=lambda: self.current_fatigue,
@@ -155,6 +171,10 @@ class CognitiveAgent:
     def _reflection_scheduler_running(self) -> bool:
         return bool(self._reflection_service.get_status().get("scheduler_running", False))
 
+    @property
+    def _background_scheduler_running(self) -> bool:
+        return bool(self._background_cognition_running)
+
     def _set_current_fatigue(self, value: float) -> None:
         self.current_fatigue = value
 
@@ -181,7 +201,302 @@ class CognitiveAgent:
         Returns:
             Generated response
         """
-        return await self._turn_processor.process_input(input_data, input_type, context)
+        response = await self._turn_processor.process_input(input_data, input_type, context)
+        self._mark_metacognitive_activity()
+        controller_response = None
+        try:
+            cycle = self._run_metacognitive_cycle(
+                input_data,
+                input_type=input_type,
+                session_id=(context or {}).get("session_id") if context else None,
+                metadata=context,
+            )
+            if cycle is not None and cycle.execution_result is not None:
+                controller_response = cycle.execution_result.response_text
+                self._mark_metacognitive_activity()
+        except Exception as exc:
+            logger.debug("Metacognitive cycle skipped in process_input: %s", exc)
+        return response or controller_response or ""
+
+    def set_metacognitive_controller(self, controller: Any) -> None:
+        self._metacognitive_controller = controller
+
+    def get_metacognitive_controller(self) -> Any:
+        return self._metacognitive_controller
+
+    def get_metacognitive_status(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_session_id = session_id or self.session_id
+        cycle = self._last_metacognitive_cycle
+        if cycle is None:
+            controller = self._metacognitive_controller
+            if controller is not None and hasattr(controller, "build_status"):
+                status = controller.build_status(resolved_session_id)
+                status["background_scheduler_running"] = self._background_cognition_running
+                status["background_tick_interval_seconds"] = self._background_cognition_interval_seconds
+                status["idle_reflection_interval_seconds"] = self._idle_reflection_interval_seconds
+                status["last_idle_reflection_ts"] = self._last_idle_reflection_ts or None
+                status.setdefault("unresolved_contradiction_count", 0)
+                return status
+            return {
+                "available": False,
+                "session_id": resolved_session_id,
+                "background_scheduler_running": self._background_cognition_running,
+                "background_tick_interval_seconds": self._background_cognition_interval_seconds,
+                "idle_reflection_interval_seconds": self._idle_reflection_interval_seconds,
+                "last_idle_reflection_ts": self._last_idle_reflection_ts or None,
+            }
+        return {
+            "available": True,
+            "session_id": resolved_session_id,
+            "last_cycle": self.get_last_cycle_summary(resolved_session_id),
+            "scheduled_task_count": len(getattr(cycle, "scheduled_tasks", ()) or ()),
+            "active_goal_count": len(getattr(cycle, "ranked_goals", ()) or ()),
+            "background_scheduler_running": self._background_cognition_running,
+            "background_tick_interval_seconds": self._background_cognition_interval_seconds,
+            "idle_reflection_interval_seconds": self._idle_reflection_interval_seconds,
+            "last_idle_reflection_ts": self._last_idle_reflection_ts or None,
+            "unresolved_contradiction_count": len(getattr(getattr(cycle, "workspace", None), "contradictions", ()) or ()),
+        }
+
+    def get_last_cycle_summary(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_session_id = session_id or self.session_id
+        cycle = self._last_metacognitive_cycle
+        if cycle is None:
+            controller = self._metacognitive_controller
+            if controller is not None and hasattr(controller, "get_latest_trace"):
+                latest_trace = controller.get_latest_trace(resolved_session_id)
+                if latest_trace is not None:
+                    return {
+                        "available": True,
+                        "session_id": resolved_session_id,
+                        "cycle_id": latest_trace.get("cycle_id"),
+                        "trace_id": latest_trace.get("cycle_id"),
+                        "selected_goal_id": ((latest_trace.get("plan") or {}).get("selected_goal") or {}).get("goal_id"),
+                        "selected_goal_kind": ((latest_trace.get("plan") or {}).get("selected_goal") or {}).get("kind"),
+                        "act_types": [act.get("act_type") for act in ((latest_trace.get("plan") or {}).get("acts") or [])],
+                        "success_score": (latest_trace.get("critic_report") or {}).get("success_score"),
+                        "follow_up_recommended": (latest_trace.get("critic_report") or {}).get("follow_up_recommended"),
+                        "response_text": (latest_trace.get("execution_result") or {}).get("response_text"),
+                        "scheduled_task_count": len(latest_trace.get("scheduled_tasks") or []),
+                    }
+            return {"available": False, "session_id": resolved_session_id}
+        return self._summarize_cycle(cycle, session_id=resolved_session_id)
+
+    def get_self_model(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_session_id = session_id or self.session_id
+        cycle = self._last_metacognitive_cycle
+        if cycle is not None and getattr(cycle, "updated_self_model", None) is not None:
+            return self._serialize_cycle_value(cycle.updated_self_model)
+        controller = self._metacognitive_controller
+        if controller is not None and hasattr(controller, "get_persisted_self_model"):
+            persisted = controller.get_persisted_self_model(resolved_session_id)
+            if isinstance(persisted, dict):
+                return persisted
+        state = self._cognitive_layers.get_self_model_state()
+        return state or {"session_id": resolved_session_id, "available": False}
+
+    def list_cognitive_tasks(self, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        resolved_session_id = session_id or self.session_id
+        cycle = self._last_metacognitive_cycle
+        if cycle is None:
+            controller = self._metacognitive_controller
+            if controller is not None and hasattr(controller, "list_tasks"):
+                return [dict(task) for task in controller.list_tasks(resolved_session_id) if isinstance(task, dict)]
+            return []
+        return [self._serialize_cycle_value(task) for task in getattr(cycle, "scheduled_tasks", ())]
+
+    def get_active_goals(self, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        resolved_session_id = session_id or self.session_id
+        cycle = self._last_metacognitive_cycle
+        if cycle is None:
+            controller = self._metacognitive_controller
+            if controller is not None and hasattr(controller, "get_latest_trace"):
+                latest_trace = controller.get_latest_trace(resolved_session_id)
+                if latest_trace is not None:
+                    return [dict(goal) for goal in (latest_trace.get("ranked_goals") or []) if isinstance(goal, dict)]
+            return []
+        return [self._serialize_cycle_value(goal) for goal in getattr(cycle, "ranked_goals", ())]
+
+    def get_metacognitive_scorecard(self, session_id: Optional[str] = None, *, limit: int = 50) -> Dict[str, Any]:
+        resolved_session_id = session_id or self.session_id
+        controller = self._metacognitive_controller
+        if controller is not None and hasattr(controller, "build_scorecard"):
+            return controller.build_scorecard(resolved_session_id, limit=limit)
+        return {
+            "available": False,
+            "session_id": resolved_session_id,
+            "trace_count": 0,
+            "summary": {},
+            "contradictions": {},
+            "self_model": {},
+            "goals": {},
+        }
+
+    def _run_metacognitive_cycle(
+        self,
+        input_data: str,
+        *,
+        input_type: str = "text",
+        session_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        controller = self._metacognitive_controller
+        if controller is None:
+            return None
+        from .metacognition import Stimulus
+
+        cycle = controller.run_cycle(
+            Stimulus(
+                session_id=session_id or self.session_id,
+                user_input=input_data,
+                input_type=input_type,
+                turn_index=self._turn_counter,
+                metadata=dict(metadata or {}),
+            )
+        )
+        self._last_metacognitive_cycle = cycle
+        return cycle
+
+    def _summarize_cycle(self, cycle: Any, *, session_id: str) -> Dict[str, Any]:
+        plan = getattr(cycle, "plan", None)
+        critic_report = getattr(cycle, "critic_report", None)
+        execution_result = getattr(cycle, "execution_result", None)
+        selected_goal = getattr(plan, "selected_goal", None) if plan is not None else None
+        acts = getattr(plan, "acts", ()) if plan is not None else ()
+        return {
+            "available": True,
+            "session_id": session_id,
+            "cycle_id": getattr(cycle, "cycle_id", None),
+            "trace_id": getattr(cycle, "trace_id", None),
+            "selected_goal_id": getattr(selected_goal, "goal_id", None),
+            "selected_goal_kind": getattr(getattr(selected_goal, "kind", None), "value", None),
+            "act_types": [getattr(getattr(act, "act_type", None), "value", None) for act in acts],
+            "success_score": getattr(critic_report, "success_score", None),
+            "follow_up_recommended": getattr(critic_report, "follow_up_recommended", None),
+            "response_text": getattr(execution_result, "response_text", None),
+            "scheduled_task_count": len(getattr(cycle, "scheduled_tasks", ()) or ()),
+        }
+
+    def _persist_reflection_report(self, report: Dict[str, Any]) -> None:
+        controller = self._metacognitive_controller
+        if controller is None or not hasattr(controller, "persist_reflection_episode"):
+            return
+        controller.persist_reflection_episode(self.session_id, report)
+
+    def _load_persisted_reflection_reports(self, limit: int) -> List[Dict[str, Any]]:
+        controller = self._metacognitive_controller
+        if controller is None or not hasattr(controller, "list_reflection_episodes"):
+            return []
+        return list(controller.list_reflection_episodes(self.session_id, limit=limit))
+
+    def run_metacognitive_scheduler_tick(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        now_ts: Optional[float] = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        controller = self._metacognitive_controller
+        resolved_session_id = session_id or self.session_id
+        if controller is None or not hasattr(controller, "run_scheduler_tick"):
+            return {
+                "session_id": resolved_session_id,
+                "executed_count": 0,
+                "executed_task_ids": [],
+                "pending_task_count": 0,
+            }
+        result = controller.run_scheduler_tick(
+            resolved_session_id,
+            now_ts=now_ts,
+            limit=limit,
+        )
+        if result.get("executed_count"):
+            self._mark_metacognitive_activity(now_ts)
+        return result
+
+    def start_metacognitive_scheduler(
+        self,
+        *,
+        interval_seconds: float = 15.0,
+        limit: int = 5,
+        idle_reflection_interval_seconds: float = 60.0,
+    ) -> None:
+        if self._background_cognition_running:
+            logger.info("Metacognitive scheduler already running.")
+            return
+
+        self._background_cognition_running = True
+        self._background_cognition_interval_seconds = interval_seconds
+        self._background_cognition_limit = limit
+        self._idle_reflection_interval_seconds = idle_reflection_interval_seconds
+
+        def run_scheduler() -> None:
+            while self._background_cognition_running:
+                try:
+                    tick_result = self.run_metacognitive_scheduler_tick(limit=self._background_cognition_limit)
+                    if not tick_result.get("executed_count"):
+                        audit_result = self.run_background_contradiction_audit()
+                        if audit_result.get("enqueued_count"):
+                            self._mark_metacognitive_activity()
+                        else:
+                            self._run_idle_reflection_if_due()
+                except Exception:
+                    logger.debug("Metacognitive scheduler tick failed", exc_info=True)
+                time.sleep(max(0.01, float(self._background_cognition_interval_seconds or 15.0)))
+
+        self._background_cognition_thread = threading.Thread(target=run_scheduler, daemon=True)
+        self._background_cognition_thread.start()
+
+    def stop_metacognitive_scheduler(self) -> None:
+        self._background_cognition_running = False
+        self._background_cognition_thread = None
+
+    def _mark_metacognitive_activity(self, timestamp: Optional[float] = None) -> None:
+        self._last_metacognitive_activity_ts = float(timestamp if timestamp is not None else time.time())
+
+    def run_background_contradiction_audit(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        now_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        controller = self._metacognitive_controller
+        resolved_session_id = session_id or self.session_id
+        if controller is None or not hasattr(controller, "run_contradiction_audit"):
+            return {
+                "session_id": resolved_session_id,
+                "contradiction_count": 0,
+                "enqueued_count": 0,
+                "enqueued_task_ids": [],
+            }
+        return controller.run_contradiction_audit(resolved_session_id, now_ts=now_ts)
+
+    def _run_idle_reflection_if_due(self, now_ts: Optional[float] = None) -> Dict[str, Any] | None:
+        current_ts = float(now_ts if now_ts is not None else time.time())
+        if current_ts - float(self._last_metacognitive_activity_ts) < float(self._idle_reflection_interval_seconds):
+            return None
+        if self._last_idle_reflection_ts and current_ts - float(self._last_idle_reflection_ts) < float(self._idle_reflection_interval_seconds):
+            return None
+        report = self._reflection_service.reflect(
+            metadata={
+                "trigger": "idle_background_scheduler",
+                "idle_for_seconds": current_ts - float(self._last_metacognitive_activity_ts),
+            }
+        )
+        self._last_idle_reflection_ts = current_ts
+        return report
+
+    @staticmethod
+    def _serialize_cycle_value(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if is_dataclass(value):
+            return asdict(value)
+        if hasattr(value, "to_dict"):
+            maybe_mapping = value.to_dict()
+            if isinstance(maybe_mapping, dict):
+                return dict(maybe_mapping)
+        return {"value": value}
 
     async def retrieve_memory_context(
         self,
@@ -374,6 +689,7 @@ class CognitiveAgent:
                 self.neural_integration.shutdown()
             except Exception as exc:
                 logger.warning("Error shutting down neural integration: %s", exc)
+        self.stop_metacognitive_scheduler()
         self.stop_reflection_scheduler()
     
     def reflect(self) -> Dict[str, Any]:

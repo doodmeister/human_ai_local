@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 
 from src.interfaces.api.dependencies import get_request_agent
+from src.orchestration.metacognition.presenters import present_background_state, present_scorecard, present_status
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
@@ -119,6 +120,13 @@ async def get_agent_status(request: Request):
     try:
         agent = get_request_agent(request)
         status = agent.get_cognitive_status()
+        metacognitive_status = {}
+        if hasattr(agent, "get_metacognitive_status"):
+            metacognitive_status = present_status(agent.get_metacognitive_status())
+        reflections = []
+        controller = getattr(agent, "get_metacognitive_controller", lambda: None)()
+        if controller is not None and hasattr(controller, "list_reflection_episodes"):
+            reflections = controller.list_reflection_episodes(getattr(agent, "session_id", "default"), limit=10)
         attention_status = status.get("attention_status", {})
         memory_status = status.get("memory_status", {})
         integration = status.get("cognitive_integration", {})
@@ -138,6 +146,14 @@ async def get_agent_status(request: Request):
                 "efficiency": integration.get("overall_efficiency", 0.0),
                 "processing_capacity": integration.get("processing_capacity", 0.0),
             },
+            "metacognition": present_background_state(
+                metacognitive_status,
+                tasks=agent.list_cognitive_tasks() if hasattr(agent, "list_cognitive_tasks") else [],
+                reflections=reflections,
+            ),
+            "metacognition_scorecard": present_scorecard(
+                agent.get_metacognitive_scorecard(limit=20) if hasattr(agent, "get_metacognitive_scorecard") else {}
+            ),
             "active_processes": len(status.get("active_goals", [])) if isinstance(status.get("active_goals"), list) else 0,
             "status": "healthy"
         }

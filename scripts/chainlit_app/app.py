@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import chainlit as cl
 from chainlit.input_widget import Select, Slider, Switch
@@ -25,14 +25,14 @@ from george_api import (
     fetch_execution_outcomes,
     fetch_experiments,
     fetch_learning_metrics,
+    fetch_metacognition_dashboard,
+    fetch_metacognition_reflections,
+    fetch_metacognition_tasks,
     fetch_memories,
     fetch_procedural_memories,
     fetch_prospective_memories,
     fetch_semantic_facts,
     format_due_display,
-    get_goal_plan,
-    get_goal_schedule,
-    get_goal_status,
     list_goals,
     list_reminders,
     search_memories,
@@ -71,6 +71,11 @@ async def set_starters(user=None, language=None):
             message="/reminders",
             icon="bell",
         ),
+        cl.Starter(
+            label="Inspect metacognition",
+            message="/metacog",
+            icon="compass",
+        ),
     ]
 
 
@@ -98,10 +103,11 @@ async def on_chat_start():
         {"id": "dream", "icon": "moon", "description": "Run a dream consolidation cycle", "button": True, "persistent": False},
         {"id": "reflect", "icon": "scan-eye", "description": "Run metacognitive reflection", "button": True, "persistent": False},
         {"id": "learning", "icon": "chart-line", "description": "Show learning dashboard metrics", "button": True, "persistent": False},
+        {"id": "metacog", "icon": "compass", "description": "Show metacognition dashboard summary", "button": True, "persistent": False},
     ])
 
     # Chat settings (gear icon)
-    settings = await cl.ChatSettings([
+    await cl.ChatSettings([
         Select(
             id="LLM_Provider",
             label="LLM Provider",
@@ -217,6 +223,9 @@ async def on_message(message: cl.Message):
         return
     if cmd == "learning" or content.startswith("/learning"):
         await _cmd_learning()
+        return
+    if cmd == "metacog" or content.startswith("/metacog"):
+        await _cmd_metacog()
         return
 
     # ------- Normal chat -------
@@ -349,7 +358,7 @@ async def on_snooze_reminder(action: cl.Action):
     minutes = cl.user_session.get("snooze_minutes") or 15
     if rid:
         await delete_reminder(rid)
-        new = await create_reminder(content_text, minutes * 60)
+        await create_reminder(content_text, minutes * 60)
         label = f"{minutes}min"
         await cl.Message(content=f"Reminder snoozed for {label}.", author="system").send()
 
@@ -358,7 +367,7 @@ async def on_snooze_reminder(action: cl.Action):
 async def on_delete_reminder(action: cl.Action):
     rid = action.payload.get("reminder_id")
     if rid and await delete_reminder(rid):
-        await cl.Message(content=f"Reminder deleted.", author="system").send()
+        await cl.Message(content="Reminder deleted.", author="system").send()
 
 
 # ============================================================================
@@ -465,7 +474,6 @@ async def _cmd_list_goals():
         title = g.get("title", "Untitled")
         priority = g.get("priority", 0.5)
         status = g.get("status", "pending")
-        dot = "red" if priority >= 0.75 else "orange" if priority >= 0.5 else "green"
         lines.append(f"- **{title}** (priority: {priority:.0%}, status: {status})")
         actions.append(cl.Action(
             name="execute_goal",
@@ -593,6 +601,118 @@ async def _cmd_learning():
         lines.append("No learning data available yet. Execute some goals to generate data.")
 
     await cl.Message(content="\n".join(lines)).send()
+
+
+async def _cmd_metacog():
+    """Show metacognition dashboard data for the current session."""
+    session_id = cl.user_session.get("session_id") or "default"
+
+    async with cl.Step(name="Metacognition Dashboard", type="tool") as step:
+        dashboard, tasks, reflections = await asyncio.gather(
+            fetch_metacognition_dashboard(session_id=session_id, history_limit=10, limit=50),
+            fetch_metacognition_tasks(session_id=session_id),
+            fetch_metacognition_reflections(session_id=session_id, limit=10),
+        )
+        step.output = (
+            f"available={bool(dashboard.get('available'))}, "
+            f"tasks={len(tasks)}, reflections={len(reflections)}"
+        )
+
+    if not dashboard or not dashboard.get("available"):
+        await cl.Message(
+            content="No metacognition trace data is available yet. Send a few chat turns or let background cognition run first."
+        ).send()
+        return
+
+    status = dashboard.get("status", {})
+    background = dashboard.get("background", {})
+    scorecard = dashboard.get("scorecard", {})
+    summary = scorecard.get("summary", {})
+    contradictions = scorecard.get("contradictions", {})
+    self_model = scorecard.get("self_model", {})
+    goals = scorecard.get("goals", {})
+
+    lines = ["**Metacognition Dashboard**\n"]
+    lines.append(f"Session: `{dashboard.get('session_id') or session_id}`")
+    lines.append(f"Trace Count: **{scorecard.get('trace_count', 0)}**")
+
+    cycle_success = summary.get("cycle_success_avg")
+    contradiction_rate = contradictions.get("contradiction_rate")
+    drift = self_model.get("self_model_drift_avg")
+    churn = goals.get("goal_churn_rate")
+    follow_up_rate = summary.get("follow_up_rate")
+
+    lines.append(
+        "Cycle Success: **{}** | Follow-Up Rate: **{}**".format(
+            f"{cycle_success:.1%}" if isinstance(cycle_success, (int, float)) else "N/A",
+            f"{follow_up_rate:.1%}" if isinstance(follow_up_rate, (int, float)) else "N/A",
+        )
+    )
+    lines.append(
+        "Contradiction Rate: **{}** | Goal Churn: **{}**".format(
+            f"{contradiction_rate:.1%}" if isinstance(contradiction_rate, (int, float)) else "N/A",
+            f"{churn:.1%}" if isinstance(churn, (int, float)) else "N/A",
+        )
+    )
+    lines.append(
+        "Self-Model Drift: **{}** | Pending Tasks: **{}** | Due Tasks: **{}**".format(
+            f"{drift:.2f}" if isinstance(drift, (int, float)) else "N/A",
+            background.get("pending_task_count", 0),
+            background.get("due_task_count", 0),
+        )
+    )
+    lines.append(
+        "Scheduler: **{}** | Open Contradictions: **{}** | Idle Reflections: **{}**".format(
+            "running" if background.get("scheduler_running") else "stopped",
+            background.get("unresolved_contradiction_count", 0),
+            background.get("idle_reflection_count", 0),
+        )
+    )
+
+    last_cycle = status.get("last_cycle") or {}
+    if last_cycle:
+        lines.append("\n**Last Cycle**")
+        lines.append(f"- Cycle ID: `{last_cycle.get('cycle_id', 'N/A')}`")
+        lines.append(f"- Goal Kind: `{last_cycle.get('selected_goal_kind', 'N/A')}`")
+        success_score = last_cycle.get("success_score")
+        lines.append(
+            f"- Success Score: {success_score:.2f}" if isinstance(success_score, (int, float)) else "- Success Score: N/A"
+        )
+
+    goal_mix = goals.get("selected_goal_kind_counts", {})
+    if goal_mix:
+        lines.append("\n**Goal Selection Mix**")
+        for goal_kind, count in goal_mix.items():
+            lines.append(f"- {goal_kind}: {count}")
+
+    if tasks:
+        lines.append("\n**Tasks**")
+        for task in tasks[:5]:
+            reason = (task.get("metadata") or {}).get("reason")
+            due_at = task.get("due_at", "N/A")
+            label = task.get("task_type") or task.get("description") or task.get("task_id", "task")
+            suffix = f" ({reason})" if reason else ""
+            lines.append(f"- {label}: {task.get('status', 'unknown')} due `{due_at}`{suffix}")
+
+    if reflections:
+        lines.append("\n**Recent Reflections**")
+        for report in reflections[:3]:
+            trigger = (report.get("metadata") or {}).get("trigger")
+            summary_text = report.get("summary") or report.get("timestamp") or "reflection"
+            suffix = f" [{trigger}]" if trigger else ""
+            lines.append(f"- {summary_text}{suffix}")
+
+    await cl.Message(content="\n".join(lines)).send()
+
+    detail_payload = {
+        "dashboard": dashboard,
+        "tasks": tasks[:10],
+        "reflections": reflections[:10],
+    }
+    await cl.Message(
+        content=f"```json\n{json.dumps(detail_payload, indent=2)[:3500]}\n```",
+        author="metacognition",
+    ).send()
 
 
 # ============================================================================

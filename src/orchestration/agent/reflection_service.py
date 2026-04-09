@@ -13,9 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class CognitiveReflectionService:
-    def __init__(self, *, get_memory: Callable[[], Any]) -> None:
+    def __init__(
+        self,
+        *,
+        get_memory: Callable[[], Any],
+        persist_report: Callable[[Dict[str, Any]], None] | None = None,
+        load_reports: Callable[[int], List[Dict[str, Any]]] | None = None,
+    ) -> None:
         self._get_memory = get_memory
-        self._reports: List[Dict[str, Any]] = []
+        self._persist_report = persist_report
+        self._load_reports = load_reports
+        self._reports: List[Dict[str, Any]] = list(load_reports(100) if load_reports is not None else [])
         self._scheduler_thread: threading.Thread | None = None
         self._scheduler_running = False
 
@@ -23,7 +31,7 @@ class CognitiveReflectionService:
     def reports(self) -> List[Dict[str, Any]]:
         return self._reports
 
-    def reflect(self) -> Dict[str, Any]:
+    def reflect(self, metadata: Dict[str, Any] | None = None) -> Dict[str, Any]:
         timestamp = datetime.now().isoformat()
         memory = self._get_memory()
         ltm = memory.ltm
@@ -64,11 +72,19 @@ class CognitiveReflectionService:
             "ltm_status": ltm.get_status() if hasattr(ltm, "get_status") else None,
             "stm_status": stm.get_status() if hasattr(stm, "get_status") else None,
         }
+        if metadata:
+            report["metadata"] = dict(metadata)
         self._reports.append(report)
+        if self._persist_report is not None:
+            try:
+                self._persist_report(report)
+            except Exception:
+                logger.debug("Failed to persist reflection report", exc_info=True)
         return report
 
     def get_reports(self, n: int = 5) -> List[Dict[str, Any]]:
-        return self._reports[-n:]
+        reports = self._merged_reports(limit=n)
+        return reports[-n:]
 
     def start_scheduler(self, interval_minutes: int = 10) -> None:
         if self._scheduler_running:
@@ -107,9 +123,31 @@ class CognitiveReflectionService:
         return status
 
     def get_last_report(self) -> Dict[str, Any]:
-        if self._reports:
-            return self._reports[-1]
+        reports = self._merged_reports(limit=1)
+        if reports:
+            return reports[-1]
         return {}
 
     def clear_reports(self) -> None:
         self._reports.clear()
+
+    def _merged_reports(self, *, limit: int) -> List[Dict[str, Any]]:
+        persisted = []
+        if self._load_reports is not None:
+            try:
+                persisted = list(self._load_reports(limit))
+            except Exception:
+                persisted = []
+        reports = list(persisted)
+        reports.extend(self._reports)
+        deduped: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for report in reports:
+            key = str(report.get("timestamp") or id(report))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(report)
+        if limit >= 0:
+            return deduped[-limit:]
+        return deduped

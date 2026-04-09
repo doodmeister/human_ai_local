@@ -263,6 +263,61 @@ st.caption(f"Last updated: {health['timestamp']}")
 | GET | `/executive/status` | Basic status | Goal counts |
 | GET | `/executive/system/health` | Full health metrics | Aggregated stats + subsystem status |
 
+### Metacognition Inspection
+
+| Method | Endpoint | Purpose | Returns |
+|--------|----------|---------|---------|
+| GET | `/agent/metacog/status` | Full metacognitive status summary | Last cycle, persisted self-model, background block |
+| GET | `/agent/metacog/background` | Background cognition summary | Scheduler, audit, idle-reflection counts |
+| GET | `/agent/metacog/scorecard` | Aggregate metacognitive scorecard | Cycle success, contradiction, drift, churn metrics |
+| GET | `/agent/metacog/dashboard` | Combined inspection payload | Status, background, and scorecard blocks |
+| GET | `/agent/metacog/last-cycle` | Last metacognitive cycle summary | Selected goal, acts, success score |
+| GET | `/agent/metacog/goals` | Ranked active goals | `{count, items}` |
+| GET | `/agent/metacog/self-model` | Persisted or live self model | Confidence, traits, beliefs |
+| GET | `/agent/metacog/tasks` | Persisted cognitive task queue | `{count, items}` |
+| GET | `/agent/metacog/reflections` | Persisted reflection episodes | `{count, items}` |
+
+Example:
+
+```python
+import requests
+import streamlit as st
+
+base_url = "http://localhost:8000"
+session_id = "demo-session"
+
+status = requests.get(
+    f"{base_url}/agent/metacog/status",
+    params={"session_id": session_id, "history_limit": 10},
+).json()
+
+background = status["background"]
+st.subheader("Metacognitive Background State")
+st.metric("Pending Tasks", background["pending_task_count"])
+st.metric("Due Tasks", background["due_task_count"])
+st.metric("Unresolved Contradictions", background["unresolved_contradiction_count"])
+st.metric("Idle Reflections", background["idle_reflection_count"])
+
+tasks = requests.get(
+    f"{base_url}/agent/metacog/tasks",
+    params={"session_id": session_id},
+).json()["items"]
+
+for task in tasks:
+    st.write(task["task_id"], task["status"], task.get("metadata", {}).get("reason"))
+
+scorecard = requests.get(
+    f"{base_url}/agent/metacog/scorecard",
+    params={"session_id": session_id, "limit": 50},
+).json()
+
+st.subheader("Metacognitive Scorecard")
+st.metric("Cycle Success", scorecard["summary"]["cycle_success_avg"])
+st.metric("Contradiction Rate", scorecard["contradictions"]["contradiction_rate"])
+st.metric("Self-Model Drift", scorecard["self_model"]["self_model_drift_avg"])
+st.metric("Goal Churn", scorecard["goals"]["goal_churn_rate"])
+```
+
 ---
 
 ## Response Schemas
@@ -334,6 +389,73 @@ st.caption(f"Last updated: {health['timestamp']}")
   "robustness_score": 0.85,
   "cognitive_smoothness": 0.92,
   "scheduling_time_ms": 85
+}
+```
+
+### Metacognitive Status (from `/agent/metacog/status`)
+
+```json
+{
+    "available": true,
+    "session_id": "demo-session",
+    "last_cycle": {
+        "cycle_id": "cycle-1",
+        "selected_goal_kind": "response",
+        "success_score": 0.8
+    },
+    "persisted_self_model": {
+        "session_id": "demo-session",
+        "confidence": 0.7
+    },
+    "pending_task_count": 1,
+    "due_task_count": 1,
+    "unresolved_contradiction_count": 2,
+    "background": {
+        "scheduler_running": true,
+        "tick_interval_seconds": 15.0,
+        "idle_reflection_interval_seconds": 60.0,
+        "audit_task_count": 1,
+        "pending_audit_task_count": 1,
+        "idle_reflection_count": 1,
+        "last_idle_reflection": {
+            "timestamp": "2026-04-09T00:00:00",
+            "metadata": {
+                "trigger": "idle_background_scheduler"
+            }
+        }
+    }
+}
+```
+
+### Metacognitive Scorecard (from `/agent/metacog/scorecard`)
+
+```json
+{
+    "available": true,
+    "session_id": "demo-session",
+    "trace_count": 3,
+    "latest_trace_id": "cycle-3",
+    "summary": {
+        "cycle_success_avg": 0.75,
+        "follow_up_rate": 0.33
+    },
+    "contradictions": {
+        "contradiction_rate": 0.5,
+        "contradiction_count_avg": 1.0
+    },
+    "self_model": {
+        "self_model_drift_avg": 0.2,
+        "confidence_drift_avg": 0.1,
+        "trait_drift_avg": 0.25,
+        "belief_churn_avg": 0.33
+    },
+    "goals": {
+        "goal_churn_rate": 0.5,
+        "selected_goal_kind_counts": {
+            "response": 2,
+            "reflection": 1
+        }
+    }
 }
 ```
 

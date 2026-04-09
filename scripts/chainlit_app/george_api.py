@@ -313,6 +313,55 @@ async def fetch_execution_outcomes(limit: int = 20) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Metacognition
+# ---------------------------------------------------------------------------
+
+async def fetch_metacognition_dashboard(
+    session_id: Optional[str] = None,
+    *,
+    history_limit: int = 10,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    try:
+        params: Dict[str, Any] = {"history_limit": history_limit, "limit": limit}
+        if session_id:
+            params["session_id"] = session_id
+        resp = await _get_client().get("/agent/metacog/dashboard", params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPError:
+        return {}
+
+
+async def fetch_metacognition_tasks(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    try:
+        params: Dict[str, Any] = {}
+        if session_id:
+            params["session_id"] = session_id
+        resp = await _get_client().get("/agent/metacog/tasks", params=params)
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+    except httpx.HTTPError:
+        return []
+
+
+async def fetch_metacognition_reflections(
+    session_id: Optional[str] = None,
+    *,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    try:
+        params: Dict[str, Any] = {"limit": limit}
+        if session_id:
+            params["session_id"] = session_id
+        resp = await _get_client().get("/agent/metacog/reflections", params=params)
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+    except httpx.HTTPError:
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
