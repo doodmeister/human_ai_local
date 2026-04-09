@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 import hashlib
 import time
 from typing import Any
@@ -11,13 +10,23 @@ from .critic import DefaultCritic
 from .event_bus import InProcessEventBus
 from .executor import DefaultPlanExecutor
 from .goal_manager import HeuristicGoalManager
+from .interfaces import (
+    CognitiveScheduler,
+    Critic,
+    CycleTracer,
+    EventBus,
+    GoalManager,
+    PlanExecutor,
+    PolicyEngine,
+    SelfModelUpdater,
+    StateProvider,
+    WorkspaceBuilder,
+)
 from .models import MetacognitiveCycleResult, Stimulus
 from .policy_engine import HeuristicPolicyEngine
 from .scorecard import build_metacognitive_scorecard
 from .scheduler import DefaultCognitiveScheduler
 from .self_model_updater import DefaultSelfModelUpdater
-from .state_provider import DefaultStateProvider
-from .workspace_builder import DefaultWorkspaceBuilder
 
 
 class MetacognitiveController:
@@ -26,16 +35,17 @@ class MetacognitiveController:
     def __init__(
         self,
         *,
-        state_provider: DefaultStateProvider,
-        workspace_builder: DefaultWorkspaceBuilder,
-        goal_manager: HeuristicGoalManager | None = None,
-        policy_engine: HeuristicPolicyEngine | None = None,
-        executor: DefaultPlanExecutor | None = None,
-        critic: DefaultCritic | None = None,
-        self_model_updater: DefaultSelfModelUpdater | None = None,
-        scheduler: DefaultCognitiveScheduler | None = None,
-        event_bus: InProcessEventBus | None = None,
-        cycle_tracer: object | None = None,
+        state_provider: StateProvider,
+        workspace_builder: WorkspaceBuilder,
+        goal_manager: GoalManager | None = None,
+        policy_engine: PolicyEngine | None = None,
+        executor: PlanExecutor | None = None,
+        critic: Critic | None = None,
+        self_model_updater: SelfModelUpdater | None = None,
+        scheduler: CognitiveScheduler | None = None,
+        event_bus: EventBus | None = None,
+        cycle_tracer: CycleTracer | None = None,
+        max_reflection_episodes: int | None = 200,
     ) -> None:
         self._state_provider = state_provider
         self._workspace_builder = workspace_builder
@@ -47,46 +57,79 @@ class MetacognitiveController:
         self._scheduler = scheduler or DefaultCognitiveScheduler()
         self._event_bus = event_bus or InProcessEventBus()
         self._cycle_tracer = cycle_tracer
+        self._max_reflection_episodes = max_reflection_episodes
 
     def run_cycle(self, stimulus: Stimulus) -> MetacognitiveCycleResult:
         cycle_id = f"cycle-{uuid4()}"
         self._event_bus.publish("metacognition.cycle.started", {"cycle_id": cycle_id, "session_id": stimulus.session_id})
+        snapshot = None
+        workspace = None
+        ranked_goals = ()
+        proposals = ()
+        plan = None
+        execution_result = None
+        critic_report = None
+        updated_self_model = None
+        scheduled_tasks = ()
+        completed_stages: list[str] = []
+        failure: dict[str, Any] | None = None
 
-        snapshot = self._state_provider.snapshot(stimulus)
-        self._event_bus.publish("metacognition.snapshot.created", {"cycle_id": cycle_id, "turn_index": snapshot.turn_index})
-        workspace = self._workspace_builder.build(stimulus, snapshot)
-        ranked_goals = self._goal_manager.rank_goals(workspace)
-        if ranked_goals:
-            workspace.dominant_goal = ranked_goals[0]
+        try:
+            snapshot = self._state_provider.snapshot(stimulus)
+            completed_stages.append("snapshot")
+            self._event_bus.publish("metacognition.snapshot.created", {"cycle_id": cycle_id, "turn_index": snapshot.turn_index})
 
-        proposals = self._policy_engine.propose_acts(workspace, ranked_goals)
-        plan = self._policy_engine.select_plan(workspace, ranked_goals, proposals)
-        execution_result = self._executor.execute(workspace, plan)
-        critic_report = self._critic.evaluate(workspace, plan, execution_result)
-        updated_self_model = self._self_model_updater.apply(snapshot.self_model, critic_report)
-        scheduled_tasks = tuple(self._scheduler.schedule(workspace, critic_report))
+            workspace = self._workspace_builder.build(stimulus, snapshot)
+            completed_stages.append("workspace")
 
-        trace_payload = {
-            "cycle_id": cycle_id,
-            "stimulus": asdict(stimulus),
-            "workspace": asdict(workspace),
-            "ranked_goals": [asdict(goal) for goal in ranked_goals],
-            "plan": asdict(plan),
-            "execution_result": asdict(execution_result),
-            "critic_report": asdict(critic_report),
-            "updated_self_model": asdict(updated_self_model),
-            "scheduled_tasks": [asdict(task) for task in scheduled_tasks],
+            ranked_goals = tuple(self._goal_manager.rank_goals(workspace))
+            if ranked_goals:
+                workspace.dominant_goal = ranked_goals[0]
+            completed_stages.append("goals")
+
+            proposals = tuple(self._policy_engine.propose_acts(workspace, list(ranked_goals)))
+            plan = self._policy_engine.select_plan(workspace, list(ranked_goals), list(proposals))
+            completed_stages.append("policy")
+
+            execution_result = self._executor.execute(workspace, plan)
+            completed_stages.append("execution")
+
+            critic_report = self._critic.evaluate(workspace, plan, execution_result)
+            completed_stages.append("critic")
+
+            updated_self_model = self._self_model_updater.apply(snapshot.self_model, critic_report)
+            completed_stages.append("self_model_updater")
+
+            scheduled_tasks = tuple(self._scheduler.schedule(workspace, critic_report))
+            completed_stages.append("scheduler")
+        except Exception as exc:
+            failure = {
+                "stage": self._infer_failed_stage(completed_stages),
+                "error": str(exc),
+                "exception_type": type(exc).__name__,
+            }
+
+        metadata = {
+            "proposal_count": len(proposals),
+            "completed_stages": completed_stages,
+            "failed": failure is not None,
         }
-        trace_id = None
-        if self._cycle_tracer is not None and hasattr(self._cycle_tracer, "write_trace"):
-            trace_id = self._cycle_tracer.write_trace(trace_payload)
-        if self._cycle_tracer is not None and hasattr(self._cycle_tracer, "persist_self_model"):
-            self._cycle_tracer.persist_self_model(stimulus.session_id, asdict(updated_self_model))
-        if scheduled_tasks and self._cycle_tracer is not None and hasattr(self._cycle_tracer, "upsert_task_queue"):
-            self._cycle_tracer.upsert_task_queue(
-                stimulus.session_id,
-                [asdict(task) for task in scheduled_tasks],
-            )
+        if failure is not None:
+            metadata["error"] = failure
+
+        trace_id = self._record_cycle_artifacts(
+            cycle_id=cycle_id,
+            stimulus=stimulus,
+            workspace=workspace,
+            ranked_goals=ranked_goals,
+            proposals=proposals,
+            plan=plan,
+            execution_result=execution_result,
+            critic_report=critic_report,
+            updated_self_model=updated_self_model,
+            scheduled_tasks=scheduled_tasks,
+            metadata=metadata,
+        )
 
         result = MetacognitiveCycleResult(
             cycle_id=cycle_id,
@@ -98,15 +141,17 @@ class MetacognitiveController:
             updated_self_model=updated_self_model,
             scheduled_tasks=scheduled_tasks,
             trace_id=trace_id,
-            metadata={"proposal_count": len(proposals)},
+            metadata=metadata,
         )
         self._event_bus.publish(
             "metacognition.cycle.completed",
             {
                 "cycle_id": cycle_id,
                 "trace_id": trace_id,
-                "success_score": critic_report.success_score,
+                "success_score": critic_report.success_score if critic_report is not None else None,
                 "scheduled_task_count": len(scheduled_tasks),
+                "failed": failure is not None,
+                "failed_stage": failure.get("stage") if failure is not None else None,
             },
         )
         return result
@@ -114,24 +159,22 @@ class MetacognitiveController:
     def get_latest_trace(self, session_id: str) -> dict[str, Any] | None:
         if self._cycle_tracer is None:
             return None
-        if hasattr(self._cycle_tracer, "latest_trace_for_session"):
-            return self._cycle_tracer.latest_trace_for_session(session_id)
-        if hasattr(self._cycle_tracer, "latest_trace"):
-            return self._cycle_tracer.latest_trace()
-        return None
+        return self._cycle_tracer.latest_trace_for_session(session_id)
 
     def get_persisted_self_model(self, session_id: str) -> dict[str, Any] | None:
-        if self._cycle_tracer is None or not hasattr(self._cycle_tracer, "load_self_model"):
+        if self._cycle_tracer is None:
             return None
         return self._cycle_tracer.load_self_model(session_id)
 
     def persist_reflection_episode(self, session_id: str, report: dict[str, Any]) -> None:
-        if self._cycle_tracer is None or not hasattr(self._cycle_tracer, "append_reflection_episode"):
+        if self._cycle_tracer is None:
             return
         self._cycle_tracer.append_reflection_episode(session_id, report)
+        if self._max_reflection_episodes is not None:
+            self._cycle_tracer.prune_reflection_episodes(session_id, max_episodes=self._max_reflection_episodes)
 
     def list_reflection_episodes(self, session_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        if self._cycle_tracer is None or not hasattr(self._cycle_tracer, "list_reflection_episodes"):
+        if self._cycle_tracer is None:
             return []
         return self._cycle_tracer.list_reflection_episodes(session_id, limit=limit)
 
@@ -142,7 +185,7 @@ class MetacognitiveController:
         queued_tasks = self.list_tasks(session_id)
         now_ts = time.time()
         metrics: dict[str, Any] = {}
-        if self._cycle_tracer is not None and hasattr(self._cycle_tracer, "build_regression_metrics"):
+        if self._cycle_tracer is not None:
             metrics = self._cycle_tracer.build_regression_metrics(session_id=session_id, limit=history_limit)
         return {
             "available": any((latest_trace, persisted_self_model, reflection_episodes)),
@@ -163,24 +206,30 @@ class MetacognitiveController:
         }
 
     def list_tasks(self, session_id: str) -> list[dict[str, Any]]:
-        if self._cycle_tracer is None or not hasattr(self._cycle_tracer, "load_task_queue"):
+        if self._cycle_tracer is None:
             return []
         return list(self._cycle_tracer.load_task_queue(session_id))
 
     def build_scorecard(self, session_id: str, *, limit: int = 50) -> dict[str, Any]:
         traces: list[dict[str, Any]] = []
-        if self._cycle_tracer is not None and hasattr(self._cycle_tracer, "list_traces"):
+        if self._cycle_tracer is not None:
             traces = list(self._cycle_tracer.list_traces(session_id=session_id, limit=limit))
         return build_metacognitive_scorecard(traces, session_id=session_id).to_dict()
 
     def list_unresolved_contradictions(self, session_id: str) -> list[dict[str, Any]]:
-        if not hasattr(self._workspace_builder, "contradictions_for_session"):
-            return []
         try:
             contradictions = self._workspace_builder.contradictions_for_session(session_id)
         except Exception:
             contradictions = []
-        return [dict(item) for item in contradictions if isinstance(item, dict)]
+        normalized: list[dict[str, Any]] = []
+        for item in contradictions:
+            if not isinstance(item, dict):
+                continue
+            description = str(item.get("description") or item.get("summary") or "").strip()
+            if not description:
+                continue
+            normalized.append(dict(item))
+        return normalized
 
     def run_contradiction_audit(
         self,
@@ -211,7 +260,7 @@ class MetacognitiveController:
                     "task_id": task_id,
                     "description": self._describe_contradiction(contradiction),
                     "status": ScheduledTaskStatus.PENDING.value,
-                    "priority": min(1.0, 0.65 + 0.05 * len(contradictions)),
+                    "priority": self._score_contradiction_priority(contradiction, contradiction_count=len(contradictions)),
                     "due_at": current_ts,
                     "metadata": {
                         "reason": "background_contradiction_audit",
@@ -221,7 +270,7 @@ class MetacognitiveController:
                 }
             )
 
-        if enqueued_tasks and self._cycle_tracer is not None and hasattr(self._cycle_tracer, "upsert_task_queue"):
+        if enqueued_tasks and self._cycle_tracer is not None:
             self._cycle_tracer.upsert_task_queue(session_id, enqueued_tasks)
 
         return {
@@ -265,7 +314,7 @@ class MetacognitiveController:
                 ),
             }
 
-        task_map = {task.get("task_id"): dict(task) for task in queued_tasks if task.get("task_id")}
+        task_map = {str(task.get("task_id")): dict(task) for task in queued_tasks if task.get("task_id")}
         executed_task_ids: list[str] = []
         execution_cycle_ids: list[str] = []
 
@@ -278,27 +327,42 @@ class MetacognitiveController:
             task_map[task_id] = current_task
             self._persist_task_map(session_id, task_map)
 
-            result = self.run_cycle(
-                Stimulus(
-                    session_id=session_id,
-                    user_input=current_task.get("description") or task_id,
-                    input_type="background_task",
-                    metadata={
-                        "background_task": True,
-                        "scheduler_tick": True,
-                        "task_id": task_id,
-                        "task_reason": current_task["metadata"].get("reason"),
-                    },
+            try:
+                result = self.run_cycle(
+                    Stimulus(
+                        session_id=session_id,
+                        user_input=current_task.get("description") or task_id,
+                        input_type="background_task",
+                        metadata={
+                            "background_task": True,
+                            "scheduler_tick": True,
+                            "task_id": task_id,
+                            "task_reason": current_task["metadata"].get("reason"),
+                        },
+                    )
                 )
-            )
-            current_task["status"] = ScheduledTaskStatus.COMPLETED.value
-            current_task["metadata"]["completed_at"] = time.time()
-            current_task["metadata"]["execution_cycle_id"] = result.cycle_id
-            task_map[task_id] = current_task
-            executed_task_ids.append(task_id)
-            execution_cycle_ids.append(result.cycle_id)
+                if result.metadata.get("failed"):
+                    current_task["status"] = ScheduledTaskStatus.FAILED.value
+                    current_task["metadata"]["failed_at"] = time.time()
+                    current_task["metadata"]["execution_cycle_id"] = result.cycle_id
+                    current_task["metadata"]["last_error"] = (result.metadata.get("error") or {}).get("error")
+                    current_task["metadata"]["last_error_stage"] = (result.metadata.get("error") or {}).get("stage")
+                else:
+                    current_task["status"] = ScheduledTaskStatus.COMPLETED.value
+                    current_task["metadata"]["completed_at"] = time.time()
+                    current_task["metadata"]["execution_cycle_id"] = result.cycle_id
+                    executed_task_ids.append(task_id)
+                    execution_cycle_ids.append(result.cycle_id)
+                task_map[task_id] = current_task
+            except Exception as exc:
+                current_task["status"] = ScheduledTaskStatus.FAILED.value
+                current_task["metadata"]["failed_at"] = time.time()
+                current_task["metadata"]["last_error"] = str(exc)
+                current_task["metadata"]["last_error_type"] = type(exc).__name__
+                task_map[task_id] = current_task
+            finally:
+                self._persist_task_map(session_id, task_map)
 
-        self._persist_task_map(session_id, task_map)
         return {
             "session_id": session_id,
             "executed_count": len(executed_task_ids),
@@ -310,7 +374,7 @@ class MetacognitiveController:
         }
 
     def _persist_task_map(self, session_id: str, task_map: dict[str, dict[str, Any]]) -> None:
-        if self._cycle_tracer is None or not hasattr(self._cycle_tracer, "persist_task_queue"):
+        if self._cycle_tracer is None:
             return
         ordered_tasks = sorted(
             task_map.values(),
@@ -337,5 +401,89 @@ class MetacognitiveController:
                 str(index),
             ]
         )
-        digest = hashlib.sha1(stable_source.encode("utf-8")).hexdigest()[:12]
+        digest = hashlib.sha256(stable_source.encode("utf-8")).hexdigest()[:12]
         return f"contradiction-audit:{session_id}:{digest}"
+
+    def _record_cycle_artifacts(
+        self,
+        *,
+        cycle_id: str,
+        stimulus: Stimulus,
+        workspace: Any,
+        ranked_goals: tuple[Any, ...],
+        proposals: tuple[Any, ...],
+        plan: Any,
+        execution_result: Any,
+        critic_report: Any,
+        updated_self_model: Any,
+        scheduled_tasks: tuple[Any, ...],
+        metadata: dict[str, Any],
+    ) -> str | None:
+        trace_id = None
+        if self._cycle_tracer is None:
+            return None
+
+        trace_payload = {
+            "cycle_id": cycle_id,
+            "stimulus": stimulus,
+            "workspace": workspace,
+            "ranked_goals": list(ranked_goals),
+            "candidate_acts": list(proposals),
+            "plan": plan,
+            "execution_result": execution_result,
+            "critic_report": critic_report,
+            "updated_self_model": updated_self_model,
+            "scheduled_tasks": list(scheduled_tasks),
+            "metadata": metadata,
+        }
+
+        try:
+            trace_id = self._cycle_tracer.write_trace(trace_payload)
+        except Exception as exc:
+            metadata["trace_error"] = {
+                "error": str(exc),
+                "exception_type": type(exc).__name__,
+            }
+
+        if updated_self_model is not None:
+            try:
+                self._cycle_tracer.persist_self_model(stimulus.session_id, updated_self_model)
+            except Exception as exc:
+                metadata["self_model_persist_error"] = {
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                }
+        if scheduled_tasks:
+            try:
+                self._cycle_tracer.upsert_task_queue(stimulus.session_id, list(scheduled_tasks))
+            except Exception as exc:
+                metadata["task_queue_persist_error"] = {
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                }
+        return trace_id
+
+    @staticmethod
+    def _infer_failed_stage(completed_stages: list[str]) -> str:
+        stage_order = [
+            "snapshot",
+            "workspace",
+            "goals",
+            "policy",
+            "execution",
+            "critic",
+            "self_model_updater",
+            "scheduler",
+        ]
+        for stage_name in stage_order:
+            if stage_name not in completed_stages:
+                return stage_name
+        return "unknown"
+
+    @staticmethod
+    def _score_contradiction_priority(contradiction: dict[str, Any], *, contradiction_count: int) -> float:
+        severity = contradiction.get("severity", contradiction.get("confidence"))
+        if isinstance(severity, (int, float)):
+            normalized_severity = max(0.0, min(1.0, float(severity)))
+            return min(1.0, 0.55 + 0.35 * normalized_severity)
+        return min(0.9, 0.60 + 0.03 * max(0, contradiction_count - 1))

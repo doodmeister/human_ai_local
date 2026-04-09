@@ -229,7 +229,7 @@ class CognitiveAgent:
         cycle = self._last_metacognitive_cycle
         if cycle is None:
             controller = self._metacognitive_controller
-            if controller is not None and hasattr(controller, "build_status"):
+            if controller is not None:
                 status = controller.build_status(resolved_session_id)
                 status["background_scheduler_running"] = self._background_cognition_running
                 status["background_tick_interval_seconds"] = self._background_cognition_interval_seconds
@@ -249,13 +249,13 @@ class CognitiveAgent:
             "available": True,
             "session_id": resolved_session_id,
             "last_cycle": self.get_last_cycle_summary(resolved_session_id),
-            "scheduled_task_count": len(getattr(cycle, "scheduled_tasks", ()) or ()),
-            "active_goal_count": len(getattr(cycle, "ranked_goals", ()) or ()),
+            "scheduled_task_count": len(cycle.scheduled_tasks or ()),
+            "active_goal_count": len(cycle.ranked_goals or ()),
             "background_scheduler_running": self._background_cognition_running,
             "background_tick_interval_seconds": self._background_cognition_interval_seconds,
             "idle_reflection_interval_seconds": self._idle_reflection_interval_seconds,
             "last_idle_reflection_ts": self._last_idle_reflection_ts or None,
-            "unresolved_contradiction_count": len(getattr(getattr(cycle, "workspace", None), "contradictions", ()) or ()),
+            "unresolved_contradiction_count": len(cycle.workspace.contradictions if cycle.workspace is not None else ()),
         }
 
     def get_last_cycle_summary(self, session_id: Optional[str] = None) -> Dict[str, Any]:
@@ -263,7 +263,7 @@ class CognitiveAgent:
         cycle = self._last_metacognitive_cycle
         if cycle is None:
             controller = self._metacognitive_controller
-            if controller is not None and hasattr(controller, "get_latest_trace"):
+            if controller is not None:
                 latest_trace = controller.get_latest_trace(resolved_session_id)
                 if latest_trace is not None:
                     return {
@@ -285,10 +285,10 @@ class CognitiveAgent:
     def get_self_model(self, session_id: Optional[str] = None) -> Dict[str, Any]:
         resolved_session_id = session_id or self.session_id
         cycle = self._last_metacognitive_cycle
-        if cycle is not None and getattr(cycle, "updated_self_model", None) is not None:
+        if cycle is not None and cycle.updated_self_model is not None:
             return self._serialize_cycle_value(cycle.updated_self_model)
         controller = self._metacognitive_controller
-        if controller is not None and hasattr(controller, "get_persisted_self_model"):
+        if controller is not None:
             persisted = controller.get_persisted_self_model(resolved_session_id)
             if isinstance(persisted, dict):
                 return persisted
@@ -300,27 +300,27 @@ class CognitiveAgent:
         cycle = self._last_metacognitive_cycle
         if cycle is None:
             controller = self._metacognitive_controller
-            if controller is not None and hasattr(controller, "list_tasks"):
+            if controller is not None:
                 return [dict(task) for task in controller.list_tasks(resolved_session_id) if isinstance(task, dict)]
             return []
-        return [self._serialize_cycle_value(task) for task in getattr(cycle, "scheduled_tasks", ())]
+        return [self._serialize_cycle_value(task) for task in cycle.scheduled_tasks]
 
     def get_active_goals(self, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
         resolved_session_id = session_id or self.session_id
         cycle = self._last_metacognitive_cycle
         if cycle is None:
             controller = self._metacognitive_controller
-            if controller is not None and hasattr(controller, "get_latest_trace"):
+            if controller is not None:
                 latest_trace = controller.get_latest_trace(resolved_session_id)
                 if latest_trace is not None:
                     return [dict(goal) for goal in (latest_trace.get("ranked_goals") or []) if isinstance(goal, dict)]
             return []
-        return [self._serialize_cycle_value(goal) for goal in getattr(cycle, "ranked_goals", ())]
+        return [self._serialize_cycle_value(goal) for goal in cycle.ranked_goals]
 
     def get_metacognitive_scorecard(self, session_id: Optional[str] = None, *, limit: int = 50) -> Dict[str, Any]:
         resolved_session_id = session_id or self.session_id
         controller = self._metacognitive_controller
-        if controller is not None and hasattr(controller, "build_scorecard"):
+        if controller is not None:
             return controller.build_scorecard(resolved_session_id, limit=limit)
         return {
             "available": False,
@@ -358,34 +358,34 @@ class CognitiveAgent:
         return cycle
 
     def _summarize_cycle(self, cycle: Any, *, session_id: str) -> Dict[str, Any]:
-        plan = getattr(cycle, "plan", None)
-        critic_report = getattr(cycle, "critic_report", None)
-        execution_result = getattr(cycle, "execution_result", None)
-        selected_goal = getattr(plan, "selected_goal", None) if plan is not None else None
-        acts = getattr(plan, "acts", ()) if plan is not None else ()
+        plan = cycle.plan
+        critic_report = cycle.critic_report
+        execution_result = cycle.execution_result
+        selected_goal = plan.selected_goal if plan is not None else None
+        acts = plan.acts if plan is not None else ()
         return {
             "available": True,
             "session_id": session_id,
-            "cycle_id": getattr(cycle, "cycle_id", None),
-            "trace_id": getattr(cycle, "trace_id", None),
-            "selected_goal_id": getattr(selected_goal, "goal_id", None),
-            "selected_goal_kind": getattr(getattr(selected_goal, "kind", None), "value", None),
-            "act_types": [getattr(getattr(act, "act_type", None), "value", None) for act in acts],
-            "success_score": getattr(critic_report, "success_score", None),
-            "follow_up_recommended": getattr(critic_report, "follow_up_recommended", None),
-            "response_text": getattr(execution_result, "response_text", None),
-            "scheduled_task_count": len(getattr(cycle, "scheduled_tasks", ()) or ()),
+            "cycle_id": cycle.cycle_id,
+            "trace_id": cycle.trace_id,
+            "selected_goal_id": selected_goal.goal_id if selected_goal is not None else None,
+            "selected_goal_kind": selected_goal.kind.value if selected_goal is not None else None,
+            "act_types": [act.act_type.value for act in acts],
+            "success_score": critic_report.success_score if critic_report is not None else None,
+            "follow_up_recommended": critic_report.follow_up_recommended if critic_report is not None else None,
+            "response_text": execution_result.response_text if execution_result is not None else None,
+            "scheduled_task_count": len(cycle.scheduled_tasks or ()),
         }
 
     def _persist_reflection_report(self, report: Dict[str, Any]) -> None:
         controller = self._metacognitive_controller
-        if controller is None or not hasattr(controller, "persist_reflection_episode"):
+        if controller is None:
             return
         controller.persist_reflection_episode(self.session_id, report)
 
     def _load_persisted_reflection_reports(self, limit: int) -> List[Dict[str, Any]]:
         controller = self._metacognitive_controller
-        if controller is None or not hasattr(controller, "list_reflection_episodes"):
+        if controller is None:
             return []
         return list(controller.list_reflection_episodes(self.session_id, limit=limit))
 
@@ -398,7 +398,7 @@ class CognitiveAgent:
     ) -> Dict[str, Any]:
         controller = self._metacognitive_controller
         resolved_session_id = session_id or self.session_id
-        if controller is None or not hasattr(controller, "run_scheduler_tick"):
+        if controller is None:
             return {
                 "session_id": resolved_session_id,
                 "executed_count": 0,
@@ -462,7 +462,7 @@ class CognitiveAgent:
     ) -> Dict[str, Any]:
         controller = self._metacognitive_controller
         resolved_session_id = session_id or self.session_id
-        if controller is None or not hasattr(controller, "run_contradiction_audit"):
+        if controller is None:
             return {
                 "session_id": resolved_session_id,
                 "contradiction_count": 0,

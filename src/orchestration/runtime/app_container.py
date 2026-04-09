@@ -39,7 +39,7 @@ class AppRuntime:
                 system_prompt=system_prompt,
             )
         controller = self.build_metacognitive_controller(agent=self._agent_instance)
-        if controller is not None and hasattr(self._agent_instance, "set_metacognitive_controller"):
+        if controller is not None:
             self._agent_instance.set_metacognitive_controller(controller)
         return self._agent_instance
 

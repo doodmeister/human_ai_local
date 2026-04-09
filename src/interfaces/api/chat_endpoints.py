@@ -115,12 +115,10 @@ async def chat_metacog_status():
 @router.get("/metacog/status")
 async def metacog_status(session_id: Optional[str] = None, history_limit: int = 10):
     agent = get_agent()
-    resolved_session_id = session_id or getattr(agent, "session_id", "default")
+    resolved_session_id = session_id or agent.session_id
     status = present_status(agent.get_metacognitive_status(session_id=resolved_session_id))
-    controller = getattr(agent, "get_metacognitive_controller", lambda: None)()
-    reflections = []
-    if controller is not None and hasattr(controller, "list_reflection_episodes"):
-        reflections = controller.list_reflection_episodes(resolved_session_id, limit=history_limit)
+    controller = agent.get_metacognitive_controller()
+    reflections = controller.list_reflection_episodes(resolved_session_id, limit=history_limit) if controller is not None else []
     status["background"] = present_background_state(
         status,
         tasks=agent.list_cognitive_tasks(session_id=resolved_session_id),
@@ -132,12 +130,10 @@ async def metacog_status(session_id: Optional[str] = None, history_limit: int = 
 @router.get("/metacog/background")
 async def metacog_background(session_id: Optional[str] = None, history_limit: int = 10):
     agent = get_agent()
-    resolved_session_id = session_id or getattr(agent, "session_id", "default")
+    resolved_session_id = session_id or agent.session_id
     status = agent.get_metacognitive_status(session_id=resolved_session_id)
-    controller = getattr(agent, "get_metacognitive_controller", lambda: None)()
-    reflections = []
-    if controller is not None and hasattr(controller, "list_reflection_episodes"):
-        reflections = controller.list_reflection_episodes(resolved_session_id, limit=history_limit)
+    controller = agent.get_metacognitive_controller()
+    reflections = controller.list_reflection_episodes(resolved_session_id, limit=history_limit) if controller is not None else []
     return present_background_state(
         status,
         tasks=agent.list_cognitive_tasks(session_id=resolved_session_id),
@@ -154,12 +150,10 @@ async def metacog_scorecard(session_id: Optional[str] = None, limit: int = 50):
 @router.get("/metacog/dashboard")
 async def metacog_dashboard(session_id: Optional[str] = None, history_limit: int = 10, limit: int = 50):
     agent = get_agent()
-    resolved_session_id = session_id or getattr(agent, "session_id", "default")
+    resolved_session_id = session_id or agent.session_id
     status = agent.get_metacognitive_status(session_id=resolved_session_id)
-    controller = getattr(agent, "get_metacognitive_controller", lambda: None)()
-    reflections = []
-    if controller is not None and hasattr(controller, "list_reflection_episodes"):
-        reflections = controller.list_reflection_episodes(resolved_session_id, limit=history_limit)
+    controller = agent.get_metacognitive_controller()
+    reflections = controller.list_reflection_episodes(resolved_session_id, limit=history_limit) if controller is not None else []
     background = present_background_state(
         status,
         tasks=agent.list_cognitive_tasks(session_id=resolved_session_id),
@@ -200,10 +194,10 @@ async def metacog_tasks(session_id: Optional[str] = None):
 @router.get("/metacog/reflections")
 async def metacog_reflections(session_id: Optional[str] = None, limit: int = 10):
     agent = get_agent()
-    controller = getattr(agent, "get_metacognitive_controller", lambda: None)()
-    if controller is None or not hasattr(controller, "list_reflection_episodes"):
+    controller = agent.get_metacognitive_controller()
+    if controller is None:
         return present_reflection_episodes([])
-    return present_reflection_episodes(controller.list_reflection_episodes(session_id or getattr(agent, "session_id", "default"), limit=limit))
+    return present_reflection_episodes(controller.list_reflection_episodes(session_id or agent.session_id, limit=limit))
 
 
 @router.get("/chat/consolidation/status")

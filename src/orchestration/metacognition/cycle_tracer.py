@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
 
@@ -17,7 +17,7 @@ class FilesystemCycleTracer:
 
     def write_trace(self, trace: Mapping[str, Any]) -> str:
         trace_id = str(trace.get("cycle_id") or uuid4())
-        payload = dict(trace)
+        payload = self._normalize(trace)
         payload.setdefault("cycle_id", trace_id)
         path = self.root_dir / f"{trace_id}.json"
         path.write_text(
@@ -55,11 +55,11 @@ class FilesystemCycleTracer:
             return traces[-limit:]
         return traces
 
-    def persist_self_model(self, session_id: str, self_model: Mapping[str, Any]) -> Path:
+    def persist_self_model(self, session_id: str, self_model: Mapping[str, Any] | Any) -> Path:
         directory = self.root_dir / "self_models"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{self._session_key(session_id)}.json"
-        payload = dict(self_model)
+        payload = self._normalize(self_model)
         payload.setdefault("session_id", session_id)
         path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, default=self._json_default),
@@ -73,12 +73,12 @@ class FilesystemCycleTracer:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def persist_task_queue(self, session_id: str, tasks: list[Mapping[str, Any]]) -> Path:
+    def persist_task_queue(self, session_id: str, tasks: Sequence[Mapping[str, Any] | Any]) -> Path:
         directory = self.root_dir / "task_queues"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{self._session_key(session_id)}.json"
         path.write_text(
-            json.dumps(list(tasks), indent=2, sort_keys=True, default=self._json_default),
+            json.dumps(self._normalize(list(tasks)), indent=2, sort_keys=True, default=self._json_default),
             encoding="utf-8",
         )
         return path
@@ -92,13 +92,16 @@ class FilesystemCycleTracer:
             return []
         return [task for task in payload if isinstance(task, dict)]
 
-    def upsert_task_queue(self, session_id: str, tasks: list[Mapping[str, Any]]) -> Path:
+    def upsert_task_queue(self, session_id: str, tasks: Sequence[Mapping[str, Any] | Any]) -> Path:
         existing = {task.get("task_id"): dict(task) for task in self.load_task_queue(session_id) if task.get("task_id")}
         for task in tasks:
-            task_id = task.get("task_id")
+            normalized_task = self._normalize(task)
+            if not isinstance(normalized_task, dict):
+                continue
+            task_id = normalized_task.get("task_id")
             if not task_id:
                 continue
-            existing[str(task_id)] = dict(task)
+            existing[str(task_id)] = normalized_task
         ordered = sorted(
             existing.values(),
             key=lambda task: (
@@ -114,7 +117,7 @@ class FilesystemCycleTracer:
         directory.mkdir(parents=True, exist_ok=True)
         timestamp = str(report.get("timestamp") or uuid4()).replace(":", "-")
         path = directory / f"{timestamp}.json"
-        payload = dict(report)
+        payload = self._normalize(report)
         payload.setdefault("session_id", session_id)
         path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, default=self._json_default),
@@ -130,6 +133,20 @@ class FilesystemCycleTracer:
         if limit is not None and limit >= 0:
             return reports[-limit:]
         return reports
+
+    def prune_reflection_episodes(self, session_id: str, *, max_episodes: int) -> int:
+        if max_episodes < 0:
+            return 0
+        directory = self.root_dir / "reflections" / self._session_key(session_id)
+        if not directory.exists():
+            return 0
+        paths = sorted(directory.glob("*.json"), key=lambda item: item.stat().st_mtime)
+        excess = len(paths) - max_episodes
+        if excess <= 0:
+            return 0
+        for path in paths[:excess]:
+            path.unlink(missing_ok=True)
+        return excess
 
     def build_regression_metrics(self, *, session_id: str | None = None, limit: int = 20) -> dict[str, Any]:
         traces = self.list_traces(session_id=session_id, limit=limit)
@@ -170,6 +187,20 @@ class FilesystemCycleTracer:
         if isinstance(value, Path):
             return str(value)
         return str(value)
+
+    @classmethod
+    def _normalize(cls, value: Any) -> Any:
+        if is_dataclass(value):
+            return cls._normalize(asdict(value))
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, Mapping):
+            return {str(key): cls._normalize(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._normalize(item) for item in value]
+        return value
 
     @staticmethod
     def _session_key(session_id: str) -> str:

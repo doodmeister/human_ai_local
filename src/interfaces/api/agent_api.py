@@ -120,13 +120,9 @@ async def get_agent_status(request: Request):
     try:
         agent = get_request_agent(request)
         status = agent.get_cognitive_status()
-        metacognitive_status = {}
-        if hasattr(agent, "get_metacognitive_status"):
-            metacognitive_status = present_status(agent.get_metacognitive_status())
-        reflections = []
-        controller = getattr(agent, "get_metacognitive_controller", lambda: None)()
-        if controller is not None and hasattr(controller, "list_reflection_episodes"):
-            reflections = controller.list_reflection_episodes(getattr(agent, "session_id", "default"), limit=10)
+        metacognitive_status = present_status(agent.get_metacognitive_status())
+        controller = agent.get_metacognitive_controller()
+        reflections = controller.list_reflection_episodes(agent.session_id, limit=10) if controller is not None else []
         attention_status = status.get("attention_status", {})
         memory_status = status.get("memory_status", {})
         integration = status.get("cognitive_integration", {})
@@ -148,11 +144,11 @@ async def get_agent_status(request: Request):
             },
             "metacognition": present_background_state(
                 metacognitive_status,
-                tasks=agent.list_cognitive_tasks() if hasattr(agent, "list_cognitive_tasks") else [],
+                tasks=agent.list_cognitive_tasks(),
                 reflections=reflections,
             ),
             "metacognition_scorecard": present_scorecard(
-                agent.get_metacognitive_scorecard(limit=20) if hasattr(agent, "get_metacognitive_scorecard") else {}
+                agent.get_metacognitive_scorecard(limit=20)
             ),
             "active_processes": len(status.get("active_goals", [])) if isinstance(status.get("active_goals"), list) else 0,
             "status": "healthy"

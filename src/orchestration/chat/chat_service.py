@@ -655,22 +655,22 @@ class ChatService:
         return cycle
 
     def _summarize_metacognitive_cycle(self, cycle: Any) -> Dict[str, Any]:
-        plan = getattr(cycle, "plan", None)
-        execution_result = getattr(cycle, "execution_result", None)
-        critic_report = getattr(cycle, "critic_report", None)
-        selected_goal = getattr(plan, "selected_goal", None) if plan is not None else None
-        acts = getattr(plan, "acts", ()) if plan is not None else ()
+        plan = cycle.plan
+        execution_result = cycle.execution_result
+        critic_report = cycle.critic_report
+        selected_goal = plan.selected_goal if plan is not None else None
+        acts = plan.acts if plan is not None else ()
         return {
             "available": True,
-            "cycle_id": getattr(cycle, "cycle_id", None),
-            "trace_id": getattr(cycle, "trace_id", None),
-            "selected_goal_id": getattr(selected_goal, "goal_id", None),
-            "selected_goal_kind": getattr(getattr(selected_goal, "kind", None), "value", None),
-            "act_types": [getattr(getattr(act, "act_type", None), "value", None) for act in acts],
-            "success_score": getattr(critic_report, "success_score", None),
-            "follow_up_recommended": getattr(critic_report, "follow_up_recommended", None),
-            "response_text": getattr(execution_result, "response_text", None),
-            "scheduled_tasks": [self._serialize_metacognitive_value(task) for task in getattr(cycle, "scheduled_tasks", ())],
+            "cycle_id": cycle.cycle_id,
+            "trace_id": cycle.trace_id,
+            "selected_goal_id": selected_goal.goal_id if selected_goal is not None else None,
+            "selected_goal_kind": selected_goal.kind.value if selected_goal is not None else None,
+            "act_types": [act.act_type.value for act in acts],
+            "success_score": critic_report.success_score if critic_report is not None else None,
+            "follow_up_recommended": critic_report.follow_up_recommended if critic_report is not None else None,
+            "response_text": execution_result.response_text if execution_result is not None else None,
+            "scheduled_tasks": [self._serialize_metacognitive_value(task) for task in cycle.scheduled_tasks],
         }
 
     @staticmethod

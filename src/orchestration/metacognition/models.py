@@ -117,7 +117,7 @@ class CriticReport:
 @dataclass(slots=True)
 class MetacognitiveCycleResult:
     cycle_id: str
-    workspace: WorkspaceState
+    workspace: WorkspaceState | None
     ranked_goals: tuple[CognitiveGoal, ...] = field(default_factory=tuple)
     plan: CognitivePlan | None = None
     execution_result: ExecutionResult | None = None
