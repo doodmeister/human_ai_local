@@ -213,12 +213,12 @@ class AutobiographicalGraphBuilder:
                         relationship_type="goal",
                     )
                 )
-            for source_event_id in item.source_event_ids:
+            for source_memory_id in item.source_memory_ids:
                 links.append(
                     AutobiographicalLink(
                         source_id=item.memory_id,
-                        target_id=f"event:{source_event_id}",
-                        relationship_type="source_event",
+                        target_id=f"memory:{source_memory_id}",
+                        relationship_type="source_memory",
                     )
                 )
             for related_episode_id in item.metadata.get("related_episodes", []):

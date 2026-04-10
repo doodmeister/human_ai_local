@@ -561,7 +561,7 @@ class ChatService:
                 assistant_content=assistant_turn.content,
                 importance=float(user_turn.importance or 0.0),
                 emotional_valence=float(user_turn.emotional_valence or 0.0),
-                source_event_ids=[user_turn.turn_id, assistant_turn.turn_id],
+                source_memory_ids=[user_turn.turn_id, assistant_turn.turn_id],
                 intent_type=str(getattr(intent, "intent_type", "") or "conversation"),
                 tick=tick,
                 goal_ids=sorted(self._session_goal_index.get(session.session_id, set())),
@@ -575,18 +575,9 @@ class ChatService:
 
     @staticmethod
     def _apply_promotion_result(session: Any, result: PromotionResult) -> None:
-        if result.episode_id:
-            setattr(session, "_last_autobiographical_episode_id", result.episode_id)
+        session.last_autobiographical_promotion = result
         if result.graph_snapshot is not None:
-            setattr(session, "_autobiographical_graph_snapshot", result.graph_snapshot)
-        if result.semantic_fact_ids:
-            setattr(session, "_last_semantic_fact_ids", list(result.semantic_fact_ids))
-        if result.semantic_products:
-            setattr(session, "_last_semantic_products", [dict(item) for item in result.semantic_products])
-        if result.prospective_reminder_ids:
-            setattr(session, "_last_prospective_reminder_ids", list(result.prospective_reminder_ids))
-        if result.prospective_products:
-            setattr(session, "_last_prospective_products", [dict(item) for item in result.prospective_products])
+            session.autobiographical_graph_snapshot = result.graph_snapshot
 
     def _summarize_context_items(self, items):
         return self._response_builder.summarize_context_items(items)

@@ -108,7 +108,7 @@ class WorldState:
             True
         """
         for key, value in goal._state.items():
-            if self.get(key) != value:
+            if key not in self._state or self.get(key) != value:
                 return False
         return True
     
@@ -154,7 +154,7 @@ class WorldState:
         """
         count = 0
         for key, value in goal._state.items():
-            if self.get(key) != value:
+            if key not in self._state or self.get(key) != value:
                 count += 1
         return count
     

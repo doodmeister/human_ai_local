@@ -352,7 +352,7 @@ class _LongitudinalHarness:
             assistant_content=interaction.assistant_content,
             importance=interaction.importance,
             emotional_valence=interaction.emotional_valence,
-            source_event_ids=[
+            source_memory_ids=[
                 f"{interaction.interaction_id}:user",
                 f"{interaction.interaction_id}:assistant",
             ],
@@ -517,7 +517,7 @@ class _RuntimeLongitudinalHarness:
             assistant_content=interaction.assistant_content,
             importance=interaction.importance,
             emotional_valence=interaction.emotional_valence,
-            source_event_ids=[
+            source_memory_ids=[
                 f"{interaction.interaction_id}:user",
                 f"{interaction.interaction_id}:assistant",
             ],

@@ -73,7 +73,7 @@ class EventEncoder:
             importance=importance,
             emotional_valence=emotional_valence,
             source=str(data.get("source") or data.get("episodic_source") or "episodic"),
-            source_event_ids=list(data.get("source_memory_ids", []) or []),
+            source_memory_ids=list(data.get("source_memory_ids", data.get("source_event_ids", [])) or []),
             relationship_target=target,
             goal_ids=event_goal_ids,
             narrative_role=str(data.get("life_period") or "general"),

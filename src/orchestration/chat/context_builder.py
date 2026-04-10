@@ -492,7 +492,9 @@ class ContextBuilder:
         if session is None:
             return None
 
-        snapshot = getattr(session, "_autobiographical_graph_snapshot", None)
+        snapshot = getattr(session, "autobiographical_graph_snapshot", None)
+        if snapshot is None:
+            snapshot = getattr(session, "_autobiographical_graph_snapshot", None)
         if isinstance(snapshot, AutobiographicalGraph):
             return snapshot
         if isinstance(snapshot, dict):
@@ -501,7 +503,7 @@ class ContextBuilder:
             except Exception:
                 graph = None
             else:
-                setattr(session, "_autobiographical_graph_snapshot", graph)
+                session.autobiographical_graph_snapshot = graph
                 return graph
 
         store = self._autobiographical_store
@@ -512,7 +514,7 @@ class ContextBuilder:
         except Exception:
             return None
         if graph is not None:
-            setattr(session, "_autobiographical_graph_snapshot", graph)
+            session.autobiographical_graph_snapshot = graph
         return graph
 
     def _selected_persisted_chapter(self, retrieval_plan: RetrievalPlan | None) -> Any | None:

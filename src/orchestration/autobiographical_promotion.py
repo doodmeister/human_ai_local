@@ -1,10 +1,12 @@
+"""Promote high-salience turns into autobiographical, semantic, and prospective stores."""
+
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 import re
-from typing import Any, Iterable, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Iterable, Sequence
 
 from src.memory.encoding import EventEncoder
 from src.memory.autobiographical import AutobiographicalGraphBuilder
@@ -19,10 +21,80 @@ _LOGGER = logging.getLogger(__name__)
 
 _DEFINING_MOMENT_IMPORTANCE_THRESHOLD = 0.8
 _DEFINING_MOMENT_VALENCE_THRESHOLD = 0.7
+_EVENT_ENCODER = EventEncoder()
+_GRAPH_BUILDER = AutobiographicalGraphBuilder()
+_TRAILING_REMINDER_PUNCTUATION = " .,!?:;…'\"“”‘’–—()[]{}"
+_MEANINGLESS_REMINDER_TERMS = frozenset({"it", "this", "that", "them", "something"})
+_MEANINGLESS_SEMANTIC_VALUES = frozenset(
+    {
+        *_MEANINGLESS_REMINDER_TERMS,
+        "things",
+        "anything",
+        "everything",
+    }
+)
+_RELATIVE_DURATION_PATTERN = re.compile(
+    r"\bin\s+(?P<count>\d+)\s+(?P<unit>minute|minutes|hour|hours|day|days|week|weeks)\b",
+    re.IGNORECASE,
+)
+_RELATIVE_PHRASE_DELTAS: tuple[tuple[str, timedelta], ...] = (
+    ("later today", timedelta(hours=4)),
+    ("tomorrow", timedelta(days=1)),
+    ("next week", timedelta(days=7)),
+)
+_REMINDER_PATTERNS: tuple[
+    tuple[re.Pattern[str], Callable[[str], str], str, tuple[str, ...]],
+    ...,
+] = (
+    (
+        re.compile(r"\bremind me to (?P<task>.+)", re.IGNORECASE),
+        lambda task: task,
+        "user_content.reminder_phrase",
+        ("reminder",),
+    ),
+    (
+        re.compile(r"\bremember to (?P<task>.+)", re.IGNORECASE),
+        lambda task: task,
+        "user_content.reminder_phrase",
+        ("reminder",),
+    ),
+    (
+        re.compile(r"\bfollow up on (?P<task>.+)", re.IGNORECASE),
+        lambda task: f"Follow up on {task}",
+        "user_content.follow_up_phrase",
+        ("follow-up",),
+    ),
+    (
+        re.compile(r"\bcheck back on (?P<task>.+)", re.IGNORECASE),
+        lambda task: f"Check back on {task}",
+        "user_content.follow_up_phrase",
+        ("follow-up",),
+    ),
+)
+_SEMANTIC_VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bi value\s+(?P<values>.+)", re.IGNORECASE), "user_content.stated_values_phrase"),
+    (re.compile(r"\bi care about\s+(?P<values>.+)", re.IGNORECASE), "user_content.stated_values_phrase"),
+    (
+        re.compile(r"\bwhat matters to me is\s+(?P<values>.+)", re.IGNORECASE),
+        "user_content.stated_values_phrase",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DueTimeExtraction:
+    content: str
+    due_time: datetime | None = None
+    due_hint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class PromotionResult:
+    """Structured result for autobiographical promotion side effects.
+
+    Truthiness reflects whether an autobiographical episode was created.
+    """
+
     episode_id: str | None = None
     graph_snapshot: Any | None = None
     semantic_fact_ids: tuple[str, ...] = field(default_factory=tuple)
@@ -31,6 +103,7 @@ class PromotionResult:
     prospective_products: tuple[dict[str, str], ...] = field(default_factory=tuple)
 
     def __bool__(self) -> bool:
+        """Return True when promotion created an autobiographical episode."""
         return self.episode_id is not None
 
 
@@ -75,7 +148,7 @@ def promote_interaction_to_autobiographical_memory(
     assistant_content: str,
     importance: float,
     emotional_valence: float,
-    source_event_ids: Sequence[str] | None = None,
+    source_memory_ids: Sequence[str] | None = None,
     intent_type: str | None = None,
     tick: Any = None,
     goal_ids: Iterable[str] | None = None,
@@ -145,7 +218,7 @@ def promote_interaction_to_autobiographical_memory(
             *[participant for participant in participants if participant not in existing_participants],
         ]
         episode_payload["context"] = merged_context
-    episode_payload["source_memory_ids"] = list(source_event_ids or [])
+    episode_payload["source_memory_ids"] = list(source_memory_ids or [])
     episode_payload["life_period"] = str(episode_payload.get("life_period") or life_period)
     episode_payload["defining_moment"] = _is_defining_moment_interaction(
         user_content=user_content,
@@ -155,20 +228,20 @@ def promote_interaction_to_autobiographical_memory(
         emotional_valence=emotional_valence,
     )
 
-    canonical_item = EventEncoder().encode_episode(
+    canonical_item = _EVENT_ENCODER.encode_episode(
         episode_payload,
         goal_ids=sorted(str(goal_id) for goal_id in (goal_ids or []) if str(goal_id).strip()),
         relationship_target=relationship_target or session_id,
     )
     graph = autobiographical_store.merge(
         session_id,
-        AutobiographicalGraphBuilder().build([canonical_item]),
+        _GRAPH_BUILDER.build([canonical_item]),
     )
     semantic_fact_ids = _store_semantic_preference_facts(
         memory=memory,
         session=session,
         importance=promotion_importance,
-        source_event_ids=source_event_ids,
+        source_memory_ids=source_memory_ids,
         user_content=user_content,
         tick=tick,
         goal_ids=goal_ids,
@@ -178,7 +251,7 @@ def promote_interaction_to_autobiographical_memory(
         session=session,
         user_content=user_content,
         importance=promotion_importance,
-        source_event_ids=source_event_ids,
+        source_memory_ids=source_memory_ids,
         goal_ids=goal_ids,
         intent_type=intent_type,
     )
@@ -223,7 +296,7 @@ def _store_semantic_preference_facts(
     memory: Any,
     session: Any,
     importance: float,
-    source_event_ids: Sequence[str] | None,
+    source_memory_ids: Sequence[str] | None,
     user_content: str,
     tick: Any,
     goal_ids: Iterable[str] | None,
@@ -265,7 +338,7 @@ def _store_semantic_preference_facts(
                     "confidence": confidence,
                     "importance": normalized_importance,
                     "relationship_target": relationship_target,
-                    "source_event_ids": list(source_event_ids or []),
+                    "source_memory_ids": list(source_memory_ids or []),
                     "derived_from": candidate["derived_from"],
                 },
             )
@@ -298,7 +371,7 @@ def _store_prospective_follow_up_reminders(
     session: Any,
     user_content: str,
     importance: float,
-    source_event_ids: Sequence[str] | None,
+    source_memory_ids: Sequence[str] | None,
     goal_ids: Iterable[str] | None,
     intent_type: str | None,
 ) -> list[dict[str, str]]:
@@ -325,7 +398,7 @@ def _store_prospective_follow_up_reminders(
     for candidate in reminder_candidates:
         metadata = {
             "source": "autobiographical_promotion",
-            "source_event_ids": list(source_event_ids or []),
+            "source_memory_ids": list(source_memory_ids or []),
             "relationship_target": relationship_target,
             "importance": normalized_importance,
             "derived_from": candidate["derived_from"],
@@ -363,18 +436,7 @@ def _store_prospective_follow_up_reminders(
 
 
 def _prospective_memory_backend(memory: Any) -> Any:
-    try:
-        prospective = getattr(memory, "prospective", None)
-    except Exception as exc:
-        _LOGGER.warning("accessing memory.prospective failed: %s", exc, exc_info=True)
-        prospective = None
-    if prospective is not None:
-        return prospective
-    try:
-        return getattr(memory, "_prospective", None)
-    except Exception as exc:
-        _LOGGER.warning("accessing memory._prospective failed: %s", exc, exc_info=True)
-        return None
+    return getattr(memory, "prospective", None)
 
 
 def _prospective_turn_reminders(user_content: str) -> list[dict[str, Any]]:
@@ -384,38 +446,13 @@ def _prospective_turn_reminders(user_content: str) -> list[dict[str, Any]]:
 
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for pattern, formatter, derived_from, tags in (
-        (
-            re.compile(r"\bremind me to (?P<task>.+)", re.IGNORECASE),
-            lambda task: task,
-            "user_content.reminder_phrase",
-            ["reminder"],
-        ),
-        (
-            re.compile(r"\bremember to (?P<task>.+)", re.IGNORECASE),
-            lambda task: task,
-            "user_content.reminder_phrase",
-            ["reminder"],
-        ),
-        (
-            re.compile(r"\bfollow up on (?P<task>.+)", re.IGNORECASE),
-            lambda task: f"Follow up on {task}",
-            "user_content.follow_up_phrase",
-            ["follow-up"],
-        ),
-        (
-            re.compile(r"\bcheck back on (?P<task>.+)", re.IGNORECASE),
-            lambda task: f"Check back on {task}",
-            "user_content.follow_up_phrase",
-            ["follow-up"],
-        ),
-    ):
+    for pattern, formatter, derived_from, tags in _REMINDER_PATTERNS:
         match = pattern.search(text)
         if match is None:
             continue
         task_text = match.group("task")
-        task_body, due_time, due_hint = _extract_due_time(task_text)
-        task_body = _normalize_reminder_text(task_body)
+        due_details = _extract_due_time(task_text)
+        task_body = _normalize_reminder_text(due_details.content)
         if not _is_meaningful_reminder_text(task_body):
             continue
         content = _normalize_reminder_text(formatter(task_body))
@@ -426,8 +463,8 @@ def _prospective_turn_reminders(user_content: str) -> list[dict[str, Any]]:
         candidates.append(
             {
                 "content": content,
-                "due_time": due_time,
-                "due_hint": due_hint,
+                "due_time": due_details.due_time,
+                "due_hint": due_details.due_hint,
                 "derived_from": derived_from,
                 "tags": list(tags),
             }
@@ -435,15 +472,11 @@ def _prospective_turn_reminders(user_content: str) -> list[dict[str, Any]]:
     return candidates
 
 
-def _extract_due_time(task_text: str) -> tuple[str, datetime | None, str | None]:
+def _extract_due_time(task_text: str) -> DueTimeExtraction:
     cleaned = str(task_text or "")
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
-    relative_match = re.search(
-        r"\bin\s+(?P<count>\d+)\s+(?P<unit>minute|minutes|hour|hours|day|days|week|weeks)\b",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
+    relative_match = _RELATIVE_DURATION_PATTERN.search(cleaned)
     if relative_match is not None:
         count = int(relative_match.group("count"))
         unit = relative_match.group("unit").lower()
@@ -456,31 +489,27 @@ def _extract_due_time(task_text: str) -> tuple[str, datetime | None, str | None]
         else:
             due_time = now + timedelta(weeks=count)
         cleaned = (cleaned[: relative_match.start()] + cleaned[relative_match.end() :]).strip()
-        return cleaned, due_time, relative_match.group(0).strip()
+        return DueTimeExtraction(cleaned, due_time, relative_match.group(0).strip())
 
-    for phrase, delta in (
-        ("later today", timedelta(hours=4)),
-        ("tomorrow", timedelta(days=1)),
-        ("next week", timedelta(days=7)),
-    ):
+    for phrase, delta in _RELATIVE_PHRASE_DELTAS:
         phrase_match = re.search(rf"\b{re.escape(phrase)}\b", cleaned, flags=re.IGNORECASE)
         if phrase_match is None:
             continue
         cleaned = (cleaned[: phrase_match.start()] + cleaned[phrase_match.end() :]).strip()
-        return cleaned, now + delta, phrase
+        return DueTimeExtraction(cleaned, now + delta, phrase)
 
-    return cleaned, None, None
+    return DueTimeExtraction(cleaned)
 
 
 def _normalize_reminder_text(value: str) -> str:
-    return " ".join(str(value or "").strip(" .,!?:;").split())
+    return " ".join(str(value or "").strip(_TRAILING_REMINDER_PUNCTUATION).split())
 
 
 def _is_meaningful_reminder_text(value: str) -> bool:
     lowered = value.lower()
     if len(lowered) < 4:
         return False
-    if lowered in {"it", "this", "that", "them", "something"}:
+    if lowered in _MEANINGLESS_REMINDER_TERMS:
         return False
     return any(char.isalpha() for char in lowered)
 
@@ -493,6 +522,8 @@ def _is_defining_moment_interaction(
     importance: float,
     emotional_valence: float,
 ) -> bool:
+    """Heuristically identify turns that should be highlighted as defining moments."""
+
     if (
         _normalize_importance_score(importance) >= _DEFINING_MOMENT_IMPORTANCE_THRESHOLD
         or abs(float(emotional_valence or 0.0)) >= _DEFINING_MOMENT_VALENCE_THRESHOLD
@@ -638,11 +669,7 @@ def _semantic_content_facts(user_content: str) -> list[tuple[str, str, str, str]
 
     candidates: list[tuple[str, str, str, str]] = []
     seen: set[tuple[str, str, str]] = set()
-    for pattern, derived_from in (
-        (re.compile(r"\bi value\s+(?P<values>.+)", re.IGNORECASE), "user_content.stated_values_phrase"),
-        (re.compile(r"\bi care about\s+(?P<values>.+)", re.IGNORECASE), "user_content.stated_values_phrase"),
-        (re.compile(r"\bwhat matters to me is\s+(?P<values>.+)", re.IGNORECASE), "user_content.stated_values_phrase"),
-    ):
+    for pattern, derived_from in _SEMANTIC_VALUE_PATTERNS:
         match = pattern.search(text)
         if match is None:
             continue
@@ -716,7 +743,7 @@ def _looks_like_meaningful_semantic_value(value: str) -> bool:
     lowered = value.lower().strip()
     if len(lowered) < 3:
         return False
-    if lowered in {"it", "this", "that", "things", "something", "anything", "everything"}:
+    if lowered in _MEANINGLESS_SEMANTIC_VALUES:
         return False
     return any(ch.isalpha() for ch in lowered)
 

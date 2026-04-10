@@ -83,7 +83,7 @@ class CanonicalMemoryItem:
     emotional_valence: float = 0.0
     arousal: float | None = None
     source: str = "unknown"
-    source_event_ids: list[str] = field(default_factory=list)
+    source_memory_ids: list[str] = field(default_factory=list)
     contradiction_set_id: str | None = None
     relationship_target: str | None = None
     goal_ids: list[str] = field(default_factory=list)
@@ -110,7 +110,7 @@ class CanonicalMemoryItem:
         ) or 0.0
         self.arousal = _validate_unit_interval("arousal", self.arousal)
         self.entities = list(self.entities)
-        self.source_event_ids = list(self.source_event_ids)
+        self.source_memory_ids = list(self.source_memory_ids)
         self.goal_ids = list(self.goal_ids)
         self.tags = list(self.tags)
         self.metadata = dict(self.metadata)
@@ -139,7 +139,7 @@ class CanonicalMemoryItem:
             emotional_valence=float(data.get("emotional_valence", 0.0)),
             arousal=float(data["arousal"]) if data.get("arousal") is not None else None,
             source=str(data.get("source", "unknown")),
-            source_event_ids=list(data.get("source_event_ids", [])),
+            source_memory_ids=list(data.get("source_memory_ids", data.get("source_event_ids", []))),
             contradiction_set_id=data.get("contradiction_set_id"),
             relationship_target=data.get("relationship_target"),
             goal_ids=list(data.get("goal_ids", [])),
@@ -166,7 +166,7 @@ class CanonicalMemoryItem:
             "emotional_valence": self.emotional_valence,
             "arousal": self.arousal,
             "source": self.source,
-            "source_event_ids": list(self.source_event_ids),
+            "source_memory_ids": list(self.source_memory_ids),
             "contradiction_set_id": self.contradiction_set_id,
             "relationship_target": self.relationship_target,
             "goal_ids": list(self.goal_ids),

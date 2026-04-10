@@ -11,11 +11,54 @@ the goal from any given state. Good heuristics are:
 Reference: Pearl, J. (1984). "Heuristics: Intelligent Search Strategies"
 """
 
-from typing import Protocol
+from __future__ import annotations
+
+import warnings
+from typing import Protocol, runtime_checkable
 
 from .world_state import WorldState
 
+__all__ = [
+    "Heuristic",
+    "goal_distance_heuristic",
+    "weighted_goal_distance_heuristic",
+    "relaxed_plan_heuristic",
+    "zero_heuristic",
+    "max_heuristic",
+    "CompositeHeuristic",
+    "DEFAULT_HEURISTIC",
+    "HEURISTICS",
+    "get_heuristic",
+]
 
+_PRIORITY_PREFIX_WEIGHTS: tuple[tuple[str, float], ...] = (
+    ("critical_", 3.0),
+    ("important_", 2.0),
+    ("optional_", 0.5),
+)
+_NON_ADMISSIBLE_HEURISTIC_NAMES = frozenset({"weighted_goal_distance"})
+
+
+def _goal_key_is_satisfied(current: WorldState, key: str, goal_value: object) -> bool:
+    return current.has(key) and current.get(key) == goal_value
+
+
+def _count_unsatisfied_goal_keys(current: WorldState, goal: WorldState) -> int:
+    unsatisfied = 0
+    for key, goal_value in goal.state.items():
+        if not _goal_key_is_satisfied(current, key, goal_value):
+            unsatisfied += 1
+    return unsatisfied
+
+
+def _weight_for_goal_key(key: str) -> float:
+    for prefix, weight in _PRIORITY_PREFIX_WEIGHTS:
+        if key.startswith(prefix):
+            return weight
+    return 1.0
+
+
+@runtime_checkable
 class Heuristic(Protocol):
     """Protocol for heuristic functions."""
 
@@ -35,11 +78,10 @@ class Heuristic(Protocol):
 
 def goal_distance_heuristic(current: WorldState, goal: WorldState) -> float:
     """
-    Simple goal distance heuristic: count unsatisfied goal keys.
+    Count unsatisfied goal keys with presence-aware comparisons.
 
-    This is admissible if each action costs at least 1.0 and can satisfy
-    at most one goal key. In practice, actions may satisfy multiple keys,
-    so this heuristic underestimates (which is good for A*).
+    This is a conservative ranking heuristic for GOAP states. It correctly
+    treats a missing key as distinct from a key explicitly set to None.
 
     Example:
         current = WorldState({"has_data": False, "has_document": False})
@@ -53,18 +95,14 @@ def goal_distance_heuristic(current: WorldState, goal: WorldState) -> float:
     Returns:
         Number of goal keys not yet satisfied
     """
-    unsatisfied = 0
-    for key, goal_value in goal.state.items():
-        if current.get(key) != goal_value:
-            unsatisfied += 1
-    return float(unsatisfied)
+    return float(_count_unsatisfied_goal_keys(current, goal))
 
 
 def weighted_goal_distance_heuristic(
     current: WorldState, goal: WorldState
 ) -> float:
     """
-    Weighted goal distance: assign different weights to different goals.
+    Priority-weighted goal distance heuristic.
 
     Uses key prefixes to determine importance:
     - "critical_": weight 3.0 (e.g., critical_task_complete)
@@ -72,7 +110,8 @@ def weighted_goal_distance_heuristic(
     - "optional_": weight 0.5 (e.g., optional_documentation_created)
     - default: weight 1.0
 
-    This is still admissible if action costs reflect these priorities.
+    This heuristic is intentionally non-admissible in the general case and
+    should only be used when ranking speed matters more than A* optimality.
 
     Args:
         current: Current world state
@@ -83,59 +122,28 @@ def weighted_goal_distance_heuristic(
     """
     total_cost = 0.0
     for key, goal_value in goal.state.items():
-        if current.get(key) != goal_value:
-            # Determine weight based on key prefix
-            if key.startswith("critical_"):
-                weight = 3.0
-            elif key.startswith("important_"):
-                weight = 2.0
-            elif key.startswith("optional_"):
-                weight = 0.5
-            else:
-                weight = 1.0
-            total_cost += weight
+        if not _goal_key_is_satisfied(current, key, goal_value):
+            total_cost += _weight_for_goal_key(key)
     return total_cost
 
 
 def relaxed_plan_heuristic(current: WorldState, goal: WorldState) -> float:
     """
-    Relaxed planning heuristic: estimate cost by ignoring preconditions.
+    Conservative placeholder for a relaxed-planning heuristic.
 
-    This heuristic builds a "relaxed plan" where actions can be applied
-    without checking preconditions. This gives a lower bound on the true
-    cost, making it admissible.
-
-    Algorithm:
-    1. Start with current state
-    2. Find cheapest action that makes progress toward any goal
-    3. Apply action (ignoring preconditions)
-    4. Repeat until all goals satisfied
-    5. Return total cost
-
-    This is more expensive to compute but more informative than simple
-    goal distance.
-
-    Note: This implementation uses a simplified version that doesn't
-    require the full action library. For a complete implementation,
-    inject the action library during planner initialization.
+    A true relaxed-plan heuristic needs access to the action library so it can
+    build a delete-relaxed plan. This function does not have that information,
+    so it falls back to the same presence-aware goal counting used by
+    goal_distance_heuristic.
 
     Args:
         current: Current world state
         goal: Goal world state
 
     Returns:
-        Estimated cost of relaxed plan
+        Conservative lower-complexity proxy for a relaxed plan estimate
     """
-    # Simplified version: assume average action cost of 1.5 per goal
-    # (better than goal_distance which assumes 1.0)
-    unsatisfied = 0
-    for key, goal_value in goal.state.items():
-        if current.get(key) != goal_value:
-            unsatisfied += 1
-
-    # Average action cost slightly higher than minimum
-    avg_action_cost = 1.5
-    return unsatisfied * avg_action_cost
+    return goal_distance_heuristic(current, goal)
 
 
 def zero_heuristic(current: WorldState, goal: WorldState) -> float:
@@ -159,20 +167,21 @@ def zero_heuristic(current: WorldState, goal: WorldState) -> float:
 
 def max_heuristic(current: WorldState, goal: WorldState) -> float:
     """
-    Maximum of multiple heuristics.
+    Maximum of the currently safe built-in heuristics.
 
-    Taking the max of multiple admissible heuristics is still admissible
-    and often more informative than any single heuristic.
+    This keeps the helper aligned with the conservative heuristics exported by
+    this module instead of combining in the explicitly non-admissible weighted
+    heuristic.
 
     Args:
         current: Current world state
         goal: Goal world state
 
     Returns:
-        Maximum of goal_distance and weighted_goal_distance
+        Maximum of goal_distance and relaxed_plan
     """
     h1 = goal_distance_heuristic(current, goal)
-    h2 = weighted_goal_distance_heuristic(current, goal)
+    h2 = relaxed_plan_heuristic(current, goal)
     return max(h1, h2)
 
 
@@ -182,8 +191,8 @@ class CompositeHeuristic:
 
     Supports:
     - max: Take maximum (admissible if all components admissible)
-    - avg: Take average (may not be admissible, use with caution)
-    - weighted: Weighted sum (may not be admissible, use with caution)
+    - avg: Take average (not admissible in general)
+    - weighted: Weighted sum (not admissible in general)
     """
 
     def __init__(
@@ -200,16 +209,34 @@ class CompositeHeuristic:
             mode: Combination mode ("max", "avg", "weighted")
             weights: Weights for "weighted" mode (must sum to 1.0)
         """
-        self.heuristics = heuristics
+        if not heuristics:
+            raise ValueError("heuristics must be non-empty")
+        if not all(callable(heuristic) for heuristic in heuristics):
+            raise TypeError("heuristics must contain only callable heuristics")
+        if mode not in {"max", "avg", "weighted"}:
+            raise ValueError(f"Unknown mode: {mode}")
+        if mode != "weighted" and weights is not None:
+            raise ValueError("weights are only supported in weighted mode")
+
+        self.heuristics = list(heuristics)
         self.mode = mode
-        self.weights = weights
+        self.weights = list(weights) if weights is not None else None
+
+        if mode in {"avg", "weighted"}:
+            warnings.warn(
+                f"CompositeHeuristic mode '{mode}' is non-admissible in general.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         if mode == "weighted":
-            if weights is None:
+            if self.weights is None:
                 raise ValueError("weights required for weighted mode")
-            if len(weights) != len(heuristics):
+            if len(self.weights) != len(self.heuristics):
                 raise ValueError("weights must match number of heuristics")
-            if abs(sum(weights) - 1.0) > 1e-6:
+            if any(weight < 0.0 for weight in self.weights):
+                raise ValueError("weights must be non-negative")
+            if abs(sum(self.weights) - 1.0) > 1e-6:
                 raise ValueError("weights must sum to 1.0")
 
     def __call__(self, current: WorldState, goal: WorldState) -> float:
@@ -218,12 +245,12 @@ class CompositeHeuristic:
 
         if self.mode == "max":
             return max(values)
-        elif self.mode == "avg":
+        if self.mode == "avg":
             return sum(values) / len(values)
-        elif self.mode == "weighted":
-            return sum(v * w for v, w in zip(values, self.weights))  # type: ignore
-        else:
-            raise ValueError(f"Unknown mode: {self.mode}")
+        if self.mode == "weighted":
+            assert self.weights is not None
+            return sum(value * weight for value, weight in zip(values, self.weights, strict=True))
+        raise ValueError(f"Unknown mode: {self.mode}")
 
 
 # Default heuristic for general use
@@ -236,7 +263,6 @@ HEURISTICS = {
     "relaxed_plan": relaxed_plan_heuristic,
     "zero": zero_heuristic,
     "max": max_heuristic,
-    "default": DEFAULT_HEURISTIC,
 }
 
 
@@ -253,9 +279,17 @@ def get_heuristic(name: str) -> Heuristic:
     Raises:
         ValueError: If heuristic name not found
     """
+    if name == "default":
+        return DEFAULT_HEURISTIC
     if name not in HEURISTICS:
-        available = ", ".join(HEURISTICS.keys())
+        available = ", ".join([*HEURISTICS.keys(), "default"])
         raise ValueError(
             f"Unknown heuristic '{name}'. Available: {available}"
+        )
+    if name in _NON_ADMISSIBLE_HEURISTIC_NAMES:
+        warnings.warn(
+            f"Heuristic '{name}' is non-admissible and may produce suboptimal A* plans.",
+            UserWarning,
+            stacklevel=2,
         )
     return HEURISTICS[name]

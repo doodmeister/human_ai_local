@@ -347,18 +347,9 @@ class CognitiveTurnProcessor:
 
     @staticmethod
     def _apply_promotion_result(session: Any, result: PromotionResult) -> None:
-        if result.episode_id:
-            setattr(session, "_last_autobiographical_episode_id", result.episode_id)
+        session.last_autobiographical_promotion = result
         if result.graph_snapshot is not None:
-            setattr(session, "_autobiographical_graph_snapshot", result.graph_snapshot)
-        if result.semantic_fact_ids:
-            setattr(session, "_last_semantic_fact_ids", list(result.semantic_fact_ids))
-        if result.semantic_products:
-            setattr(session, "_last_semantic_products", [dict(item) for item in result.semantic_products])
-        if result.prospective_reminder_ids:
-            setattr(session, "_last_prospective_reminder_ids", list(result.prospective_reminder_ids))
-        if result.prospective_products:
-            setattr(session, "_last_prospective_products", [dict(item) for item in result.prospective_products])
+            session.autobiographical_graph_snapshot = result.graph_snapshot
 
     async def enhance_attention_with_neural(
         self,

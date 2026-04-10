@@ -495,7 +495,7 @@ class GOAPTaskPlannerAdapter:
             self.action_library = create_default_action_library()
             self.goap_planner = GOAPPlanner(
                 action_library=self.action_library,
-                heuristic=get_heuristic('weighted_goal_distance')
+                heuristic=get_heuristic('goal_distance')
             )
             self.feature_flags = get_feature_flags()
             self.goap_available = True

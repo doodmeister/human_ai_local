@@ -12,6 +12,7 @@ import time
 
 from ..core.config import CognitiveConfig
 from ..memory.autobiographical import AutobiographicalGraphStore
+from .autobiographical_promotion import PromotionResult
 from .cognitive_layers import ChatCognitiveLayerRuntime
 from .metacognition.enums import ReflectionTrigger
 from .agent import (
@@ -80,6 +81,8 @@ class CognitiveAgent:
         self.active_goals = []
         # Stores recent conversation history for proactive recall
         self.conversation_context: List[Dict[str, Any]] = []
+        self.autobiographical_graph_snapshot: Any | None = None
+        self.last_autobiographical_promotion = PromotionResult()
         
         # LLM configuration - Initialize LLM provider
         self._llm_session = CognitiveAgentLLMSession(

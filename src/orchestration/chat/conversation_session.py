@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Deque
+from typing import Any, Deque, Dict, List, Optional
 from collections import deque
 import time
 import uuid
 import threading
+
+from ..autobiographical_promotion import PromotionResult
 
 from .models import TurnRecord
 
@@ -17,6 +19,8 @@ class ConversationSession:
     created_at: float = field(default_factory=time.time)
     turns: Deque[TurnRecord] = field(default_factory=lambda: deque(maxlen=250))
     last_access: float = field(default_factory=time.time)
+    autobiographical_graph_snapshot: Any | None = None
+    last_autobiographical_promotion: PromotionResult = field(default_factory=PromotionResult)
 
     def add_turn(self, turn: TurnRecord) -> None:
         self.turns.append(turn)
