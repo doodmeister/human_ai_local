@@ -5,7 +5,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from .enums import ScheduledTaskStatus
+from .enums import BackgroundTaskReason, InputType, ScheduledTaskStatus, StimulusMetadataKey
 from .critic import DefaultCritic
 from .event_bus import InProcessEventBus, MetacognitiveEvent
 from .executor import DefaultPlanExecutor
@@ -22,7 +22,7 @@ from .interfaces import (
     StateProvider,
     WorkspaceBuilder,
 )
-from .models import MetacognitiveCycleResult, Stimulus
+from .models import ContradictionRecord, MetacognitiveCycleResult, Stimulus
 from .policy_engine import HeuristicPolicyEngine
 from .scorecard import build_metacognitive_scorecard
 from .scheduler import DefaultCognitiveScheduler
@@ -222,19 +222,17 @@ class MetacognitiveController:
             traces = list(self._cycle_tracer.list_traces(session_id=session_id, limit=limit))
         return build_metacognitive_scorecard(traces, session_id=session_id).to_dict()
 
-    def list_unresolved_contradictions(self, session_id: str) -> list[dict[str, Any]]:
+    def list_unresolved_contradictions(self, session_id: str) -> list[ContradictionRecord]:
         try:
             contradictions = self._workspace_builder.contradictions_for_session(session_id)
         except Exception:
             contradictions = []
-        normalized: list[dict[str, Any]] = []
+        normalized: list[ContradictionRecord] = []
         for item in contradictions:
-            if not isinstance(item, dict):
+            contradiction = ContradictionRecord.from_value(item)
+            if not (contradiction.description or contradiction.kind):
                 continue
-            description = str(item.get("description") or item.get("summary") or "").strip()
-            if not description:
-                continue
-            normalized.append(dict(item))
+            normalized.append(contradiction)
         return normalized
 
     def run_contradiction_audit(
@@ -269,9 +267,9 @@ class MetacognitiveController:
                     "priority": self._score_contradiction_priority(contradiction, contradiction_count=len(contradictions)),
                     "due_at": current_ts,
                     "metadata": {
-                        "reason": "background_contradiction_audit",
+                        "reason": BackgroundTaskReason.CONTRADICTION_AUDIT.value,
                         "audit_generated": True,
-                        "contradiction": contradiction,
+                        "contradiction": contradiction.to_dict(),
                     },
                 }
             )
@@ -338,12 +336,12 @@ class MetacognitiveController:
                     Stimulus(
                         session_id=session_id,
                         user_input=current_task.get("description") or task_id,
-                        input_type="background_task",
+                            input_type=InputType.BACKGROUND_TASK,
                         metadata={
-                            "background_task": True,
-                            "scheduler_tick": True,
-                            "task_id": task_id,
-                            "task_reason": current_task["metadata"].get("reason"),
+                            StimulusMetadataKey.BACKGROUND_TASK.value: True,
+                            StimulusMetadataKey.SCHEDULER_TICK.value: True,
+                            StimulusMetadataKey.TASK_ID.value: task_id,
+                            StimulusMetadataKey.TASK_REASON.value: current_task["metadata"].get("reason"),
                         },
                     )
                 )
@@ -393,17 +391,16 @@ class MetacognitiveController:
         self._cycle_tracer.persist_task_queue(session_id, ordered_tasks)
 
     @staticmethod
-    def _describe_contradiction(contradiction: dict[str, Any]) -> str:
-        description = str(contradiction.get("description") or contradiction.get("summary") or "Review contradictory context on a later pass")
-        return description
+    def _describe_contradiction(contradiction: ContradictionRecord) -> str:
+        return contradiction.description or contradiction.kind or "Review contradictory context on a later pass"
 
     @staticmethod
-    def _build_contradiction_task_id(session_id: str, contradiction: dict[str, Any], *, index: int) -> str:
+    def _build_contradiction_task_id(session_id: str, contradiction: ContradictionRecord, *, index: int) -> str:
         stable_source = "|".join(
             [
-                str(contradiction.get("contradiction_set_id") or ""),
-                str(contradiction.get("kind") or contradiction.get("type") or ""),
-                str(contradiction.get("description") or contradiction.get("summary") or contradiction),
+                str(contradiction.contradiction_set_id or ""),
+                contradiction.kind,
+                contradiction.description or contradiction.kind,
                 str(index),
             ]
         )
@@ -487,8 +484,8 @@ class MetacognitiveController:
         return "unknown"
 
     @staticmethod
-    def _score_contradiction_priority(contradiction: dict[str, Any], *, contradiction_count: int) -> float:
-        severity = contradiction.get("severity", contradiction.get("confidence"))
+    def _score_contradiction_priority(contradiction: ContradictionRecord, *, contradiction_count: int) -> float:
+        severity = contradiction.severity if isinstance(contradiction.severity, (int, float)) else contradiction.confidence
         if isinstance(severity, (int, float)):
             normalized_severity = max(0.0, min(1.0, float(severity)))
             return min(1.0, 0.55 + 0.35 * normalized_severity)

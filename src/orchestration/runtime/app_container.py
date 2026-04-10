@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib import import_module
+import logging
 from typing import Any, Optional
 
 from src.core.config import get_chat_config
@@ -8,6 +9,8 @@ from src.memory.consolidation.consolidator import ConsolidationPolicy, MemoryCon
 from src.memory.metrics import metrics_registry
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from src.orchestration.agent_singleton import create_agent
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _lazy_import(path: str, attr: str) -> Any:
@@ -107,7 +110,13 @@ class AppRuntime:
             if memory is not None and hasattr(memory, "get_context_for_query"):
                 try:
                     return memory.get_context_for_query(query)
-                except Exception:
+                except Exception as exc:
+                    _LOGGER.warning(
+                        "memory.get_context_for_query failed for session %s: %s",
+                        session_id,
+                        exc,
+                        exc_info=True,
+                    )
                     return {}
             return {}
 
@@ -115,7 +124,13 @@ class AppRuntime:
             if memory is not None and hasattr(memory, "get_unresolved_conflicts"):
                 try:
                     conflicts = memory.get_unresolved_conflicts(session_id)
-                except Exception:
+                except Exception as exc:
+                    _LOGGER.warning(
+                        "memory.get_unresolved_conflicts failed for session %s: %s",
+                        session_id,
+                        exc,
+                        exc_info=True,
+                    )
                     conflicts = []
                 if isinstance(conflicts, list):
                     return [conflict for conflict in conflicts if isinstance(conflict, dict)]

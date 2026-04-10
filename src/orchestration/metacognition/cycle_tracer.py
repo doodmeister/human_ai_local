@@ -1,3 +1,10 @@
+"""Filesystem-backed persistence for metacognition traces and related artifacts.
+
+This module stores cycle traces, self-model snapshots, scheduled task queues,
+and reflection episodes on disk with indexed lookup, atomic writes, and
+best-effort locking for mutable session-scoped state.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -5,11 +12,13 @@ import json
 import os
 import time
 from contextlib import contextmanager
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, cast
 from uuid import uuid4
+
+from .models import AttentionStatus, AttentionUpdate, ContradictionRecord, FocusItem, GoalMetadata, MemoryStatus, MemoryUpdate, PlanMetadata, RetrievalContextItem
 
 
 class FilesystemCycleTracer:
@@ -109,12 +118,15 @@ class FilesystemCycleTracer:
         self._locked_write_json(path, normalized_tasks)
         return path
 
-    def load_task_queue(self, session_id: str) -> list[dict[str, Any]]:
+    def load_task_queue(self, session_id: str, *, limit: int | None = None) -> list[dict[str, Any]]:
         path = self.root_dir / "task_queues" / f"{self._session_key(session_id)}.json"
         payload = self._read_json_file(path, fallback=[])
         if not isinstance(payload, list):
             return []
-        return [task for task in payload if isinstance(task, dict)]
+        tasks = [task for task in payload if isinstance(task, dict)]
+        if limit is not None and limit >= 0:
+            tasks = tasks[-limit:]
+        return tasks
 
     def upsert_task_queue(self, session_id: str, tasks: Sequence[Mapping[str, Any] | Any]) -> Path:
         directory = self.root_dir / "task_queues"
@@ -190,7 +202,7 @@ class FilesystemCycleTracer:
         *,
         traces: Sequence[Mapping[str, Any]] | None = None,
         session_id: str | None = None,
-        limit: int = 20,
+        limit: int | None = 20,
     ) -> dict[str, Any]:
         trace_list = list(traces) if traces is not None else self.list_traces(session_id=session_id, limit=limit)
         if not trace_list:
@@ -223,8 +235,15 @@ class FilesystemCycleTracer:
 
     @classmethod
     def _normalize(cls, value: Any) -> Any:
+        if isinstance(value, (ContradictionRecord, RetrievalContextItem, MemoryStatus, AttentionStatus, GoalMetadata, PlanMetadata, MemoryUpdate, AttentionUpdate)):
+            return cls._normalize(value.to_dict())
+        if isinstance(value, FocusItem):
+            return cls._normalize(value.to_primitive())
         if is_dataclass(value):
-            return cls._normalize(asdict(cast(Any, value)))
+            return {
+                field.name: cls._normalize(getattr(cast(Any, value), field.name))
+                for field in fields(cast(Any, value))
+            }
         if isinstance(value, Enum):
             return value.value
         if isinstance(value, Path):

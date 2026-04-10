@@ -11,6 +11,20 @@ class GoalKind(str, Enum):
     PLANNING = "planning"
 
 
+class InputType(str, Enum):
+    TEXT = "text"
+    AUDIO = "audio"
+    VOICE = "voice"
+    IMAGE = "image"
+    TOOL_RESULT = "tool_result"
+    BACKGROUND_TASK = "background_task"
+
+
+class PolicyName(str, Enum):
+    UNSET = "unset"
+    HEURISTIC_V1 = "heuristic_policy_v1"
+
+
 class CognitiveActType(str, Enum):
     RESPOND = "respond"
     RETRIEVE_CONTEXT = "retrieve_context"
@@ -37,3 +51,25 @@ class ScheduledTaskStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class StimulusMetadataKey(str, Enum):
+    BACKGROUND_TASK = "background_task"
+    SCHEDULER_TICK = "scheduler_tick"
+    TASK_ID = "task_id"
+    TASK_REASON = "task_reason"
+
+
+class TaskReason(str, Enum):
+    CONTRADICTIONS = "contradictions"
+    UNCERTAINTY = "uncertainty"
+    BASELINE = "baseline"
+    BACKGROUND_CONTRADICTION_AUDIT = "background_contradiction_audit"
+
+
+class BackgroundTaskReason(str, Enum):
+    CONTRADICTION_AUDIT = TaskReason.BACKGROUND_CONTRADICTION_AUDIT.value
+
+
+class ReflectionTrigger(str, Enum):
+    IDLE_SCHEDULER = "idle_background_scheduler"

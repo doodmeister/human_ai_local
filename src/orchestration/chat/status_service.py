@@ -1,11 +1,23 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional
 
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 
 from .metrics import metrics_registry
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalize_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class ChatStatusService:
@@ -119,13 +131,13 @@ class ChatStatusService:
             try:
                 seconds = float(offset)
                 if seconds > 0:
-                    return datetime.now() + timedelta(seconds=seconds)
+                    return _utc_now() + timedelta(seconds=seconds)
             except (TypeError, ValueError):
                 pass
         due_text = intent.entities.get("reminder_due_time")
         if isinstance(due_text, str):
             try:
-                return datetime.fromisoformat(due_text)
+                return _normalize_datetime(datetime.fromisoformat(due_text))
             except Exception:
                 pass
         return None
@@ -133,7 +145,10 @@ class ChatStatusService:
     def format_due_phrase(self, due_time: Optional[datetime]) -> str:
         if due_time is None:
             return "no specific time"
-        now = datetime.now()
+        due_time = _normalize_datetime(due_time)
+        if due_time is None:
+            return "no specific time"
+        now = _utc_now()
         delta = due_time - now
         total_seconds = delta.total_seconds()
         if total_seconds < -60:
@@ -261,9 +276,9 @@ class ChatStatusService:
         try:
             pm = get_inmemory_prospective_memory()
             reminders = pm.list_reminders(include_completed=False)
-            now = datetime.now()
+            now = _utc_now()
             for reminder in reminders:
-                due_time = getattr(reminder, "due_time", None)
+                due_time = _normalize_datetime(getattr(reminder, "due_time", None))
                 if not due_time:
                     continue
                 delta = (due_time - now).total_seconds()

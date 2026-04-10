@@ -32,6 +32,7 @@ from .turn_support import ChatTurnSupport
 from .turn_context import ChatTurnContextBuilder
 from src.memory.prospective.prospective_memory import get_inmemory_prospective_memory
 from src.orchestration.autobiographical_promotion import (
+    PromotionResult,
     derive_autobiographical_life_period,
     promote_interaction_to_autobiographical_memory,
 )
@@ -552,7 +553,7 @@ class ChatService:
         tick: Any = None,
     ) -> str | None:
         try:
-            return promote_interaction_to_autobiographical_memory(
+            result = promote_interaction_to_autobiographical_memory(
                 memory=self._get_memory_system(),
                 autobiographical_store=getattr(self.context_builder, "_autobiographical_store", None),
                 session=session,
@@ -566,9 +567,26 @@ class ChatService:
                 goal_ids=sorted(self._session_goal_index.get(session.session_id, set())),
                 default_prefix="chat",
             )
+            self._apply_promotion_result(session, result)
+            return result.episode_id
         except Exception as exc:
             logger.debug("Autobiographical episodic promotion skipped: %s", exc)
             return None
+
+    @staticmethod
+    def _apply_promotion_result(session: Any, result: PromotionResult) -> None:
+        if result.episode_id:
+            setattr(session, "_last_autobiographical_episode_id", result.episode_id)
+        if result.graph_snapshot is not None:
+            setattr(session, "_autobiographical_graph_snapshot", result.graph_snapshot)
+        if result.semantic_fact_ids:
+            setattr(session, "_last_semantic_fact_ids", list(result.semantic_fact_ids))
+        if result.semantic_products:
+            setattr(session, "_last_semantic_products", [dict(item) for item in result.semantic_products])
+        if result.prospective_reminder_ids:
+            setattr(session, "_last_prospective_reminder_ids", list(result.prospective_reminder_ids))
+        if result.prospective_products:
+            setattr(session, "_last_prospective_products", [dict(item) for item in result.prospective_products])
 
     def _summarize_context_items(self, items):
         return self._response_builder.summarize_context_items(items)

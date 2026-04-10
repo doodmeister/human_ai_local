@@ -12,7 +12,7 @@ The system gracefully degrades if optional dependencies are not available.
 
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 import json
 import uuid
@@ -22,6 +22,44 @@ from pathlib import Path
 # ===============================================================================
 # Data Models
 # ===============================================================================
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalize_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return _normalize_datetime(datetime.fromisoformat(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_due_time(value: Optional[Union[datetime, float, int]]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return _utc_now() + timedelta(seconds=float(value))
+    if isinstance(value, datetime):
+        return _normalize_datetime(value)
+    return None
+
+
+def _sort_due_timestamp(reminder: "Reminder", missing_value: float) -> float:
+    due_time = _normalize_datetime(reminder.due_time)
+    if due_time is None:
+        return missing_value
+    return due_time.timestamp()
 
 @dataclass
 class Reminder:
@@ -41,7 +79,7 @@ class Reminder:
     id: str
     content: str
     due_time: Optional[datetime] = None
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=_utc_now)
     completed: bool = False
     completed_at: Optional[datetime] = None
     tags: List[str] = field(default_factory=list)
@@ -65,14 +103,17 @@ class Reminder:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert reminder to dictionary format."""
+        due_time = _normalize_datetime(self.due_time)
+        created_at = _normalize_datetime(self.created_at) or _utc_now()
+        completed_at = _normalize_datetime(self.completed_at)
         return {
             "id": self.id,
             "content": self.content,
-            "due_time": self.due_time.isoformat() if self.due_time else None,
-            "due_in_seconds": (self.due_time - datetime.now()).total_seconds() if self.due_time else None,
-            "created_at": self.created_at.isoformat(),
+            "due_time": due_time.isoformat() if due_time else None,
+            "due_in_seconds": (due_time - _utc_now()).total_seconds() if due_time else None,
+            "created_at": created_at.isoformat(),
             "completed": self.completed,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": completed_at.isoformat() if completed_at else None,
             "tags": self.tags,
             "metadata": self.metadata
         }
@@ -83,10 +124,10 @@ class Reminder:
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             content=data["content"],
-            due_time=datetime.fromisoformat(data["due_time"]) if data.get("due_time") else None,
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(),
+            due_time=_parse_datetime(data.get("due_time")),
+            created_at=_parse_datetime(data.get("created_at")) or _utc_now(),
             completed=data.get("completed", False),
-            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            completed_at=_parse_datetime(data.get("completed_at")),
             tags=data.get("tags", []),
             metadata=data.get("metadata", {})
         )
@@ -357,14 +398,10 @@ class InMemoryProspectiveMemory(ProspectiveMemorySystem):
         Returns:
             Created reminder
         """
-        # Backward compatibility: if due_time is a float/int, treat as seconds from now
-        if isinstance(due_time, (int, float)):
-            due_time = datetime.now() + timedelta(seconds=float(due_time))
-        
         reminder = Reminder(
             id=str(uuid.uuid4()),
             content=content,
-            due_time=due_time,
+            due_time=_coerce_due_time(due_time),
             tags=tags or [],
             metadata=metadata or {}
         )
@@ -380,7 +417,7 @@ class InMemoryProspectiveMemory(ProspectiveMemorySystem):
     
     def get_due_reminders(self, now: Optional[datetime] = None) -> List[Reminder]:
         """Get all reminders that are currently due."""
-        now = now or datetime.now()
+        now = _normalize_datetime(now) or _utc_now()
         
         due_reminders = []
         for reminder in self._reminders.values():
@@ -396,11 +433,11 @@ class InMemoryProspectiveMemory(ProspectiveMemorySystem):
                 
                 due_reminders.append(reminder)
         
-        return sorted(due_reminders, key=lambda r: r.due_time or datetime.min)
+        return sorted(due_reminders, key=lambda r: _sort_due_timestamp(r, float("-inf")))
     
     def get_upcoming(self, within: timedelta) -> List[Reminder]:
         """Get reminders due within a time window."""
-        horizon = datetime.now() + within
+        horizon = _utc_now() + within
         
         upcoming = []
         for reminder in self._reminders.values():
@@ -409,7 +446,7 @@ class InMemoryProspectiveMemory(ProspectiveMemorySystem):
                 reminder.due_time <= horizon):
                 upcoming.append(reminder)
         
-        return sorted(upcoming, key=lambda r: r.due_time or datetime.min)
+        return sorted(upcoming, key=lambda r: _sort_due_timestamp(r, float("-inf")))
     
     def list_reminders(self, include_completed: bool = False, include_triggered: Optional[bool] = None) -> List[Reminder]:
         """List all reminders.
@@ -427,7 +464,7 @@ class InMemoryProspectiveMemory(ProspectiveMemorySystem):
         if not include_completed:
             reminders = [r for r in reminders if not r.completed]
         
-        return sorted(reminders, key=lambda r: r.due_time or datetime.max)
+        return sorted(reminders, key=lambda r: _sort_due_timestamp(r, float("inf")))
     
     def search_reminders(self, query: str, limit: int = 10) -> List[Reminder]:
         """Search reminders by simple text matching."""
@@ -450,7 +487,7 @@ class InMemoryProspectiveMemory(ProspectiveMemorySystem):
         
         if not reminder.completed:
             reminder.completed = True
-            reminder.completed_at = datetime.now()
+            reminder.completed_at = _utc_now()
             self._increment_metric("prospective_reminders_completed_total")
         
         return True
@@ -637,10 +674,10 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
         return Reminder(
             id=reminder_id,
             content=metadata.get("content", document),
-            due_time=datetime.fromisoformat(metadata["due_time"]) if metadata.get("due_time") else None,
-            created_at=datetime.fromisoformat(metadata["created_at"]) if metadata.get("created_at") else datetime.now(),
+            due_time=_parse_datetime(metadata.get("due_time")),
+            created_at=_parse_datetime(metadata.get("created_at")) or _utc_now(),
             completed=metadata.get("completed", False),
-            completed_at=datetime.fromisoformat(metadata["completed_at"]) if metadata.get("completed_at") else None,
+            completed_at=_parse_datetime(metadata.get("completed_at")),
             tags=metadata.get("tags", "").split(",") if metadata.get("tags") else [],
             metadata=reminder_metadata,
         )
@@ -663,14 +700,10 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
         Returns:
             Created reminder
         """
-        # Backward compatibility: if due_time is a float/int, treat as seconds from now
-        if isinstance(due_time, (int, float)):
-            due_time = datetime.now() + timedelta(seconds=float(due_time))
-        
         reminder = Reminder(
             id=str(uuid.uuid4()),
             content=content,
-            due_time=due_time,
+            due_time=_coerce_due_time(due_time),
             tags=tags or [],
             metadata=metadata or {}
         )
@@ -716,7 +749,7 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
     
     def get_due_reminders(self, now: Optional[datetime] = None) -> List[Reminder]:
         """Get all reminders that are currently due."""
-        now = now or datetime.now()
+        now = _normalize_datetime(now) or _utc_now()
         
         try:
             result = self.collection.get()
@@ -740,8 +773,8 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
                         continue
 
                     try:
-                        due_time = datetime.fromisoformat(due_time_str)
-                        if due_time <= now:
+                        due_time = _parse_datetime(str(due_time_str))
+                        if due_time is not None and due_time <= now:
                             reminder = self._metadata_to_reminder(reminder_id, metadata, document)
                             due_reminders.append(reminder)
 
@@ -751,13 +784,13 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
                     except (ValueError, TypeError):
                         continue  # Skip malformed dates
 
-            return sorted(due_reminders, key=lambda r: r.due_time or datetime.min)
+            return sorted(due_reminders, key=lambda r: _sort_due_timestamp(r, float("-inf")))
         except Exception:
             return []
     
     def get_upcoming(self, within: timedelta) -> List[Reminder]:
         """Get reminders due within a time window."""
-        horizon = datetime.now() + within
+        horizon = _utc_now() + within
         
         try:
             result = self.collection.get()
@@ -781,14 +814,14 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
                         continue
 
                     try:
-                        due_time = datetime.fromisoformat(due_time_str)
-                        if due_time <= horizon:
+                        due_time = _parse_datetime(str(due_time_str))
+                        if due_time is not None and due_time <= horizon:
                             reminder = self._metadata_to_reminder(reminder_id, metadata, document)
                             upcoming.append(reminder)
                     except (ValueError, TypeError):
                         continue
 
-            return sorted(upcoming, key=lambda r: r.due_time or datetime.min)
+            return sorted(upcoming, key=lambda r: _sort_due_timestamp(r, float("-inf")))
         except Exception:
             return []
     
@@ -823,7 +856,7 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
                     reminder = self._metadata_to_reminder(reminder_id, metadata, document)
                     reminders.append(reminder)
 
-            return sorted(reminders, key=lambda r: r.due_time or datetime.max)
+            return sorted(reminders, key=lambda r: _sort_due_timestamp(r, float("inf")))
         except Exception:
             return []
     
@@ -878,7 +911,7 @@ class VectorProspectiveMemory(ProspectiveMemorySystem):
             metadata = self._normalize_metadata(raw_meta)
 
             metadata['completed'] = True
-            metadata['completed_at'] = datetime.now().isoformat()
+            metadata['completed_at'] = _utc_now().isoformat()
 
             self.collection.update(
                 ids=[reminder_id],

@@ -55,6 +55,7 @@ class InProcessEventBus:
         failure_count = 0
         for handler in tuple(self._handlers.get(event_name, ())):
             handler_payload = dict(payload)
+            payload_preview = self._payload_preview(payload)
             try:
                 handler(handler_payload)
             except Exception as exc:
@@ -65,7 +66,7 @@ class InProcessEventBus:
                     "handler": getattr(handler, "__qualname__", repr(handler)),
                     "timestamp": time.time(),
                     "payload_keys": sorted(handler_payload.keys()),
-                    "payload_preview": handler_payload,
+                    "payload_preview": payload_preview,
                 }
                 self._failures.append(failure)
                 failure_count += 1
@@ -102,3 +103,13 @@ class InProcessEventBus:
     def clear(self) -> None:
         self._handlers.clear()
         self._failures.clear()
+
+    @staticmethod
+    def _payload_preview(payload: Mapping[str, Any]) -> dict[str, str]:
+        preview: dict[str, str] = {}
+        for key, value in payload.items():
+            rendered = repr(value)
+            if len(rendered) > 120:
+                rendered = f"{rendered[:117]}..."
+            preview[str(key)] = rendered
+        return preview

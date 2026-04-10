@@ -154,16 +154,14 @@ async def metacog_dashboard(session_id: Optional[str] = None, history_limit: int
     status = agent.get_metacognitive_status(session_id=resolved_session_id)
     controller = agent.get_metacognitive_controller()
     reflections = controller.list_reflection_episodes(resolved_session_id, limit=history_limit) if controller is not None else []
-    background = present_background_state(
-        status,
-        tasks=agent.list_cognitive_tasks(session_id=resolved_session_id),
-        reflections=reflections,
-    )
+    tasks = agent.list_cognitive_tasks(session_id=resolved_session_id)
     scorecard = agent.get_metacognitive_scorecard(session_id=resolved_session_id, limit=limit)
     return present_dashboard(
         status_payload=status,
-        background_payload=background,
+        background_payload=status,
         scorecard_payload=scorecard,
+        tasks=tasks,
+        reflections=reflections,
     )
 
 

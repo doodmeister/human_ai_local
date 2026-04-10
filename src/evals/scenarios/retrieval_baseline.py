@@ -322,7 +322,7 @@ class _RuntimeRetrievalHarness:
             }
         )
 
-        episode_id = promote_interaction_to_autobiographical_memory(
+        promotion = promote_interaction_to_autobiographical_memory(
             memory=self.memory,
             autobiographical_store=self.autobiographical_store,
             session=session,
@@ -339,10 +339,11 @@ class _RuntimeRetrievalHarness:
             goal_ids=interaction.goal_ids,
             default_prefix="eval",
         )
+        episode_id = promotion.episode_id
         if episode_id:
             self._episode_aliases[str(episode_id)] = interaction.interaction_id
 
-        semantic_products = list(getattr(session, "_last_semantic_products", []) or [])
+        semantic_products = [dict(product) for product in promotion.semantic_products]
         for predicate, object_value, alias in interaction.semantic_aliases:
             matched = next(
                 (

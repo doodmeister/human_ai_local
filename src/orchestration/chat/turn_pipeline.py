@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.learning.learning_law import clamp01, utility_score
@@ -435,7 +435,7 @@ class ChatTurnPipeline:
 
             upcoming_window = float(cfg.get("prospective_upcoming_window_seconds", 1800.0))
             upcoming_limit = int(cfg.get("prospective_upcoming_limit", 3))
-            now_dt = datetime.now()
+            now_dt = datetime.now(timezone.utc)
             if upcoming_window > 0:
                 raw_upcoming = pm.get_upcoming(within=timedelta(seconds=upcoming_window))
                 due_ids = {reminder.id for reminder in due_reminders}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Callable, Any, Dict
 import threading
 
@@ -975,6 +975,7 @@ class ContextBuilder:
         try:
             # Get reminders due within next 2 hours
             upcoming = self.prospective.get_upcoming(within=timedelta(hours=2))
+            now = datetime.now(timezone.utc)
             
             if not upcoming:
                 return items
@@ -995,7 +996,7 @@ class ContextBuilder:
                 for r in plan_reminders[:5]:  # Limit to 5
                     due_in = ""
                     if r.due_time:
-                        delta = r.due_time - datetime.now()
+                        delta = r.due_time - now
                         mins = int(delta.total_seconds() / 60)
                         if mins < 60:
                             due_in = f" (due in {mins}m)"
@@ -1025,7 +1026,7 @@ class ContextBuilder:
                 for r in regular_reminders[:3]:  # Limit to 3
                     due_in = ""
                     if r.due_time:
-                        delta = r.due_time - datetime.now()
+                        delta = r.due_time - now
                         mins = int(delta.total_seconds() / 60)
                         if mins < 60:
                             due_in = f" (in {mins}m)"

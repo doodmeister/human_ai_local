@@ -11,7 +11,7 @@ This module bridges the executive system with user engagement,
 making the system feel more like a proactive assistant.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, cast
 from enum import Enum
@@ -156,12 +156,13 @@ class ProactiveAgencySystem:
         
         try:
             due_reminders = self.prospective.get_due_reminders()
+            now = datetime.now(timezone.utc)
             
             for reminder in due_reminders[:5]:  # Limit to 5
                 # Calculate how overdue
                 overdue_minutes = 0
                 if reminder.due_time:
-                    overdue_minutes = (datetime.now() - reminder.due_time).total_seconds() / 60
+                    overdue_minutes = (now - reminder.due_time).total_seconds() / 60
                 
                 # Higher priority for more overdue items
                 priority = min(1.0, 0.8 + (overdue_minutes / 60) * 0.2)
@@ -207,6 +208,7 @@ class ProactiveAgencySystem:
         
         try:
             upcoming = self.prospective.get_upcoming(within=timedelta(minutes=30))
+            now = datetime.now(timezone.utc)
             
             # Only include plan steps that are coming up soon
             for reminder in upcoming:
@@ -214,7 +216,7 @@ class ProactiveAgencySystem:
                     continue
                 
                 if reminder.due_time:
-                    minutes_until = (reminder.due_time - datetime.now()).total_seconds() / 60
+                    minutes_until = (reminder.due_time - now).total_seconds() / 60
                     
                     if minutes_until <= 15:  # Within 15 minutes
                         suggestions.append(ProactiveSuggestion(

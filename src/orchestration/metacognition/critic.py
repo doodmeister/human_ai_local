@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from .enums import CognitiveActType, GoalKind
-from .models import CognitivePlan, CriticReport, ExecutionResult, WorkspaceState
+from .models import AttentionUpdate, CognitivePlan, ContradictionRecord, CriticReport, ExecutionResult, MemoryUpdate, WorkspaceState
 
 
 class DefaultCritic:
@@ -27,13 +27,15 @@ class DefaultCritic:
             plan_acts = tuple((plan.acts or ()) if plan is not None else ())
             contradictions_raw = tuple((workspace.contradictions or ()) if workspace is not None else ())
             context_items = tuple((workspace.context_items or ()) if workspace is not None else ())
-            memory_updates = tuple((result.memory_updates or ()) if result is not None else ())
-            attention_updates = dict((result.attention_updates or {}) if result is not None else {})
-            dispatch_log = list(((result.metadata or {}).get("dispatch_log") or []) if result is not None else [])
+            memory_updates = self._normalize_memory_updates(getattr(result, "memory_updates", ()) if result is not None else ())
+            attention_updates = self._normalize_attention_updates(
+                getattr(result, "attention_updates", ()) if result is not None else ()
+            )
+            result_metadata = dict((result.metadata or {}) if result is not None else {})
+            dispatch_log = list((result_metadata.get("dispatch_log") or []) if result is not None else [])
             productive_act_count = sum(1 for entry in dispatch_log if self._dispatch_entry_is_productive(entry))
             response_length = len(response_text)
-            contradiction_details = tuple(self._normalize_contradiction(item) for item in contradictions_raw)
-            contradictions = tuple(self._contradiction_label(item) for item in contradiction_details)
+            contradictions = tuple(ContradictionRecord.from_value(item) for item in contradictions_raw)
             executed_act_types = [act.act_type.value for act in executed_acts]
             contradiction_count = len(contradictions)
             plan_count = len(plan_acts)
@@ -59,6 +61,8 @@ class DefaultCritic:
             inspected_conflicts = any(act.act_type is CognitiveActType.INSPECT_CONFLICT for act in executed_acts)
             load_resilience_bonus = 0.05 if cognitive_load >= 0.75 and bool(getattr(result, "success", False)) else 0.0
             uncertainty_reduction_bonus = 0.05 if uncertainty >= 0.5 and retrieved_context else 0.0
+            dry_run = bool(result_metadata.get("dry_run"))
+            dry_run_penalty = 0.15 if dry_run else 0.0
 
             success_score = response_quality
             success_score += execution_quality
@@ -68,6 +72,7 @@ class DefaultCritic:
             success_score += load_resilience_bonus
             success_score += uncertainty_reduction_bonus
             success_score -= contradiction_penalty
+            success_score -= dry_run_penalty
             success_score = max(0.0, min(1.0, success_score))
 
             goal_progress = self._goal_progress(
@@ -93,10 +98,11 @@ class DefaultCritic:
                 "memory_updates": len(memory_updates),
                 "attention_updated": bool(attention_updates),
                 "contradiction_count": contradiction_count,
-                "contradiction_details": [dict(item) for item in contradiction_details],
+                "contradiction_details": [item.to_dict() for item in contradictions],
                 "cognitive_load": cognitive_load,
                 "uncertainty": uncertainty,
                 "dispatch_summary": self._summarize_dispatch_log(dispatch_log),
+                "dry_run": dry_run,
                 "score_components": {
                     "response_quality": round(response_quality, 6),
                     "execution_quality": round(execution_quality, 6),
@@ -106,6 +112,7 @@ class DefaultCritic:
                     "load_resilience_bonus": round(load_resilience_bonus, 6),
                     "uncertainty_reduction_bonus": round(uncertainty_reduction_bonus, 6),
                     "contradiction_penalty": round(contradiction_penalty, 6),
+                    "dry_run_penalty": round(dry_run_penalty, 6),
                 },
                 "completion_ratio": round(completion_ratio, 6),
                 "productive_ratio": round(productive_ratio, 6),
@@ -161,18 +168,10 @@ class DefaultCritic:
             return 0.0
 
     @staticmethod
-    def _normalize_contradiction(item: Any) -> dict[str, Any]:
-        if isinstance(item, dict):
-            return dict(item)
-        return {"value": str(item)}
-
-    @staticmethod
-    def _contradiction_label(item: dict[str, Any]) -> str:
-        return str(item.get("kind") or item.get("description") or item.get("value") or item)
-
-    @staticmethod
     def _dispatch_entry_is_productive(entry: Any) -> bool:
         if not isinstance(entry, dict):
+            return False
+        if entry.get("error") or entry.get("stub"):
             return False
         return any(value for key, value in entry.items() if key != "act_type" and value)
 
@@ -217,8 +216,8 @@ class DefaultCritic:
         executed_acts: tuple[Any, ...],
         response_text: str,
         success: bool,
-        memory_updates: tuple[Any, ...],
-        attention_updates: dict[str, Any],
+        memory_updates: tuple[MemoryUpdate, ...],
+        attention_updates: tuple[AttentionUpdate, ...],
     ) -> float:
         if selected_goal is None:
             return 0.0
@@ -230,6 +229,22 @@ class DefaultCritic:
         if attention_updates:
             base += 0.1
         return min(1.0, base)
+
+    @staticmethod
+    def _normalize_memory_updates(values: Any) -> tuple[MemoryUpdate, ...]:
+        if values is None:
+            return ()
+        if isinstance(values, (list, tuple)):
+            return tuple(MemoryUpdate.from_value(item) for item in values)
+        return (MemoryUpdate.from_value(values),)
+
+    @staticmethod
+    def _normalize_attention_updates(values: Any) -> tuple[AttentionUpdate, ...]:
+        if values is None:
+            return ()
+        if isinstance(values, (list, tuple)):
+            return tuple(AttentionUpdate.from_value(item) for item in values)
+        return (AttentionUpdate.from_value(values),)
 
     @staticmethod
     def _act_matches_goal_kind(act: Any, goal_kind: GoalKind) -> bool:

@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 import uuid
 
 from src.memory.schema import canonical_item_to_prompt_memory_payload, normalize_memory_search_results
-from src.orchestration.autobiographical_promotion import promote_interaction_to_autobiographical_memory
+from src.orchestration.autobiographical_promotion import PromotionResult, promote_interaction_to_autobiographical_memory
 
 from .. import CognitiveStep, CognitiveTick
 from ..chat.emotion_salience import estimate_salience_and_valence
@@ -310,7 +310,7 @@ class CognitiveTurnProcessor:
 
             if not str(response).startswith("[ERROR]"):
                 try:
-                    promote_interaction_to_autobiographical_memory(
+                    result = promote_interaction_to_autobiographical_memory(
                         memory=self._get_memory(),
                         autobiographical_store=self._get_autobiographical_store(),
                         session=self._get_session(),
@@ -323,6 +323,7 @@ class CognitiveTurnProcessor:
                         goal_ids=self._get_active_goal_ids(),
                         default_prefix="agent",
                     )
+                    self._apply_promotion_result(self._get_session(), result)
                 except Exception as exc:
                     logger.debug("Autobiographical promotion skipped: %s", exc)
 
@@ -343,6 +344,21 @@ class CognitiveTurnProcessor:
             attention_scores.get("cognitive_load", 0.0),
             attention_scores.get("items_in_focus", 0),
         )
+
+    @staticmethod
+    def _apply_promotion_result(session: Any, result: PromotionResult) -> None:
+        if result.episode_id:
+            setattr(session, "_last_autobiographical_episode_id", result.episode_id)
+        if result.graph_snapshot is not None:
+            setattr(session, "_autobiographical_graph_snapshot", result.graph_snapshot)
+        if result.semantic_fact_ids:
+            setattr(session, "_last_semantic_fact_ids", list(result.semantic_fact_ids))
+        if result.semantic_products:
+            setattr(session, "_last_semantic_products", [dict(item) for item in result.semantic_products])
+        if result.prospective_reminder_ids:
+            setattr(session, "_last_prospective_reminder_ids", list(result.prospective_reminder_ids))
+        if result.prospective_products:
+            setattr(session, "_last_prospective_products", [dict(item) for item in result.prospective_products])
 
     async def enhance_attention_with_neural(
         self,

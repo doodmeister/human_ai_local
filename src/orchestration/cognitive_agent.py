@@ -13,6 +13,7 @@ import time
 from ..core.config import CognitiveConfig
 from ..memory.autobiographical import AutobiographicalGraphStore
 from .cognitive_layers import ChatCognitiveLayerRuntime
+from .metacognition.enums import ReflectionTrigger
 from .agent import (
     CognitiveAgentLLMSession,
     CognitiveAgentRuntimeBuilder,
@@ -479,7 +480,7 @@ class CognitiveAgent:
             return None
         report = self._reflection_service.reflect(
             metadata={
-                "trigger": "idle_background_scheduler",
+                "trigger": ReflectionTrigger.IDLE_SCHEDULER.value,
                 "idle_for_seconds": current_ts - float(self._last_metacognitive_activity_ts),
             }
         )

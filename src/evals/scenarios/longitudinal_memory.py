@@ -16,10 +16,14 @@ from types import SimpleNamespace
 from src.evals.metrics import LongitudinalMetrics, score_longitudinal
 from src.memory.autobiographical import AutobiographicalGraphBuilder, AutobiographicalGraphStore
 from src.memory.encoding import EventEncoder
-from src.memory.episodic.episodic_memory import EpisodicContext, EpisodicMemory
 from src.memory.memory_system import MemorySystem, MemorySystemConfig
 from src.memory.relationship import RelationshipMemory
-from src.orchestration.autobiographical_promotion import promote_interaction_to_autobiographical_memory
+from src.orchestration.autobiographical_promotion import PromotionResult, promote_interaction_to_autobiographical_memory
+
+
+_episodic_module = import_module("src.memory.episodic")
+EpisodicContext = _episodic_module.EpisodicContext
+EpisodicMemory = _episodic_module.EpisodicMemory
 
 
 _BASE_TIME = datetime(2025, 1, 10, 14, 0, tzinfo=timezone.utc)
@@ -244,7 +248,7 @@ class _LongitudinalHarness:
         )
 
         for interaction in phase.promoted_interactions:
-            actual_id = self._promote_interaction(interaction)
+            actual_id = self._promote_interaction(interaction).episode_id
             if actual_id:
                 self._episode_aliases[interaction.interaction_id] = actual_id
 
@@ -329,7 +333,7 @@ class _LongitudinalHarness:
     def store_fact(self, subject: str, predicate: str, object_val: Any, **kwargs: Any) -> str:
         return self.semantic.store_fact(subject, predicate, object_val, **kwargs)
 
-    def _promote_interaction(self, interaction: PromotedInteractionSeed) -> str | None:
+    def _promote_interaction(self, interaction: PromotedInteractionSeed) -> PromotionResult:
         session = SimpleNamespace(session_id=interaction.session_id)
         setattr(
             session,
@@ -430,7 +434,7 @@ class _RuntimeLongitudinalHarness:
             )
 
             for interaction in phase.promoted_interactions:
-                actual_id = self._promote_interaction(interaction)
+                actual_id = self._promote_interaction(interaction).episode_id
                 if actual_id:
                     self._episode_aliases[interaction.interaction_id] = actual_id
 
@@ -494,7 +498,7 @@ class _RuntimeLongitudinalHarness:
         except Exception:
             pass
 
-    def _promote_interaction(self, interaction: PromotedInteractionSeed) -> str | None:
+    def _promote_interaction(self, interaction: PromotedInteractionSeed) -> PromotionResult:
         session = SimpleNamespace(session_id=interaction.session_id)
         setattr(
             session,

@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import re
 from typing import Any, Iterable, Sequence
 
 from src.memory.encoding import EventEncoder
 from src.memory.autobiographical import AutobiographicalGraphBuilder
+
+__all__ = [
+    "PromotionResult",
+    "derive_autobiographical_life_period",
+    "promote_interaction_to_autobiographical_memory",
+]
+
+_LOGGER = logging.getLogger(__name__)
+
+_DEFINING_MOMENT_IMPORTANCE_THRESHOLD = 0.8
+_DEFINING_MOMENT_VALENCE_THRESHOLD = 0.7
+
+
+@dataclass(frozen=True, slots=True)
+class PromotionResult:
+    episode_id: str | None = None
+    graph_snapshot: Any | None = None
+    semantic_fact_ids: tuple[str, ...] = field(default_factory=tuple)
+    semantic_products: tuple[dict[str, str], ...] = field(default_factory=tuple)
+    prospective_reminder_ids: tuple[str, ...] = field(default_factory=tuple)
+    prospective_products: tuple[dict[str, str], ...] = field(default_factory=tuple)
+
+    def __bool__(self) -> bool:
+        return self.episode_id is not None
 
 
 def derive_autobiographical_life_period(
@@ -17,12 +43,14 @@ def derive_autobiographical_life_period(
     if tick is not None:
         try:
             narrative = tick.state.get("narrative")
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning("tick.state.get('narrative') failed while deriving life period: %s", exc, exc_info=True)
             narrative = None
         if narrative is not None and hasattr(narrative, "to_dict"):
             try:
                 narrative_data = narrative.to_dict()
-            except Exception:
+            except Exception as exc:
+                _LOGGER.warning("narrative.to_dict() failed while deriving life period: %s", exc, exc_info=True)
                 narrative_data = {}
             active_themes = [
                 str(theme).strip().lower().replace(" ", "_")
@@ -52,14 +80,16 @@ def promote_interaction_to_autobiographical_memory(
     tick: Any = None,
     goal_ids: Iterable[str] | None = None,
     default_prefix: str = "chat",
-) -> str | None:
+) -> PromotionResult:
     if memory is None or not hasattr(memory, "create_episodic_memory"):
-        return None
+        return PromotionResult()
     if autobiographical_store is None or not hasattr(autobiographical_store, "merge"):
-        return None
+        return PromotionResult()
     session_id = str(getattr(session, "session_id", "") or "").strip()
     if not session_id:
-        return None
+        return PromotionResult()
+
+    promotion_importance = _normalize_importance_score(importance)
 
     participants: list[str] = []
     relationship = getattr(session, "_relationship_memory_snapshot", None)
@@ -89,20 +119,20 @@ def promote_interaction_to_autobiographical_memory(
             summary=summary_line,
             detailed_content=detailed_content,
             participants=participants,
-            importance=max(float(importance or 0.0), 0.55),
+            importance=promotion_importance,
             emotional_valence=float(emotional_valence or 0.0),
             life_period=life_period,
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        _LOGGER.warning("create_episodic_memory failed for session %s: %s", session_id, exc, exc_info=True)
+        return PromotionResult()
 
     if not episode_id:
-        return None
+        return PromotionResult()
 
-    setattr(session, "_last_autobiographical_episode_id", str(episode_id))
     episode_payload = _load_episode_payload(memory, str(episode_id))
     if episode_payload is None:
-        return str(episode_id)
+        return PromotionResult(episode_id=str(episode_id))
 
     episode_payload.setdefault("id", str(episode_id))
     episode_payload.setdefault("context", {"participants": participants})
@@ -117,14 +147,13 @@ def promote_interaction_to_autobiographical_memory(
         episode_payload["context"] = merged_context
     episode_payload["source_memory_ids"] = list(source_event_ids or [])
     episode_payload["life_period"] = str(episode_payload.get("life_period") or life_period)
-    if _is_defining_moment_interaction(
+    episode_payload["defining_moment"] = _is_defining_moment_interaction(
         user_content=user_content,
         assistant_content=assistant_content,
         intent_type=intent_type,
         importance=importance,
         emotional_valence=emotional_valence,
-    ):
-        episode_payload["defining_moment"] = True
+    )
 
     canonical_item = EventEncoder().encode_episode(
         episode_payload,
@@ -135,32 +164,32 @@ def promote_interaction_to_autobiographical_memory(
         session_id,
         AutobiographicalGraphBuilder().build([canonical_item]),
     )
-    setattr(session, "_autobiographical_graph_snapshot", graph)
     semantic_fact_ids = _store_semantic_preference_facts(
         memory=memory,
         session=session,
-        importance=max(float(importance or 0.0), 0.55),
+        importance=promotion_importance,
         source_event_ids=source_event_ids,
         user_content=user_content,
         tick=tick,
         goal_ids=goal_ids,
     )
-    if semantic_fact_ids:
-        setattr(session, "_last_semantic_fact_ids", [item["fact_id"] for item in semantic_fact_ids])
-        setattr(session, "_last_semantic_products", semantic_fact_ids)
     prospective_reminder_ids = _store_prospective_follow_up_reminders(
         memory=memory,
         session=session,
         user_content=user_content,
-        importance=max(float(importance or 0.0), 0.55),
+        importance=promotion_importance,
         source_event_ids=source_event_ids,
         goal_ids=goal_ids,
         intent_type=intent_type,
     )
-    if prospective_reminder_ids:
-        setattr(session, "_last_prospective_reminder_ids", [item["reminder_id"] for item in prospective_reminder_ids])
-        setattr(session, "_last_prospective_products", prospective_reminder_ids)
-    return str(episode_id)
+    return PromotionResult(
+        episode_id=str(episode_id),
+        graph_snapshot=graph,
+        semantic_fact_ids=tuple(str(item["fact_id"]) for item in semantic_fact_ids),
+        semantic_products=tuple(dict(item) for item in semantic_fact_ids),
+        prospective_reminder_ids=tuple(str(item["reminder_id"]) for item in prospective_reminder_ids),
+        prospective_products=tuple(dict(item) for item in prospective_reminder_ids),
+    )
 
 
 def _load_episode_payload(memory: Any, episode_id: str) -> dict[str, Any] | None:
@@ -175,16 +204,16 @@ def _load_episode_payload(memory: Any, episode_id: str) -> dict[str, Any] | None
                 return dict(episode.to_dict())
             if isinstance(episode, dict):
                 return dict(episode)
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOGGER.warning("episodic.retrieve_memory failed for episode %s: %s", episode_id, exc, exc_info=True)
 
     if hasattr(episodic, "retrieve"):
         try:
             episode = episodic.retrieve(episode_id)
             if isinstance(episode, dict):
                 return dict(episode)
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOGGER.warning("episodic.retrieve failed for episode %s: %s", episode_id, exc, exc_info=True)
 
     return None
 
@@ -218,7 +247,8 @@ def _store_semantic_preference_facts(
     ).strip()
     interaction_count = int(getattr(relationship, "interaction_count", 0) or 0)
     semantic_source = _derive_semantic_fact_source(user_content)
-    confidence = min(0.9, 0.62 + (min(interaction_count, 10) * 0.02) + (float(importance or 0.0) * 0.18))
+    normalized_importance = _normalize_importance_score(importance)
+    confidence = min(0.9, 0.62 + (min(interaction_count, 10) * 0.02) + (normalized_importance * 0.18))
     fact_records: list[dict[str, str]] = []
     for candidate in semantic_candidates:
         subject = candidate["subject"]
@@ -233,13 +263,21 @@ def _store_semantic_preference_facts(
                 metadata={
                     "source": semantic_source,
                     "confidence": confidence,
-                    "importance": max(0.6, float(importance or 0.0)),
+                    "importance": normalized_importance,
                     "relationship_target": relationship_target,
                     "source_event_ids": list(source_event_ids or []),
                     "derived_from": candidate["derived_from"],
                 },
             )
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning(
+                "store_fact failed for session %s candidate %s/%s: %s",
+                getattr(session, "session_id", ""),
+                predicate,
+                object_value,
+                exc,
+                exc_info=True,
+            )
             continue
         if fact_id:
             fact_records.append(
@@ -281,15 +319,17 @@ def _store_prospective_follow_up_reminders(
         return []
 
     reminder_records: list[dict[str, str]] = []
-    goal_tags = [f"goal:{goal_id}" for goal_id in sorted(str(goal_id) for goal_id in (goal_ids or []) if str(goal_id).strip())]
+    normalized_importance = _normalize_importance_score(importance)
+    goal_id_values = sorted(str(goal_id) for goal_id in (goal_ids or []) if str(goal_id).strip())
+    goal_tags = [f"goal:{goal_id}" for goal_id in goal_id_values]
     for candidate in reminder_candidates:
         metadata = {
             "source": "autobiographical_promotion",
             "source_event_ids": list(source_event_ids or []),
             "relationship_target": relationship_target,
-            "importance": max(0.6, float(importance or 0.0)),
+            "importance": normalized_importance,
             "derived_from": candidate["derived_from"],
-            "goal_ids": [tag.removeprefix("goal:") for tag in goal_tags],
+            "goal_ids": goal_id_values,
         }
         if candidate["due_hint"]:
             metadata["due_hint"] = candidate["due_hint"]
@@ -300,7 +340,14 @@ def _store_prospective_follow_up_reminders(
                 tags=["auto-generated", "promoted-turn", *goal_tags, *candidate["tags"]],
                 metadata=metadata,
             )
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning(
+                "add_reminder failed for session %s content %r: %s",
+                getattr(session, "session_id", ""),
+                candidate["content"],
+                exc,
+                exc_info=True,
+            )
             continue
         reminder_id = str(getattr(reminder, "id", "") or "").strip()
         if not reminder_id:
@@ -318,11 +365,16 @@ def _store_prospective_follow_up_reminders(
 def _prospective_memory_backend(memory: Any) -> Any:
     try:
         prospective = getattr(memory, "prospective", None)
-    except Exception:
+    except Exception as exc:
+        _LOGGER.warning("accessing memory.prospective failed: %s", exc, exc_info=True)
         prospective = None
     if prospective is not None:
         return prospective
-    return getattr(memory, "_prospective", None)
+    try:
+        return getattr(memory, "_prospective", None)
+    except Exception as exc:
+        _LOGGER.warning("accessing memory._prospective failed: %s", exc, exc_info=True)
+        return None
 
 
 def _prospective_turn_reminders(user_content: str) -> list[dict[str, Any]]:
@@ -441,7 +493,10 @@ def _is_defining_moment_interaction(
     importance: float,
     emotional_valence: float,
 ) -> bool:
-    if float(importance or 0.0) >= 0.8 or abs(float(emotional_valence or 0.0)) >= 0.7:
+    if (
+        _normalize_importance_score(importance) >= _DEFINING_MOMENT_IMPORTANCE_THRESHOLD
+        or abs(float(emotional_valence or 0.0)) >= _DEFINING_MOMENT_VALENCE_THRESHOLD
+    ):
         return True
 
     normalized_intent = str(intent_type or "").strip().lower()
@@ -487,6 +542,17 @@ def _derive_semantic_fact_source(user_content: str) -> str:
     return "user_assertion"
 
 
+def _normalize_importance_score(value: float) -> float:
+    return min(max(float(value or 0.0), 0.0), 1.0)
+
+
+def _strip_case_insensitive_prefix(value: str, prefix: str) -> str:
+    normalized_value = str(value).strip()
+    if normalized_value.lower().startswith(prefix.lower()):
+        return normalized_value[len(prefix) :].strip()
+    return normalized_value
+
+
 def _semantic_facts_from_norms(norms: Sequence[str]) -> list[tuple[str, str, str]]:
     facts: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str, str]] = set()
@@ -495,11 +561,11 @@ def _semantic_facts_from_norms(norms: Sequence[str]) -> list[tuple[str, str, str
         lowered = normalized.lower()
         fact: tuple[str, str, str] | None = None
         if lowered.startswith("prefers "):
-            fact = ("user", "prefers", normalized[8:].strip())
+            fact = ("user", "prefers", _strip_case_insensitive_prefix(normalized, "prefers "))
         elif lowered.startswith("likes "):
-            fact = ("user", "prefers", normalized[6:].strip())
+            fact = ("user", "prefers", _strip_case_insensitive_prefix(normalized, "likes "))
         elif lowered.startswith("asks for "):
-            fact = ("user", "asks_for", normalized[9:].strip())
+            fact = ("user", "asks_for", _strip_case_insensitive_prefix(normalized, "asks for "))
         if fact is None or not fact[2]:
             continue
         dedupe_key = (fact[0].lower(), fact[1].lower(), fact[2].lower())
@@ -624,13 +690,15 @@ def _narrative_active_themes(tick: Any) -> list[str]:
         return []
     try:
         narrative = tick.state.get("narrative")
-    except Exception:
+    except Exception as exc:
+        _LOGGER.warning("tick.state.get('narrative') failed while deriving semantic focus values: %s", exc, exc_info=True)
         narrative = None
     if narrative is None or not hasattr(narrative, "to_dict"):
         return []
     try:
         data = narrative.to_dict()
-    except Exception:
+    except Exception as exc:
+        _LOGGER.warning("narrative.to_dict() failed while deriving semantic focus values: %s", exc, exc_info=True)
         return []
     return [str(theme) for theme in data.get("active_themes", []) if str(theme).strip()]
 
