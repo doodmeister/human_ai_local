@@ -198,6 +198,18 @@ async def metacog_reflections(session_id: Optional[str] = None, limit: int = 10)
     return present_reflection_episodes(controller.list_reflection_episodes(session_id or agent.session_id, limit=limit))
 
 
+@router.post("/metacog/reflect")
+async def metacog_reflect():
+    """Trigger an immediate reflection report through the mounted metacognition API."""
+    agent = get_agent()
+    report = agent.reflect() if hasattr(agent, "reflect") else None
+    if report is None or report == {}:
+        report = {"status": "empty"}
+    if not isinstance(report, dict):
+        report = {"status": "ok", "value": str(report)}
+    return {"status": "ok", "report": report}
+
+
 @router.get("/chat/consolidation/status")
 async def chat_consolidation_status():
     """Return consolidation system status and recent events.

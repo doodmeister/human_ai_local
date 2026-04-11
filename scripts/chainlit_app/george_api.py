@@ -139,7 +139,7 @@ async def trigger_dream(cycle_type: str = "light") -> Dict[str, Any]:
 
 
 async def trigger_reflection() -> Dict[str, Any]:
-    resp = await _get_client().post("/reflect")
+    resp = await _get_client().post("/agent/metacog/reflect")
     resp.raise_for_status()
     return resp.json()
 

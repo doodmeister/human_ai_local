@@ -1,68 +1,97 @@
 # Human-AI Cognition Framework
 
-A production-grade cognitive architecture for AI systems with human-like memory, reasoning, and executive control.
+A production-grade cognitive architecture for AI systems with persistent memory, executive control, adaptive attention, and a metacognitive runtime.
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## 🎯 Overview
+## Overview
 
-Complete cognitive framework with:
-- **Memory Systems**: Short-term (STM), long-term (LTM), episodic, and prospective memory
-- **Executive Functions**: Goal management, decision-making, GOAP planning, constraint scheduling
-- **Learning**: ML-powered outcome tracking, A/B testing, continuous improvement
-- **Attention**: Adaptive mechanisms, cognitive load tracking, metacognition
+The repository combines:
+
+- Memory systems for short-term, long-term, episodic, autobiographical, procedural, and prospective recall
+- Executive systems for goal management, decision support, GOAP planning, scheduling, and learning from outcomes
+- Attention and cognition layers for salience, fatigue, focus management, and self-model support
+- A metacognitive loop that observes the agent's state, schedules follow-up cognition, persists traces, and exposes diagnostics through the API
+
+The canonical runtime entrypoints are:
+
+- `python main.py chat` for the interactive CLI
+- `python main.py api` for FastAPI
+- `python main.py chainlit` for the Chainlit UI
+- `python main.py ui` for the legacy Streamlit UI
 
 ---
 
-## ✨ Key Capabilities
+## Recent Changes
+
+The past week landed several major runtime changes:
+
+- A full `src/orchestration/metacognition/` subsystem with typed models, interfaces, controller, goal manager, policy engine, executor, critic, scheduler, event bus, presenters, scorecard, and filesystem-backed cycle tracing
+- Background cognition support with persisted scheduled tasks, idle reflection, contradiction-audit scheduling, persisted reflection episodes, and persisted self-model snapshots
+- New metacognition API surfaces for status, background activity, scorecards, dashboard views, last-cycle inspection, goals, tasks, self-model state, and reflection history
+- Attention refactoring in `src/cognition/attention/` to separate lifecycle, state, models, and exceptions from the main mechanism implementation
+- Memory lineage cleanup that standardizes `source_memory_ids` while remaining backward-compatible with older `source_event_ids` payloads
+- Executive and learning improvements around decision history, feature handling, outcome-tracking fidelity, and validation-ready ML decision features
+- Chainlit and Streamlit client updates, plus refreshed UI/API quickstart documentation
+
+For the phased metacognition plan and completion status, see `cognition.md`.
+
+---
+
+## Key Capabilities
 
 ### Memory
-- **STM**: 7-item capacity, activation decay, LRU eviction
-- **LTM**: Vector-based semantic memory with forgetting curves
-- **Episodic**: Contextual memories with emotional valence
-- **Prospective**: Time-based and event-based reminders
+
+- STM with decay, capacity limits, and adaptive utilization tracking
+- Vector-backed LTM and retrieval scoring
+- Episodic and autobiographical memory with promotion, provenance, and contradiction-aware normalization
+- Procedural memory and recall feedback pathways
+- Prospective memory with reminder management and optional vector-backed storage
 
 ### Executive Functions
-- **Goals**: Hierarchical goals with dependencies and deadlines
-- **Decisions**: Weighted scoring, AHP, Pareto optimization with ML predictions
-- **Planning**: GOAP (A* search) with 10 predefined actions
-- **Scheduling**: Google OR-Tools CP-SAT constraint solver
-- **Learning**: Outcome tracking, A/B testing, 4 ML models
 
-### Phase 2 Cognitive Layers (Implemented)
-- **Layer 0: Drives** with implicit learning and internal conflict detection
-- **Layer 1: Felt Sense** with mood derivation
-- **Layer 2: Relational Field** for relationship-aware cognition
-- **Layer 3: Emergent Patterns** including Big Five descriptions
-- **Layer 4: Self-Model** with blind spots and self-discovery
-- **Layer 5: Narrative** for identity synthesis and context injection
+- Hierarchical goals with dependencies, deadlines, and execution state
+- Multiple decision strategies including weighted scoring, AHP, Pareto optimization, and ML-assisted scoring
+- GOAP planning and CP-SAT scheduling
+- Outcome tracking, feature extraction, experiment analysis, and model training hooks
+- Executive telemetry for lifecycle events and metrics integration
 
-### API Endpoints
-- **Chat**: `/agent/chat` - Conversational interface with memory
-- **Memory**: `/agent/memory/*` - STM/LTM storage and retrieval
-- **Reminders**: `/agent/reminders/*` - Prospective memory management
-- **Executive**: `/executive/*` - Goal management and execution pipeline
+### Attention And Cognition
+
+- Attention lifecycle/state modeling and adaptive cognitive load handling
+- Felt-sense, relational, narrative, self-model, and emergent-pattern cognitive layers
+- Dream-state consolidation and cognitive break support
+
+### Metacognition
+
+- Per-turn snapshots and adaptive chat advisories under load or degraded performance
+- A controller-driven cognition loop with explicit goals, candidate acts, execution results, critic reports, and self-model updates
+- Background scheduling for follow-up cognition, contradiction audits, and idle reflections
+- Persisted traces, reflections, tasks, and scorecards exposed through stable presenter-backed APIs
+
+---
 
 ## Current Architecture
 
-The canonical runtime path is now:
+The canonical runtime path is:
 
 - `main.py` for user-facing entrypoints
 - `src/orchestration/runtime/bootstrap.py` for FastAPI app creation
-- `src/orchestration/runtime/app_container.py` for shared CLI/API runtime composition
+- `src/orchestration/runtime/app_container.py` for shared runtime composition
 - `src/orchestration/cognitive_agent.py` as the public cognitive facade
-- `src/orchestration/chat/chat_service.py` as the public chat facade
+- `src/orchestration/chat/chat_service.py` for chat orchestration
+- `src/orchestration/metacognition/` for the metacognitive loop and persistence
 - `src/memory/memory_system.py` as the public memory facade
 - `src/executive/integration.py` as the public executive orchestration surface
 
-The current architectural refactor plan and status are tracked in `phase3.md`.
+The active refactor and rollout notes live in `phase3.md` and `cognition.md`.
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -70,316 +99,314 @@ The current architectural refactor plan and status are tracked in `phase3.md`.
 git clone https://github.com/yourusername/human_ai_local.git
 cd human_ai_local
 python -m venv venv
-source venv/Scripts/activate  # Windows (use venv/bin/activate on Linux/Mac)
+source venv/Scripts/activate  # Windows Git Bash; use venv/bin/activate on Linux/macOS
 pip install -r requirements.txt
 ```
 
-### Start the System
+### Start The System
 
-**Option 1: Chainlit Chat UI** (recommended)
-```bash
-# Start the backend API first
-python main.py api
+Option 1: Chainlit UI with backend
 
-# In a second terminal, start the Chainlit UI
-python main.py chainlit
-```
-Access at http://localhost:8501
-
-Or start both together:
 ```bash
 python main.py chainlit --with-backend
 ```
 
-**Option 2: API Server only**
+Chainlit runs on `http://localhost:8501` and the API runs on `http://127.0.0.1:8000`.
+
+Option 2: API only
+
 ```bash
 python main.py api
 ```
-Access at http://127.0.0.1:8000 (docs at /docs)
 
-**Option 3: Streamlit UI** (legacy)
+API docs are available at `http://127.0.0.1:8000/docs`.
+
+Option 3: Split terminals
+
+```bash
+python main.py api
+python main.py chainlit
+```
+
+Option 4: Interactive CLI
+
+```bash
+python main.py chat
+```
+
+Option 5: Legacy Streamlit UI
+
 ```bash
 python main.py ui
 ```
-Access at http://localhost:8501
 
-### API compatibility
+See `STARTUP_GUIDE.md` for startup troubleshooting and `docs/UI_DEVELOPER_API_QUICKSTART.md` for frontend integration details.
+
+### API Compatibility
 
 `python main.py api` is the canonical API startup path.
 
 Notes:
 
-- Prefer unprefixed routes such as `/agent/chat`, `/memory/...`, and `/executive/...`.
-- Legacy `/api/*` aliases are removed.
-- If you're pointing a UI at the backend, set `GEORGE_API_BASE_URL` to the server root, for example `http://127.0.0.1:8000`.
+- Prefer unprefixed routes such as `/agent/chat`, `/agent/metacog/*`, `/memory/...`, and `/executive/...`
+- Legacy `/api/*` aliases are removed
+- When pointing a UI at the backend, set `GEORGE_API_BASE_URL` to the server root, for example `http://127.0.0.1:8000`
 
 For a quick endpoint smoke check, run:
+
 ```bash
 python scripts/smoke_api_compat.py --base http://localhost:8000
 ```
 
-### Memory and personality quality gate
+### Memory Quality Gate
 
 For the deterministic memory/personality regression scorecard, run:
+
 ```bash
 python scripts/generate_memory_scorecard.py --fail-on-gate
 ```
 
 This summarizes retrieval quality, longitudinal continuity, contradiction repair, false-memory resistance, and policy-behavior stability, and exits nonzero if any configured gate fails.
 
-The same deterministic gate now runs in GitHub Actions on pull requests and pushes to `main` via `.github/workflows/memory-quality-gate.yml`.
+---
+
+## API Reference
+
+### Chat And Metacognition
+
+```text
+POST   /agent/chat                         # Send message, optionally stream, optionally override consolidation threshold
+GET    /agent/chat/preview                 # Deterministic context preview
+GET    /agent/chat/metrics                 # Chat metrics snapshot
+GET    /agent/chat/performance             # Latency/performance status
+GET    /agent/chat/metacog/status          # Last chat metacog snapshot
+GET    /agent/chat/consolidation/status    # Consolidation health and recent events
+
+GET    /agent/metacog/status               # Normalized metacognitive status
+GET    /agent/metacog/background           # Background scheduler and reflection state
+GET    /agent/metacog/scorecard            # Persisted metacognition scorecard
+GET    /agent/metacog/dashboard            # Combined status/background/scorecard view
+GET    /agent/metacog/last-cycle           # Last persisted metacognitive cycle
+GET    /agent/metacog/goals                # Active metacognitive goals
+GET    /agent/metacog/self-model           # Persisted self-model
+GET    /agent/metacog/tasks                # Scheduled cognitive tasks
+GET    /agent/metacog/reflections          # Reflection episode history
+POST   /agent/metacog/reflect              # Trigger an immediate reflection report
+
+GET    /agent/init-status                  # Agent initialization state
+GET    /agent/status                       # Basic cognitive status snapshot
+GET    /health                             # API health
+GET    /health/detailed                    # Component-level health
+GET    /telemetry                          # Resilience telemetry snapshot
+GET    /circuit-breakers                   # Circuit breaker states
+```
+
+### Memory And Reminders
+
+```text
+POST   /memory/{system}/store              # Store memory in STM/LTM/Episodic
+GET    /memory/{system}/retrieve/{id}      # Retrieve by ID
+POST   /memory/{system}/search             # Search by query
+GET    /status                             # Memory system status
+
+POST   /agent/reminders                    # Create reminder
+GET    /agent/reminders                    # List reminders
+GET    /agent/reminders/due                # Retrieve due reminders
+DELETE /agent/reminders/triggered          # Purge fired reminders
+POST   /agent/reminders/{id}/complete      # Mark reminder complete
+DELETE /agent/reminders/{id}               # Delete reminder
+```
+
+### Executive
+
+```text
+POST   /executive/goals                    # Create goal
+GET    /executive/goals                    # List goals
+GET    /executive/goals/{goal_id}          # Goal details
+POST   /executive/goals/{goal_id}/execute  # Decision -> plan -> schedule pipeline
+GET    /executive/goals/{goal_id}/status   # Execution context
+GET    /executive/goals/{goal_id}/plan     # GOAP plan
+GET    /executive/goals/{goal_id}/schedule # CP-SAT schedule
+GET    /executive/status                   # Executive status
+GET    /executive/system/health            # Extended health metrics
+```
+
+Full API docs: `http://127.0.0.1:8000/docs` when the server is running.
 
 ---
 
-## 📡 API Reference
+## Usage Examples
 
-### Chat Endpoints
-```
-POST   /agent/chat                    # Send message, get response
-GET    /agent/chat/preview            # Preview context items
-GET    /agent/chat/performance        # Performance metrics
-GET    /agent/chat/metacog/status     # Metacognition status
-```
+### Chat With Memory
 
-### Memory Endpoints
-```
-POST   /memory/{system}/store         # Store memory in STM/LTM/Episodic
-GET    /memory/{system}/retrieve/{id} # Retrieve by ID
-POST   /memory/{system}/search        # Search by query
-GET    /status                        # Memory system status
-```
-
-### Reminder Endpoints (Prospective Memory)
-```
-POST   /agent/reminders               # Create reminder
-GET    /agent/reminders               # List all reminders
-GET    /agent/reminders/due           # Get due reminders
-DELETE /agent/reminders/{id}          # Delete reminder
-POST   /agent/reminders/{id}/complete # Mark complete
-```
-
-### Executive Endpoints (NEW)
-```
-# Goal Management
-POST   /executive/goals                      # Create goal
-GET    /executive/goals                      # List goals
-GET    /executive/goals/{goal_id}            # Get goal details
-
-# Execution Pipeline
-POST   /executive/goals/{goal_id}/execute    # Run Decision→Plan→Schedule pipeline
-GET    /executive/goals/{goal_id}/status     # Get execution context
-GET    /executive/goals/{goal_id}/plan       # Get GOAP plan (action sequence)
-GET    /executive/goals/{goal_id}/schedule   # Get CP-SAT schedule (Gantt data)
-
-# System Monitoring
-GET    /executive/status                     # Basic status
-GET    /executive/system/health              # Full health metrics
-```
-
-**Full API docs**: http://localhost:8000/docs (when server running)
-
----
-
-## 💡 Usage Examples
-
-### Example 1: Chat with Memory
 ```python
 from src.orchestration.chat.factory import build_chat_service
 
 service = build_chat_service()
 
-result = service.process_user_message("My favorite color is blue", session_id="user1")
-response = service.process_user_message("What's my favorite color?", session_id="user1")
+service.process_user_message("My favorite color is blue", session_id="user1")
+result = service.process_user_message("What's my favorite color?", session_id="user1")
+print(result["response"])
 ```
 
-### Example 2: Execute a Goal
+### Execute A Goal
+
 ```python
 import requests
 
-# Create goal
-response = requests.post("http://localhost:8000/executive/goals", json={
-    "title": "Analyze sales data",
-    "description": "Generate Q4 insights",
-    "priority": "HIGH",
-    "success_criteria": ["data_analyzed=True", "report_created=True"]
-})
+response = requests.post(
+    "http://localhost:8000/executive/goals",
+    json={
+        "title": "Analyze sales data",
+        "description": "Generate Q4 insights",
+        "priority": "HIGH",
+        "success_criteria": ["data_analyzed=True", "report_created=True"],
+    },
+)
 goal_id = response.json()["goal"]["id"]
 
-# Execute integrated pipeline (Decision → Plan → Schedule)
-response = requests.post(f"http://localhost:8000/executive/goals/{goal_id}/execute")
-context = response.json()["execution_context"]
+execution = requests.post(f"http://localhost:8000/executive/goals/{goal_id}/execute")
+context = execution.json()["execution_context"]
 
-print(f"Status: {context['status']}")
-print(f"Actions: {context['total_actions']}, Tasks: {context['scheduled_tasks']}")
-print(f"Planning: {context['planning_time_ms']}ms, Scheduling: {context['scheduling_time_ms']}ms")
+print(context["status"])
+print(context["planning_time_ms"], context["scheduled_tasks"])
 ```
 
-### Example 3: View GOAP Plan
-```python
-# Get plan from execution context
-response = requests.get(f"http://localhost:8000/executive/goals/{goal_id}/plan")
-plan = response.json()["plan"]
+### Inspect Metacognition
 
-for i, step in enumerate(plan["steps"], 1):
-    print(f"Step {i}: {step['name']}")
-    print(f"  Preconditions: {step['preconditions']}")
-    print(f"  Effects: {step['effects']}")
-    print(f"  Cost: {step['cost']}")
+```python
+import requests
+
+dashboard = requests.get("http://localhost:8000/agent/metacog/dashboard")
+payload = dashboard.json()
+
+print(payload["available"])
+print(payload["background"]["scheduler_running"])
+print(payload["scorecard"].get("summary", {}))
 ```
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-Create `.env` file (see `.env.example`):
+Create a `.env` file for provider and storage settings:
 
 ```bash
-# LLM Provider
+# LLM provider
 LLM_PROVIDER=openai
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4
 
-# Memory Storage
+# Memory storage
 CHROMA_PERSIST_DIR=./data/memory_stores
+STM_COLLECTION=stm
+LTM_COLLECTION=ltm
 STM_CAPACITY=7
 
-# Cognitive Limits
-MAX_ATTENTION_CAPACITY=100
-COGNITIVE_LOAD_THRESHOLD=0.75
-
-# Feature Flags
+# Feature flags
 GOAP_ENABLED=1
-USE_VECTOR_PROSPECTIVE=0  # Set to 1 for semantic reminders
+USE_VECTOR_PROSPECTIVE=0
+DISABLE_SEMANTIC_MEMORY=1
 ```
+
+For chat runtime configuration, `ContextBuilder` consumes `get_chat_config().to_dict()` from `src/core/config.py`.
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
-# Default maintained suite
+# Maintained default suite
 python -m pytest -q
-
-# Target a focused maintained area or file
-python -m pytest tests/executive -q
-python -m pytest tests/unit -q
-python -m pytest tests/test_chat_factory_integration.py -q
-python -m pytest tests/test_memory_system_init_prospective.py -q
 
 # Lint source and tests
 python -m ruff check src tests
 
-# Focused specialized memory validation
+# Focused metacognition validation
+python -m pytest tests/test_metacognition_api_endpoints.py -q
+python -m pytest tests/test_metacognition_persistence.py -q
+python -m pytest tests/test_metacognition_runtime_integration.py -q
+python -m pytest tests/test_metacognition_scorecard.py -q
+
+# Focused memory and executive validation
 python -m pytest tests/test_enhanced_ltm_comprehensive.py -q
 python -m pytest tests/test_episodic_memory_integration.py -q
-
-# Archived manual-only legacy tests, only when intentionally validating older paths
-python -m pytest archived_tests/manual_legacy/integration -q
-python -m pytest archived_tests/manual_legacy/scenarios -q
+python -m pytest tests/test_executive_decision_support.py -q
+python -m pytest tests/test_outcome_tracking.py -q
 ```
 
 The default `pytest -q` target is the maintained `tests/` suite via `pytest.ini`.
 
-Current test layout:
-
-- `tests/`: the maintained default suite discovered by `pytest -q`, including top-level regression files and maintained subdirectories.
-- `tests/executive/` and `tests/unit/`: convenient targeted subdirectory runs when working on those areas.
-- Specific top-level files under `tests/`: the most precise way to run targeted validations during refactors.
-- `archived_tests/manual_legacy/`: intentionally opt-in legacy coverage outside the default loop.
-
-The maintained suite currently lives directly under `tests/`. It is broader than the earlier planned contract-only lane, and archived manual legacy coverage remains opt-in under `archived_tests/manual_legacy/`.
+Legacy manual-only coverage remains opt-in under `archived_tests/manual_legacy/`.
 
 ---
 
-## 📖 Documentation
+## Documentation
 
-### Key Documentation
-- **System Integration**: `docs/archive/WEEK_15_COMPLETION_SUMMARY.md`
-- **GOAP Planning**: `docs/archive/PHASE_2_FINAL_COMPLETE.md`
-- **Scheduling**: `docs/archive/WEEK_12_COMPLETION_SUMMARY.md`, `docs/archive/WEEK_14_COMPLETION_SUMMARY.md`
-- **Learning & A/B Testing**: `docs/archive/WEEK_16_PHASE_4_AB_TESTING.md`
-- **Memory Systems**: `docs/archive/enhanced_ltm_summary.md`, `docs/archive/vector_stm_integration_complete.md`
-- **Executive API**: `docs/archive/BACKEND_API_COMPLETION_SUMMARY.md`
-- **UI Development**: `docs/UI_DEVELOPER_API_QUICKSTART.md`
+Active docs:
 
-### Quick References
-- **AI Instructions**: `.github/copilot-instructions.md` - Development patterns
-- **Roadmap**: `docs/archive/planning/roadmap.md` - Future development plans
+- `cognition.md` - Metacognition architecture, phases, and rollout status
+- `phase3.md` - Runtime refactor plan and architecture notes
+- `docs/metacog_features.md` - Chat-layer metacognitive snapshot behavior
+- `docs/executive_telemetry.md` - Executive event and metrics wiring
+- `docs/memory_personality_architecture.md` - Memory/personality design
+- `docs/memory_personality_roadmap.md` - Roadmap and sequencing
+- `docs/memory_personality_implementation_tickets.md` - Implementation slices
+- `docs/memory_personality_issue_backlog.md` - Remaining follow-up work
+- `docs/goap_architecture.md` and `docs/goap_quick_reference.md` - Planning reference
+- `docs/UI_DEVELOPER_API_QUICKSTART.md` - Frontend/API integration notes
+- `docs/README.md` - Documentation index
+
+Historical summaries remain under `docs/archive/`.
 
 ---
 
-## 🛠️ Project Structure
+## Project Structure
 
-```
+```text
 human_ai_local/
 ├── src/
-│   ├── chat/              # Chat service, context building
-│   ├── memory/            # STM, LTM, episodic, prospective
-│   ├── executive/         # Goals, decisions, planning, scheduling, learning
-│   ├── attention/         # Attention mechanism
-│   ├── interfaces/        # API endpoints
-│   └── core/              # Configuration
-├── tests/                 # Maintained default pytest suite and targeted subdirectories
-├── archived_tests/        # Historical manual-only legacy tests
-├── scripts/
-│   ├── chainlit_app/      # Chainlit chat UI (recommended)
-│   └── george_streamlit_chat.py  # Legacy Streamlit UI
-├── docs/                  # Documentation
-└── data/                  # Persistent storage
+│   ├── cognition/attention/         # Attention lifecycle, state, models
+│   ├── orchestration/chat/          # Chat orchestration and context building
+│   ├── orchestration/metacognition/ # Controller, scheduler, tracer, presenters
+│   ├── memory/                      # STM, LTM, episodic, autobiographical, procedural, prospective
+│   ├── executive/                   # Goals, decisions, planning, scheduling, learning
+│   ├── interfaces/api/              # FastAPI routers
+│   └── core/                        # Config and resilience
+├── tests/                           # Maintained pytest suite
+├── archived_tests/                  # Manual-only legacy coverage
+├── scripts/                         # Utilities, smoke tests, UI entry modules
+├── docs/                            # Active documentation and archive
+└── data/                            # Persistent stores, traces, outcomes, models
 ```
 
 ---
 
-## 📊 Performance Benchmarks
+## Status
 
-- **Chat Response**: <1s typical, <3s with full retrieval
-- **Memory Retrieval**: <100ms STM, <200ms LTM
-- **GOAP Planning**: <50ms simple, <500ms complex
-- **CP-SAT Scheduling**: <30s for 50 tasks
-- **Full Pipeline**: 12-15s end-to-end
+Production-ready core areas:
 
----
+- Memory systems including prospective and autobiographical flows
+- Executive orchestration including decision, planning, scheduling, and learning
+- Chat interface with adaptive retrieval, consolidation controls, and performance diagnostics
+- Metacognition runtime through persistence, observability, and background cognition phases
+- Chainlit-backed interactive UI and canonical FastAPI runtime
 
-## 🗺️ Status
+Still evolving:
 
-### Production Ready ✅
-- Memory systems (STM, LTM, episodic, prospective)
-- Executive functions (goals, GOAP, CP-SAT, learning)
-- Chat interface with full context building
-- REST API with 30+ endpoints
-- A/B testing and ML training pipeline
-- Phase 2 cognitive layers (Drives → Narrative) integrated
-
-### In Progress 🚧
-- Enhanced UI visualizations (plan viewer, Gantt charts)
-- Production monitoring dashboard
-
-### Planned 📋
-- Multi-agent collaboration
-- Continuous model retraining
-- Enhanced sentiment analysis
-
-See `docs/archive/planning/roadmap.md` for details.
+- Richer frontend visualization for plans, schedules, and metacognitive state
+- Additional monitoring and operator dashboards
+- Continued memory/personality quality work and follow-up tickets from the active roadmap
 
 ---
 
-## 📄 License
+## Built With
 
-MIT License - See [LICENSE](LICENSE)
-
----
-
-## 🙏 Built With
-
-- **ChromaDB** - Vector database
-- **sentence-transformers** - Embeddings
-- **Google OR-Tools** - Constraint solving
-- **FastAPI** - REST API
-- **Chainlit** - Chat UI framework
-- **Streamlit** - Legacy UI
-- **scikit-learn** - ML pipeline
-- **scipy** - Statistical analysis
-
----
-
-**Built with 🧠 for human-like AI cognition**
+- ChromaDB
+- sentence-transformers
+- Google OR-Tools
+- FastAPI
+- Chainlit
+- Streamlit
+- scikit-learn
+- scipy
