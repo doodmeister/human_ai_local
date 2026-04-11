@@ -36,7 +36,7 @@ The UI client reads `GEORGE_API_BASE_URL` and defaults to `http://localhost:8000
 - Goal creation, listing, and execution through the executive pipeline
 - Dream-cycle triggering for consolidation
 - Learning summaries backed by executive learning, experiments, and outcomes endpoints
-- Metacognition dashboards backed by `/agent/metacog/dashboard`, `/agent/metacog/tasks`, and `/agent/metacog/reflections`
+- Metacognition dashboards backed by `/agent/metacog/dashboard`, `/agent/metacog/tasks`, and `/agent/metacog/reflections` for internal diagnostics
 
 ## Slash Commands
 
@@ -49,8 +49,10 @@ The current Chainlit app registers these commands in the input bar:
 - `/goal <title>` to create a goal
 - `/dream` to run a dream consolidation cycle
 - `/learning` to show learning metrics, experiments, and recent outcomes
-- `/metacog` to show the metacognition dashboard for the current session
+- `/metacog` to show the metacognition diagnostics dashboard for the current session
 - `/reflect` to trigger an immediate reflection report through the canonical metacognition API
+
+Use normal chat or `/memory <system> [query]` when you want remembered content rather than internal diagnostics.
 
 ## Session Settings
 

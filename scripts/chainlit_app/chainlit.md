@@ -20,7 +20,7 @@ This Chainlit UI is the primary interactive frontend for the repository.
 | `/goal Finish the report` | Create a goal |
 | `/dream` | Run a dream consolidation cycle |
 | `/learning` | Show learning metrics, experiments, and recent outcomes |
-| `/metacog` | Show the metacognition dashboard for the current session |
+| `/metacog` | Show the metacognition diagnostics dashboard for the current session |
 | `/reflect` | Trigger an immediate reflection report through the canonical metacognition API |
 
 ## Settings
@@ -31,4 +31,5 @@ Use the settings panel to change the LLM provider, model, salience threshold, de
 
 - The UI talks to the backend root configured by `GEORGE_API_BASE_URL`
 - The main supported diagnostics path is `/agent/metacog/*`
+- For remembered user content, use normal chat or `/memory <system> [query]` rather than `/metacog`
 - See `../../chainlit.md` and `../../README.md` for the current high-level runtime contract

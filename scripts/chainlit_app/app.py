@@ -72,7 +72,7 @@ async def set_starters(user=None, language=None):
             icon="bell",
         ),
         cl.Starter(
-            label="Inspect metacognition",
+            label="Inspect diagnostics",
             message="/metacog",
             icon="compass",
         ),
@@ -101,9 +101,9 @@ async def on_chat_start():
         {"id": "goals", "icon": "target", "description": "List active goals", "button": True, "persistent": True},
         {"id": "goal", "icon": "plus", "description": "Create a goal: /goal <title>", "button": False, "persistent": False},
         {"id": "dream", "icon": "moon", "description": "Run a dream consolidation cycle", "button": True, "persistent": False},
-        {"id": "reflect", "icon": "scan-eye", "description": "Run metacognitive reflection", "button": True, "persistent": False},
+        {"id": "reflect", "icon": "scan-eye", "description": "Run a manual reflection report", "button": True, "persistent": False},
         {"id": "learning", "icon": "chart-line", "description": "Show learning dashboard metrics", "button": True, "persistent": False},
-        {"id": "metacog", "icon": "compass", "description": "Show metacognition dashboard summary", "button": True, "persistent": False},
+        {"id": "metacog", "icon": "compass", "description": "Show internal metacognition diagnostics, not personal memory recall", "button": True, "persistent": False},
     ])
 
     # Chat settings (gear icon)
@@ -633,6 +633,8 @@ async def _cmd_metacog():
     goals = scorecard.get("goals", {})
 
     lines = ["**Metacognition Dashboard**\n"]
+    lines.append("This view shows internal self-monitoring and scheduler diagnostics. It is not the personal-memory recall view.")
+    lines.append("For remembered information, ask in normal chat or use `/memory <system> [query]`.\n")
     lines.append(f"Session: `{dashboard.get('session_id') or session_id}`")
     lines.append(f"Trace Count: **{scorecard.get('trace_count', 0)}**")
 

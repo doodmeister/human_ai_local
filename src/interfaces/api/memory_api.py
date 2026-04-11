@@ -18,6 +18,35 @@ from src.interfaces.api.dependencies import get_request_agent, get_request_memor
 
 router = APIRouter()
 
+
+def _serialize_memory_record(item: Any) -> Dict[str, Any]:
+    if isinstance(item, dict):
+        return dict(item)
+    if hasattr(item, "to_dict"):
+        maybe_dict = item.to_dict()
+        if isinstance(maybe_dict, dict):
+            return dict(maybe_dict)
+    if hasattr(item, "__dict__"):
+        return dict(vars(item))
+    return {"value": item}
+
+
+def _collection_records(collection: Any) -> list[dict[str, Any]]:
+    result = collection.get()
+    records: list[dict[str, Any]] = []
+    ids = result.get("ids") or []
+    docs = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+    for index, memory_id in enumerate(ids):
+        records.append(
+            {
+                "id": memory_id,
+                "content": docs[index] if index < len(docs) else "",
+                "metadata": metadatas[index] if index < len(metadatas) else {},
+            }
+        )
+    return records
+
 class StoreMemoryRequest(BaseModel):
     content: Any
     memory_type: Optional[str] = "episodic"
@@ -213,6 +242,19 @@ def add_feedback(system: str, memory_id: str, req: FeedbackRequest, request: Req
 def list_memories(system: str, request: Request):
     agent = get_request_agent(request)
     memsys = get_system(system, agent)
+
+    if hasattr(memsys, 'get_all_memories'):
+        try:
+            return {"memories": [_serialize_memory_record(item) for item in memsys.get_all_memories()]}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to list memories for '{system}': {str(e)}")
+
+    collection = getattr(memsys, 'collection', None)
+    if collection is not None and hasattr(collection, 'get'):
+        try:
+            return {"memories": _collection_records(collection)}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to list memories for '{system}': {str(e)}")
     
     # LTM, Episodic, Semantic (Chroma-based)
     if hasattr(memsys, 'get_all'):
