@@ -17,8 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .drive_state import DriveState, DRIVE_NAMES, _clamp
 from .drive_config import DriveConfig

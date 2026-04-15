@@ -291,8 +291,6 @@ class ExecutiveAgent:
         }
         return mapping.get(priority, 5)
 
-        return candidate_goals
-
     def get_cognitive_status(self) -> Dict[str, Any]:
         return {
             "mode": self._core.mode.name,

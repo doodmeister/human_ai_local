@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from ..ltm import VectorLongTermMemory
 from ..stm import VectorShortTermMemory

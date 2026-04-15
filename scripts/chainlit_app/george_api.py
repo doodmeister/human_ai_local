@@ -6,6 +6,7 @@ communicate with the FastAPI backend over HTTP.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -240,6 +241,50 @@ async def search_memories(system: str, query: str, max_results: int = 20) -> Lis
         return data.get("results", data.get("memories", []))
     except httpx.HTTPError:
         return []
+
+
+def _first_numeric_value(item: Dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = item.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+async def unified_memory_search(query: str, max_per_system: int = 5) -> List[Dict[str, Any]]:
+    """Search STM, LTM, episodic, and semantic memory sources concurrently."""
+    normalized_query = str(query or "").strip()
+    if not normalized_query:
+        return []
+
+    systems = ["stm", "ltm", "episodic"]
+    tasks = [search_memories(system, normalized_query, max_results=max_per_system) for system in systems]
+    tasks.append(fetch_semantic_facts(normalized_query))
+
+    results_per_system = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: List[Dict[str, Any]] = []
+    labels = systems + ["semantic"]
+    for label, result in zip(labels, results_per_system):
+        if isinstance(result, Exception):
+            continue
+        for item in result or []:
+            enriched = dict(item)
+            enriched["_source_system"] = label
+            enriched.setdefault("source_system", label)
+            merged.append(enriched)
+
+    merged.sort(
+        key=lambda item: (
+            -_first_numeric_value(item, "relevance", "similarity", "confidence", "importance", "activation"),
+            -_first_numeric_value(item, "importance", "activation"),
+        )
+    )
+    return merged[:20]
 
 
 async def delete_memory(system: str, memory_id: str) -> bool:

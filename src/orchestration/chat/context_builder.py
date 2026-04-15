@@ -27,6 +27,14 @@ from src.memory.schema import CanonicalMemoryItem, canonical_item_to_context_pay
 from src.memory.retrieval import MemoryReranker, RetrievalPlan, RetrievalPlanner
 
 
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class ContextBuilder:
     """Staged context construction pipeline (extended scaffold with basic fallback)."""
 
@@ -997,8 +1005,9 @@ class ContextBuilder:
                 plan_lines = []
                 for r in plan_reminders[:5]:  # Limit to 5
                     due_in = ""
-                    if r.due_time:
-                        delta = r.due_time - now
+                    due_time = _normalize_datetime(getattr(r, "due_time", None))
+                    if due_time:
+                        delta = due_time - now
                         mins = int(delta.total_seconds() / 60)
                         if mins < 60:
                             due_in = f" (due in {mins}m)"
@@ -1027,8 +1036,9 @@ class ContextBuilder:
                 reminder_lines = []
                 for r in regular_reminders[:3]:  # Limit to 3
                     due_in = ""
-                    if r.due_time:
-                        delta = r.due_time - now
+                    due_time = _normalize_datetime(getattr(r, "due_time", None))
+                    if due_time:
+                        delta = due_time - now
                         mins = int(delta.total_seconds() / 60)
                         if mins < 60:
                             due_in = f" (in {mins}m)"

@@ -21,7 +21,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from .felt_sense_config import FeltSenseConfig
 from .felt_sense_state import FeltSense
@@ -217,9 +217,9 @@ class MoodLabeler:
         high_arousal_labels = ("anxious", "excited", "frustrated", "restless")
 
         if correct_label in low_arousal_labels:
-            candidates = [l for l in low_arousal_labels if l != correct_label]
+            candidates = [label for label in low_arousal_labels if label != correct_label]
         elif correct_label in high_arousal_labels:
-            candidates = [l for l in high_arousal_labels if l != correct_label]
+            candidates = [label for label in high_arousal_labels if label != correct_label]
         else:
             candidates = ["uncertain"]
 

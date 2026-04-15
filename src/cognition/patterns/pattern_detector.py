@@ -28,7 +28,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .pattern_config import PatternConfig
-from .pattern_state import EmergentPattern, PatternField, _clamp
+from .pattern_state import EmergentPattern, PatternField
 
 logger = logging.getLogger(__name__)
 

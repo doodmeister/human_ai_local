@@ -392,6 +392,7 @@ class ProactiveRecallRequest(BaseModel):
 @app.post("/agent/process")
 async def process_input(request: ProcessInputRequest, response: Response):
     """Process user input through the cognitive agent"""
+    _mark_deprecated(response, "/agent/chat")
     try:
         agent = get_agent()
         response = await agent.process_input(request.text)
@@ -904,6 +905,95 @@ def _purge_legacy_api_routes() -> None:
 
 
 _purge_legacy_api_routes()
+
+
+def _mark_response_deprecated(result: Response, successor_path: str) -> Response:
+    _mark_deprecated(result, successor_path)
+    return result
+
+
+@app.get("/api/health")
+async def health_check_legacy(response: Response):
+    _mark_deprecated(response, "/health")
+    return await health_check()
+
+
+@app.get("/api/agent/init-status")
+async def initialization_status_legacy(request: Request, response: Response):
+    _mark_deprecated(response, "/agent/init-status")
+    return await initialization_status(request=request, response=response)
+
+
+@app.get("/api/agent/status")
+async def agent_status_legacy(request: Request, response: Response):
+    _mark_deprecated(response, "/agent/status")
+    return await agent_status(request=request, response=response)
+
+
+@app.post("/api/agent/process")
+async def process_input_legacy(request: ProcessInputRequest, response: Response):
+    _mark_deprecated(response, "/agent/process")
+    return await process_input(request=request, response=response)
+
+
+@app.post("/api/agent/chat")
+async def agent_chat_legacy(req: AgentChatRequest, request: Request, response: Response):
+    result = await agent_chat(req=req, request=request, response=response)
+    if isinstance(result, Response):
+        return _mark_response_deprecated(result, "/agent/chat")
+    _mark_deprecated(response, "/agent/chat")
+    return result
+
+
+@app.get("/api/agent/reminders")
+async def agent_list_reminders_legacy(request: Request, response: Response, include_triggered: bool = True):
+    _mark_deprecated(response, "/agent/reminders")
+    return await agent_list_reminders(
+        request=request,
+        response=response,
+        include_triggered=include_triggered,
+    )
+
+
+@app.get("/api/neural/status")
+async def neural_status_legacy(response: Response):
+    _mark_deprecated(response, "/neural/status")
+    return await neural_status_root()
+
+
+@app.get("/api/analytics/performance")
+async def performance_analytics_legacy(response: Response):
+    _mark_deprecated(response, "/analytics/performance")
+    return await performance_analytics_root()
+
+
+@app.get("/api/executive/status")
+async def executive_status_legacy(request: Request, response: Response):
+    from src.interfaces.api.executive_api import get_executive_status
+
+    _mark_deprecated(response, "/executive/status")
+    return await get_executive_status(request=request)
+
+
+@app.get("/api/agent/memory/list/stm")
+async def legacy_stm_list(response: Response):
+    _mark_deprecated(response, "/memory/stm/list")
+    agent = get_agent()
+    memories = agent.memory.stm.get_all_memories() if hasattr(agent.memory.stm, "get_all_memories") else []
+    return {"memories": jsonable_encoder(memories)}
+
+
+@app.get("/api/procedure/list")
+async def legacy_procedure_list_alias(request: Request):
+    from src.interfaces.api.procedural_api import list_procedures
+
+    return list_procedures(request=request)
+
+
+@app.get("/api/agent/memory/procedural/list")
+async def legacy_agent_procedural_list(request: Request, response: Response):
+    _mark_deprecated(response, "/api/procedure/list")
+    return await legacy_procedure_list_alias(request=request)
 
 
 if __name__ == "__main__":

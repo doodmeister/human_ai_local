@@ -808,7 +808,6 @@ class VectorShortTermMemory:
                     return False
 
                 metadata = dict(result["metadatas"][0] if result.get("metadatas") else {})
-                content = result["documents"][0] if result.get("documents") else ""
 
                 now = datetime.now()
                 metadata["last_access"] = now.isoformat()

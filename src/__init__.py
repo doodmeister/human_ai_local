@@ -11,6 +11,9 @@ This package implements:
 - Neural Architectures (Hopfield Networks, DPAD, LSHN)
 """
 
+import importlib
+import sys
+
 __version__ = "0.1.0"
 __author__ = "Human-AI Cognition Team"
 
@@ -47,13 +50,6 @@ __all__ = [
     "get_cognitive_logger",
     "setup_logging",
 ]
-
-
-# ---- Backward-compatible module aliases (Phase 6 normalization) ----
-# We keep the old import paths working without reintroducing the old top-level
-# directories in `src/`.
-import importlib
-import sys
 
 
 def _alias_module(old: str, new: str) -> None:  # pragma: no cover

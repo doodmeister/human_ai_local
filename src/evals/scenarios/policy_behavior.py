@@ -533,11 +533,11 @@ async def _generate_with_runtime_agent(scenario: PolicyBehaviorScenario) -> tupl
             agent._llm_session.provider = provider
             agent._llm_session.openai_client = None
             agent._cognitive_layers = _runtime_layers_for_scenario(scenario, persist_dir=temp_dir)
-            agent._turn_processor._get_cognitive_layers = lambda: agent._cognitive_layers
+            agent._turn_processor._get_cognitive_layers = lambda current_agent=agent: current_agent._cognitive_layers
             if scenario.use_runtime_memory_context:
-                async def _runtime_memory_context(processed_input):
+                async def _runtime_memory_context(processed_input, current_agent=agent):
                     return await _retrieve_persisted_runtime_memory_context(
-                        agent,
+                        current_agent,
                         str(processed_input.get("raw_input", "")),
                     )
 

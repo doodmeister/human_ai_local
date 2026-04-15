@@ -14,6 +14,24 @@ from typing import Any, Dict, List
 import chainlit as cl
 from chainlit.input_widget import Select, Slider, Switch
 
+from src.interfaces.ui.chainlit_message_flow import (
+    build_backend_suggestion_specs,
+    build_maintenance_suggestion_specs,
+    build_metacog_narrative,
+    build_command_action_specs,
+    build_response_artifact_sections,
+    collect_response_intents,
+    filter_suggestion_specs,
+    get_primary_intent_type,
+    is_metacog_raw_request,
+    normalize_command_request,
+    normalize_salience_mode,
+    parse_memory_command_content,
+    SALIENCE_MODE_VALUES,
+    salience_threshold_for_mode,
+    should_refresh_reflection_dashboard,
+)
+
 from george_api import (
     API_BASE,
     check_health,
@@ -39,6 +57,7 @@ from george_api import (
     send_chat,
     trigger_dream,
     trigger_reflection,
+    unified_memory_search,
     update_llm_config,
 )
 
@@ -90,12 +109,17 @@ async def on_chat_start():
         "include_trace": False,
         "reflection": False,
     })
-    cl.user_session.set("salience_threshold", 0.55)
+    cl.user_session.set("salience_mode", "adaptive")
+    cl.user_session.set("salience_threshold", salience_threshold_for_mode("adaptive"))
     cl.user_session.set("snooze_minutes", 15)
+    cl.user_session.set("turn_count", 0)
+    cl.user_session.set("last_dream_turn", 0)
+    cl.user_session.set("last_reflect_turn", 0)
+    cl.user_session.set("suggestion_last_turns", {})
 
     # Set up commands for the input bar
     await cl.context.emitter.set_commands([
-        {"id": "memory", "icon": "brain", "description": "Browse a memory system (stm, ltm, episodic, semantic, prospective, procedural)", "button": True, "persistent": True},
+        {"id": "memory", "icon": "brain", "description": "Search memories or browse a system: /memory <query> or /memory <system> [query]", "button": True, "persistent": True},
         {"id": "reminders", "icon": "bell", "description": "List active reminders", "button": True, "persistent": True},
         {"id": "remind", "icon": "alarm-clock", "description": "Create a reminder: /remind <minutes> <text>", "button": False, "persistent": False},
         {"id": "goals", "icon": "target", "description": "List active goals", "button": True, "persistent": True},
@@ -121,14 +145,12 @@ async def on_chat_start():
             values=["gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
             initial_index=0,
         ),
-        Slider(
-            id="Salience",
-            label="STM Consolidation Threshold",
-            initial=0.55,
-            min=0.0,
-            max=1.0,
-            step=0.05,
-            description="Lower = capture more memories, higher = only emphatic messages",
+        Select(
+            id="Salience_Mode",
+            label="Memory capture sensitivity",
+            values=list(SALIENCE_MODE_VALUES),
+            initial_index=0,
+            description="Adaptive uses backend defaults. Override only if you want broader or narrower capture.",
         ),
         Slider(
             id="Snooze_Minutes",
@@ -172,7 +194,9 @@ async def on_chat_start():
 @cl.on_settings_update
 async def on_settings_update(settings: Dict[str, Any]):
     """Apply changed settings."""
-    cl.user_session.set("salience_threshold", settings.get("Salience", 0.55))
+    salience_mode = normalize_salience_mode(settings.get("Salience_Mode"))
+    cl.user_session.set("salience_mode", salience_mode)
+    cl.user_session.set("salience_threshold", salience_threshold_for_mode(salience_mode))
     cl.user_session.set("snooze_minutes", int(settings.get("Snooze_Minutes", 15)))
     cl.user_session.set("flags", {
         "include_memory": settings.get("Include_Memory", True),
@@ -195,40 +219,55 @@ async def on_settings_update(settings: Dict[str, Any]):
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    """Handle every user message — route commands or chat."""
-    cmd = getattr(message, "command", None) or ""
-    content = message.content.strip()
+    """Handle every user message through explicit command or backend chat paths."""
+    command_name, content = normalize_command_request(
+        getattr(message, "command", None),
+        getattr(message, "content", "") or "",
+    )
 
-    # ------- Command routing -------
-    if cmd == "memory" or content.startswith("/memory"):
+    if command_name:
+        await _handle_command_message(command_name, content)
+        return
+
+    if not content:
+        return
+
+    await _handle_chat_message(content)
+
+
+async def _handle_command_message(command_name: str, content: str):
+    """Dispatch explicit slash commands and command-bar requests."""
+    if command_name == "memory":
         await _cmd_memory(content)
         return
-    if cmd == "reminders" or content.startswith("/reminders"):
+    if command_name == "reminders":
         await _cmd_list_reminders()
         return
-    if cmd == "remind" or content.startswith("/remind"):
+    if command_name == "remind":
         await _cmd_create_reminder(content)
         return
-    if cmd == "goals" or content.startswith("/goals"):
+    if command_name == "goals":
         await _cmd_list_goals()
         return
-    if cmd == "goal" or content.startswith("/goal"):
+    if command_name == "goal":
         await _cmd_create_goal(content)
         return
-    if cmd == "dream" or content.startswith("/dream"):
+    if command_name == "dream":
         await _cmd_dream()
         return
-    if cmd == "reflect" or content.startswith("/reflect"):
+    if command_name == "reflect":
         await _cmd_reflect()
         return
-    if cmd == "learning" or content.startswith("/learning"):
+    if command_name == "learning":
         await _cmd_learning()
         return
-    if cmd == "metacog" or content.startswith("/metacog"):
-        await _cmd_metacog()
+    if command_name == "metacog":
+        await _cmd_metacog(content)
         return
 
-    # ------- Normal chat -------
+
+async def _handle_chat_message(content: str):
+    """Send conversational input through the backend chat pipeline."""
     session_id = cl.user_session.get("session_id") or "default"
     flags = cl.user_session.get("flags") or {}
     salience = cl.user_session.get("salience_threshold")
@@ -245,10 +284,35 @@ async def on_message(message: cl.Message):
             return
         step.output = response.get("response", "")
 
-    reply_text = response.get("response") or "[Empty response]"
+    turn_count = int(cl.user_session.get("turn_count") or 0) + 1
+    cl.user_session.set("turn_count", turn_count)
 
-    # Build action buttons for any detected goal
+    await _render_chat_response(response, session_id=session_id, turn_count=turn_count)
+
+
+async def _render_chat_response(response: Dict[str, Any], *, session_id: str, turn_count: int):
+    """Render the structured chat response returned by the backend."""
+    reply_text = response.get("response") or "[Empty response]"
+    actions = _build_response_actions(response)
+
+    msg = cl.Message(content=reply_text, actions=actions)
+    await msg.send()
+
+    flags = cl.user_session.get("flags") or {}
+    await _render_response_artifacts(msg, response, include_trace=bool(flags.get("include_trace")))
+
+    proactive = response.get("proactive_reminders") or {}
+    due = proactive.get("due") or []
+    if due:
+        await _surface_due_reminders(due)
+
+    await _maybe_surface_suggestions(response, actions, session_id=session_id, turn_count=turn_count)
+
+
+def _build_response_actions(response: Dict[str, Any]) -> List[cl.Action]:
+    """Create UI actions from backend chat state."""
     actions: List[cl.Action] = []
+
     detected_goal = response.get("detected_goal")
     if detected_goal:
         goal_id = detected_goal.get("goal_id", "")
@@ -259,69 +323,112 @@ async def on_message(message: cl.Message):
             payload={"goal_id": goal_id},
         ))
 
-    # Send the reply
-    msg = cl.Message(content=reply_text, actions=actions)
-    await msg.send()
+    primary_intent = get_primary_intent_type(response.get("intent"))
+    handled_intents = collect_response_intents(
+        response.get("intent_sections"),
+        response.get("intent_results"),
+    )
+    command_specs = build_command_action_specs(
+        primary_intent=primary_intent,
+        handled_intents=handled_intents,
+        proactive_reminders=response.get("proactive_reminders") or {},
+    )
+    for spec in command_specs:
+        actions.append(cl.Action(
+            name="run_command",
+            label=spec["label"],
+            icon=spec.get("icon"),
+            payload={"command": spec["command"]},
+        ))
+    return actions
 
-    # Render context items, captured memories, and metrics as nested Steps
-    context_items = response.get("context_items") or []
-    captured = response.get("captured_memories") or []
-    metrics = response.get("metrics") or {}
-    intent = response.get("intent") or {}
 
-    elements: List[str] = []
-    if metrics:
-        parts = []
-        if metrics.get("turn_latency_ms") is not None:
-            parts.append(f"latency {metrics['turn_latency_ms']:.0f}ms")
-        if metrics.get("stm_hits") is not None:
-            parts.append(f"STM={metrics['stm_hits']}")
-        if metrics.get("ltm_hits") is not None:
-            parts.append(f"LTM={metrics['ltm_hits']}")
-        if metrics.get("user_salience") is not None:
-            parts.append(f"salience={metrics['user_salience']:.2f}")
-        if metrics.get("consolidation_status"):
-            parts.append(metrics["consolidation_status"])
-        if parts:
-            elements.append(" | ".join(parts))
+async def _maybe_surface_suggestions(
+    response: Dict[str, Any],
+    existing_actions: List[cl.Action],
+    *,
+    session_id: str,
+    turn_count: int,
+):
+    """Surface non-blocking suggestions derived from backend chat state."""
+    existing_commands = {
+        str(action.payload.get("command") or "").strip()
+        for action in existing_actions
+        if getattr(action, "name", "") == "run_command"
+    }
+    last_dream_turn = int(cl.user_session.get("last_dream_turn") or 0)
+    last_reflect_turn = int(cl.user_session.get("last_reflect_turn") or 0)
+    last_suggested_turns = cl.user_session.get("suggestion_last_turns") or {}
 
-    if intent.get("intent_type"):
-        elements.append(f"Intent: **{intent['intent_type']}** ({intent.get('confidence', 0):.0%})")
+    dashboard: Dict[str, Any] | None = None
+    if should_refresh_reflection_dashboard(turn_count=turn_count, last_reflect_turn=last_reflect_turn):
+        try:
+            dashboard = await fetch_metacognition_dashboard(session_id=session_id, history_limit=5, limit=20)
+        except Exception:
+            dashboard = {}
 
-    if elements:
-        await cl.Message(content="\n".join(elements), author="metrics", parent_id=msg.id).send()
+    suggestions = build_backend_suggestion_specs(response)
+    suggestions.extend(
+        build_maintenance_suggestion_specs(
+            turn_count=turn_count,
+            last_dream_turn=last_dream_turn,
+            last_reflect_turn=last_reflect_turn,
+            response=response,
+            dashboard=dashboard,
+        )
+    )
+    suggestions = filter_suggestion_specs(
+        suggestions,
+        existing_commands=existing_commands,
+        last_suggested_turns=last_suggested_turns,
+        turn_count=turn_count,
+    )
+    sent = 0
+    for spec in suggestions:
+        command = str(spec.get("command") or "").strip()
+        actions = []
+        if command:
+            actions.append(
+                cl.Action(
+                    name="run_command",
+                    label=spec["label"],
+                    icon=spec.get("icon"),
+                    payload={"command": command},
+                )
+            )
+        await cl.Message(content=spec["message"], actions=actions, author="system").send()
+        if command:
+            last_suggested_turns[command] = turn_count
+        sent += 1
+        if sent >= 2:
+            break
+    cl.user_session.set("suggestion_last_turns", last_suggested_turns)
 
-    if context_items:
-        lines = ["**Context used (STM -> LTM):**"]
-        for item in context_items[:10]:
-            source = item.get("source_system", "?")
-            reason = item.get("reason", "")
-            snippet = str(item.get("content", ""))[:120]
-            lines.append(f"- `[{source}]` {snippet}  _{reason}_")
-        await cl.Message(content="\n".join(lines), author="context", parent_id=msg.id).send()
 
-    if captured:
-        lines = ["**Captured memories:**"]
-        for mem in captured[:8]:
-            tag = f"[{mem.get('memory_type', '')}] " if mem.get("memory_type") else ""
-            extra = ""
-            if mem.get("reinforced"):
-                extra = " (reinforced)"
-            if mem.get("contradiction"):
-                extra = " (contradiction)"
-            lines.append(f"- {tag}{mem.get('content', '')}{extra}")
-        await cl.Message(content="\n".join(lines), author="memory", parent_id=msg.id).send()
+async def _render_response_artifacts(msg: cl.Message, response: Dict[str, Any], *, include_trace: bool):
+    """Render response diagnostics and supporting artifacts."""
+    sections = build_response_artifact_sections(response, include_trace=include_trace)
 
-    # Surface due reminders proactively
-    proactive = response.get("proactive_reminders") or {}
-    due = proactive.get("due") or []
-    if due:
-        await _surface_due_reminders(due)
+    if sections["metrics"]:
+        await cl.Message(content="\n".join(sections["metrics"]), author="metrics", parent_id=msg.id).send()
+
+    if sections["context"]:
+        await cl.Message(content="\n".join(sections["context"]), author="context", parent_id=msg.id).send()
+
+    if sections["memory"]:
+        await cl.Message(content="\n".join(sections["memory"]), author="memory", parent_id=msg.id).send()
 
 
 # ============================================================================
 # Action Callbacks
 # ============================================================================
+
+@cl.action_callback("run_command")
+async def on_run_command(action: cl.Action):
+    command = str(action.payload.get("command") or "").strip()
+    if not command:
+        return
+    await on_message(cl.Message(content=command))
 
 @cl.action_callback("execute_goal")
 async def on_execute_goal(action: cl.Action):
@@ -375,13 +482,40 @@ async def on_delete_reminder(action: cl.Action):
 # ============================================================================
 
 async def _cmd_memory(content: str):
-    """Browse a memory system.  Usage: /memory <system> [query]"""
-    parts = content.split(maxsplit=2)
-    system = parts[1] if len(parts) > 1 else "stm"
-    query = parts[2] if len(parts) > 2 else ""
-    valid = {"stm", "ltm", "episodic", "semantic", "prospective", "procedural"}
-    if system not in valid:
-        await cl.Message(content=f"Unknown system `{system}`. Choose from: {', '.join(sorted(valid))}").send()
+    """Search across memories or browse a specific memory system."""
+    request = parse_memory_command_content(content)
+    mode = request["mode"]
+    system = request["system"]
+    query = request["query"] or ""
+
+    if mode == "help":
+        await cl.Message(
+            content=(
+                "Usage: `/memory <query>` to search across STM, LTM, episodic, and semantic memory.\n"
+                "Or browse a specific system with `/memory <system> [query]`.\n"
+                "Systems: `stm`, `ltm`, `episodic`, `semantic`, `prospective`, `procedural`."
+            )
+        ).send()
+        return
+
+    if mode == "unified":
+        async with cl.Step(name="Searching memories", type="tool") as step:
+            memories = await unified_memory_search(query)
+            step.output = f"Found {len(memories)} items"
+
+        if not memories:
+            await cl.Message(content=f"No memories matched _{query}_ across searchable systems.").send()
+            return
+
+        await cl.Message(
+            content="\n".join(
+                _format_memory_lines(
+                    title=f"Memory Search Results for '{query}'",
+                    memories=memories,
+                    include_source=True,
+                )
+            )
+        ).send()
         return
 
     async with cl.Step(name=f"Fetching {system} memories", type="tool") as step:
@@ -401,10 +535,19 @@ async def _cmd_memory(content: str):
         await cl.Message(content=f"No memories in **{system}**." + (f" Query: _{query}_" if query else "")).send()
         return
 
-    lines = [f"**{system.upper()} Memories** ({len(memories)} items):\n"]
+    await cl.Message(content="\n".join(_format_memory_lines(title=f"{system.upper()} Memories", memories=memories))).send()
+
+
+def _format_memory_lines(title: str, memories: List[Dict[str, Any]], *, include_source: bool = False) -> List[str]:
+    """Format memory search and browse results for Chainlit messages."""
+    lines = [f"**{title}** ({len(memories)} items):\n"]
     for i, mem in enumerate(memories[:20], 1):
         text = mem.get("content") or mem.get("detailed_content") or mem.get("summary") or str(mem)
         text = str(text)[:200]
+        prefix = ""
+        if include_source:
+            source = mem.get("_source_system") or mem.get("source_system") or "?"
+            prefix = f"[{str(source).upper()}] "
         importance = mem.get("importance")
         activation = mem.get("activation")
         extras = []
@@ -413,9 +556,8 @@ async def _cmd_memory(content: str):
         if activation is not None:
             extras.append(f"act={activation:.2f}")
         suffix = f"  _({', '.join(extras)})_" if extras else ""
-        lines.append(f"{i}. {text}{suffix}")
-
-    await cl.Message(content="\n".join(lines)).send()
+        lines.append(f"{i}. {prefix}{text}{suffix}")
+    return lines
 
 
 async def _cmd_list_reminders():
@@ -524,6 +666,7 @@ async def _cmd_dream():
         lines.append(f"- Candidates: {dr.get('candidates_identified', 0)}")
         lines.append(f"- Associations: {dr.get('associations_created', 0)}")
         lines.append(f"- Duration: {dr.get('actual_duration', 0):.2f}s")
+    cl.user_session.set("last_dream_turn", int(cl.user_session.get("turn_count") or 0))
     await cl.Message(content="\n".join(lines)).send()
 
 
@@ -554,6 +697,7 @@ async def _cmd_reflect():
             lines.append(f"  - {rec}")
     if len(lines) == 1:
         lines.append("No data available.")
+    cl.user_session.set("last_reflect_turn", int(cl.user_session.get("turn_count") or 0))
     await cl.Message(content="\n".join(lines)).send()
 
 
@@ -603,9 +747,10 @@ async def _cmd_learning():
     await cl.Message(content="\n".join(lines)).send()
 
 
-async def _cmd_metacog():
+async def _cmd_metacog(content: str = ""):
     """Show metacognition dashboard data for the current session."""
     session_id = cl.user_session.get("session_id") or "default"
+    raw_mode = is_metacog_raw_request(content)
 
     async with cl.Step(name="Metacognition Dashboard", type="tool") as step:
         dashboard, tasks, reflections = await asyncio.gather(
@@ -623,6 +768,39 @@ async def _cmd_metacog():
             content="No metacognition trace data is available yet. Send a few chat turns or let background cognition run first."
         ).send()
         return
+
+    if raw_mode:
+        await _render_metacog_raw(dashboard, tasks, reflections, session_id)
+        return
+
+    await _render_metacog_narrative(dashboard, tasks, reflections)
+
+
+async def _render_metacog_narrative(
+    dashboard: Dict[str, Any],
+    tasks: List[Dict[str, Any]],
+    reflections: List[Dict[str, Any]],
+):
+    """Render a narrative self-report for the current metacognitive state."""
+    narrative = build_metacog_narrative(dashboard, tasks=tasks, reflections=reflections)
+    actions = [
+        cl.Action(
+            name="run_command",
+            label="Show full diagnostics",
+            icon="compass",
+            payload={"command": "/metacog --raw"},
+        )
+    ]
+    await cl.Message(content=narrative, actions=actions).send()
+
+
+async def _render_metacog_raw(
+    dashboard: Dict[str, Any],
+    tasks: List[Dict[str, Any]],
+    reflections: List[Dict[str, Any]],
+    session_id: str,
+):
+    """Render the detailed diagnostic metacognition view."""
 
     status = dashboard.get("status", {})
     background = dashboard.get("background", {})
