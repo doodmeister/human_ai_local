@@ -70,9 +70,11 @@ class ChatTurnPipeline:
                     classifier.context.active_goals = set(service._session_goal_index.get(sess.session_id, set()))
 
                     if service._orchestrator is None:
-                        from src.executive.integration import ExecutiveSystem
+                        executive_system = getattr(service._goal_detector, "executive", None)
+                        if executive_system is None:
+                            from src.executive.integration import ExecutiveSystem
 
-                        executive_system = ExecutiveSystem()
+                            executive_system = ExecutiveSystem()
                         service._orchestrator = ExecutiveOrchestrator(executive_system)
                     loop = None
                     try:

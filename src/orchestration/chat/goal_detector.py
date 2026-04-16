@@ -99,7 +99,7 @@ class GoalDetector:
                     title=title,
                     description=entities.get('goal_description', message),
                     priority=priority,
-                    deadline=deadline,
+                    target_date=deadline,
                 )
             else:
                 goal_ref = self.executive.create_goal(
