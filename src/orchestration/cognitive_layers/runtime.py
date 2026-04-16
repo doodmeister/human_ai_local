@@ -196,6 +196,7 @@ class ChatCognitiveLayerRuntime:
         salience: float,
         valence: float,
         global_turn_counter: int,
+        procedural_memory: Any = None,
     ) -> None:
         try:
             drive_state, drive_processor = self.get_drive_system()
@@ -286,6 +287,7 @@ class ChatCognitiveLayerRuntime:
                     felt_sense_history=self._felt_sense_history,
                     relational_field=self._relational_field,
                     conflicts=tick.state.get("drive_conflicts") or None,
+                    procedural_memory=procedural_memory,
                 )
             tick.state["pattern_field"] = pattern_field
             setattr(session, "_pattern_field_snapshot", pattern_field)

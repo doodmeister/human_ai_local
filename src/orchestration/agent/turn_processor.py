@@ -83,6 +83,7 @@ class CognitiveTurnProcessor:
                     salience=salience,
                     valence=valence,
                     global_turn_counter=self._get_turn_counter(),
+                    procedural_memory=getattr(self._get_memory(), "procedural", None),
                 )
                 response_policy = tick.state.get("response_policy")
                 if response_policy is not None:

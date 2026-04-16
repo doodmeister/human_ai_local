@@ -98,6 +98,8 @@ _PATTERN_VALUE_MAP: Dict[str, str] = {
     "positive_orientation": "optimism",
 }
 
+_PROCEDURAL_PATTERN_VALUE = "reliable execution"
+
 
 # ────────────────────────────────────────────────────────────────────
 #  SelfModelBuilder
@@ -414,7 +416,13 @@ class SelfModelBuilder:
             reverse=True,
         )
         for pattern in strong:
-            value = _PATTERN_VALUE_MAP.get(pattern.name)
+            if (
+                getattr(pattern, "category", "") == "procedural_pattern"
+                or self._is_procedural_pattern_name(pattern.name)
+            ):
+                value = _PROCEDURAL_PATTERN_VALUE
+            else:
+                value = _PATTERN_VALUE_MAP.get(pattern.name)
             if value and value not in values:
                 values.append(value)
             if len(values) >= cfg.max_values:
@@ -618,10 +626,18 @@ class SelfModelBuilder:
     @staticmethod
     def _is_positive_pattern_name(name: str) -> bool:
         """Check if a pattern name suggests positive valence."""
+        if SelfModelBuilder._is_procedural_pattern_name(name):
+            return True
         name_lower = name.lower()
         return any(kw in name_lower for kw in _POSITIVE_PATTERN_KEYWORDS)
 
     @staticmethod
     def _human_readable_name(pattern_name: str) -> str:
         """Convert snake_case pattern name to human-readable form."""
+        if SelfModelBuilder._is_procedural_pattern_name(pattern_name):
+            return "reliant on proven routines"
         return pattern_name.replace("_", " ")
+
+    @staticmethod
+    def _is_procedural_pattern_name(pattern_name: str) -> bool:
+        return pattern_name.lower().startswith("learned_routine_")

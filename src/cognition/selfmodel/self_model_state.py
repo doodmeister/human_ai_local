@@ -33,6 +33,26 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
+def _display_pattern_name(pattern_name: str) -> str:
+    if pattern_name.lower().startswith("learned_routine_"):
+        return "reliant on proven routines"
+    return pattern_name.replace("_", " ")
+
+
+def _display_pattern_names(pattern_names: List[str], limit: int) -> List[str]:
+    display_names: List[str] = []
+    seen: set[str] = set()
+    for pattern_name in pattern_names:
+        display_name = _display_pattern_name(pattern_name)
+        if display_name in seen:
+            continue
+        seen.add(display_name)
+        display_names.append(display_name)
+        if len(display_names) >= limit:
+            break
+    return display_names
+
+
 # ────────────────────────────────────────────────────────────────────
 #  SelfDiscovery
 # ────────────────────────────────────────────────────────────────────
@@ -170,13 +190,15 @@ class SelfModel:
         parts = []
 
         if self.perceived_strengths:
+            strengths = _display_pattern_names(self.perceived_strengths, 3)
             parts.append(
-                f"I tend to be {', '.join(self.perceived_strengths[:3])}"
+                f"I tend to be {', '.join(strengths)}"
             )
 
         if self.perceived_weaknesses:
+            weaknesses = _display_pattern_names(self.perceived_weaknesses, 2)
             parts.append(
-                f"I sometimes struggle with {', '.join(self.perceived_weaknesses[:2])}"
+                f"I sometimes struggle with {', '.join(weaknesses)}"
             )
 
         if self.stated_values:

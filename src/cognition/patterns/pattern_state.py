@@ -31,6 +31,7 @@ PATTERN_CATEGORIES: tuple[str, ...] = (
     "relational_pattern",
     "felt_sense_pattern",
     "conflict_pattern",
+    "procedural_pattern",
 )
 
 

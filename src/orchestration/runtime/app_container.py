@@ -160,6 +160,7 @@ class AppRuntime:
         attention: Optional[Any] = None,
         executive: Optional[Any] = None,
         prospective: Optional[Any] = None,
+        procedural: Optional[Any] = None,
         metacognitive_controller: Optional[Any] = None,
     ) -> Any:
         """Build a ChatService using explicit dependencies or runtime fallbacks."""
@@ -178,6 +179,7 @@ class AppRuntime:
                 episodic = episodic or getattr(memory, "episodic", None)
                 semantic = semantic or getattr(memory, "semantic", None)
                 prospective = prospective or getattr(memory, "prospective", None)
+                procedural = procedural or getattr(memory, "procedural", None)
             attention = attention or getattr(agent, "attention", None)
             executive = executive or getattr(agent, "performance_optimizer", None)
 
@@ -214,6 +216,11 @@ class AppRuntime:
                 prospective = memory_system.prospective
             except Exception:
                 prospective = None
+        if procedural is None and memory_system is not None:
+            try:
+                procedural = memory_system.procedural
+            except Exception:
+                procedural = None
 
         if attention is None:
             AttentionManager = _lazy_import("src.cognition.attention.attention_manager", "AttentionManager")
@@ -271,6 +278,7 @@ class AppRuntime:
             attention=attention,
             executive=executive,
             prospective=prospective,
+            procedural=procedural,
             autobiographical_store=autobiographical_store,
         )
 

@@ -13,6 +13,7 @@ Key responsibilities:
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -226,6 +227,17 @@ class OutcomeTracker:
         predicted_makespan = self._extract_predicted_makespan_minutes(context)
         task_count = len(context.schedule.tasks) if context.schedule and context.schedule.tasks else len(context.plan.steps) if context.plan else 0
         decision_strategy = self._derive_decision_strategy(context)
+        action_sequence = self._extract_action_sequence(context)
+        sequence_signature = self.build_action_sequence_signature(action_sequence)
+        procedural_metadata = {
+            "action_sequence": action_sequence,
+            "action_sequence_signature": sequence_signature or None,
+            "planning_source": context.metadata.get("planning_source") if isinstance(context.metadata, dict) else None,
+            "planning_procedure_id": context.metadata.get("planning_procedure_id") if isinstance(context.metadata, dict) else None,
+            "procedural_match_ids": list(context.metadata.get("procedural_match_ids", []) or []) if isinstance(context.metadata, dict) else [],
+            "procedural_reinforced_ids": list(context.metadata.get("procedural_reinforced_ids", []) or []) if isinstance(context.metadata, dict) else [],
+            "compiled_procedure_id": context.metadata.get("compiled_procedure_id") if isinstance(context.metadata, dict) else None,
+        }
         
         # Build outcome record
         record = OutcomeRecord(
@@ -264,6 +276,7 @@ class OutcomeTracker:
             deviations=deviations or context.deviations,
             failure_reason=context.failure_reason,
             lessons_learned=context.lessons_learned,
+            metadata=procedural_metadata,
         )
         
         # Store
@@ -278,6 +291,99 @@ class OutcomeTracker:
         )
         
         return record
+
+    @staticmethod
+    def build_action_sequence_signature(action_sequence: List[str]) -> str:
+        """Return a normalized signature for a plan action sequence."""
+        normalized = [
+            re.sub(r"[^a-z0-9]+", " ", str(step or "").lower()).strip()
+            for step in action_sequence
+        ]
+        normalized = [step for step in normalized if step]
+        return " -> ".join(normalized)
+
+    def get_action_sequence_stats(
+        self,
+        signature: str,
+        *,
+        min_outcome_score: float = 0.0,
+        min_plan_adherence: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Summarize recurrence and known procedure IDs for a normalized action sequence."""
+        normalized_signature = str(signature or "").strip()
+        if not normalized_signature:
+            return {
+                "signature": "",
+                "sample_size": 0,
+                "qualified_success_count": 0,
+                "goal_ids": [],
+                "known_procedure_ids": [],
+                "latest_procedure_id": None,
+                "avg_outcome_score": 0.0,
+                "avg_plan_adherence": 0.0,
+            }
+
+        matches = [
+            outcome
+            for outcome in self._outcomes
+            if str(outcome.metadata.get("action_sequence_signature") or "").strip() == normalized_signature
+        ]
+        qualified = [
+            outcome
+            for outcome in matches
+            if outcome.success
+            and outcome.outcome_score >= min_outcome_score
+            and outcome.accuracy_metrics.plan_adherence_score >= min_plan_adherence
+        ]
+
+        known_procedure_ids: List[str] = []
+        for outcome in reversed(matches):
+            metadata = outcome.metadata or {}
+            candidates = [metadata.get("compiled_procedure_id"), metadata.get("planning_procedure_id")]
+            candidates.extend(metadata.get("procedural_reinforced_ids", []) or [])
+            candidates.extend(metadata.get("procedural_match_ids", []) or [])
+            for candidate in candidates:
+                normalized = str(candidate or "").strip()
+                if normalized and normalized not in known_procedure_ids:
+                    known_procedure_ids.append(normalized)
+
+        goal_ids: List[str] = []
+        for outcome in qualified:
+            if outcome.goal_id and outcome.goal_id not in goal_ids:
+                goal_ids.append(outcome.goal_id)
+
+        avg_outcome_score = sum(outcome.outcome_score for outcome in qualified) / len(qualified) if qualified else 0.0
+        avg_plan_adherence = (
+            sum(outcome.accuracy_metrics.plan_adherence_score for outcome in qualified) / len(qualified)
+            if qualified
+            else 0.0
+        )
+
+        return {
+            "signature": normalized_signature,
+            "sample_size": len(matches),
+            "qualified_success_count": len(qualified),
+            "goal_ids": goal_ids,
+            "known_procedure_ids": known_procedure_ids,
+            "latest_procedure_id": known_procedure_ids[0] if known_procedure_ids else None,
+            "avg_outcome_score": avg_outcome_score,
+            "avg_plan_adherence": avg_plan_adherence,
+        }
+
+    def update_outcome_metadata(self, record_id: str, updates: Dict[str, Any]) -> bool:
+        """Persist metadata updates for a previously recorded outcome."""
+        normalized_record_id = str(record_id or "").strip()
+        if not normalized_record_id:
+            return False
+
+        for outcome in self._outcomes:
+            if outcome.record_id != normalized_record_id:
+                continue
+            outcome.metadata.update(dict(updates or {}))
+            self._save_outcome(outcome)
+            return True
+
+        return False
     
     def get_outcome_history(
         self,
@@ -593,6 +699,32 @@ class OutcomeTracker:
             return metadata_strategy
 
         return "unknown"
+
+    def _extract_action_sequence(self, context: Any) -> List[str]:
+        """Extract a normalized action sequence from the execution context plan."""
+        if not getattr(context, "plan", None):
+            return []
+
+        plan = context.plan
+        if hasattr(plan, "get_action_sequence"):
+            try:
+                sequence = plan.get_action_sequence()
+            except Exception:
+                sequence = []
+            return [str(step).strip() for step in sequence if str(step).strip()]
+
+        extracted: List[str] = []
+        for step in getattr(plan, "steps", []) or []:
+            if isinstance(step, dict):
+                candidate = step.get("name") or step.get("action") or step.get("description")
+            else:
+                action = getattr(step, "action", None)
+                candidate = getattr(action, "name", None) if action is not None else None
+                candidate = candidate or getattr(step, "name", None) or getattr(step, "description", None)
+            normalized = str(candidate or "").strip()
+            if normalized:
+                extracted.append(normalized)
+        return extracted
     
     def clear_history(self) -> int:
         """

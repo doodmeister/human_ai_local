@@ -39,7 +39,40 @@ logger = logging.getLogger(__name__)
 
 def _human_name(snake: str) -> str:
     """Convert ``'curiosity_seeking'`` → ``'curiosity seeking'``."""
+    if snake.startswith("learned_routine_"):
+        return "proven routines"
     return snake.replace("_", " ")
+
+
+def _is_procedural_pattern(pattern: Any) -> bool:
+    category = str(getattr(pattern, "category", "") or "")
+    name = str(getattr(pattern, "name", "") or "")
+    return category == "procedural_pattern" or name.startswith("learned_routine_")
+
+
+def _procedural_patterns(pattern_field: Any, limit: int = 2) -> List[Any]:
+    if pattern_field is None:
+        return []
+    active_patterns = getattr(pattern_field, "active_patterns", None)
+    if callable(active_patterns):
+        candidates = active_patterns(min_strength=0.05)
+    else:
+        candidates = getattr(pattern_field, "patterns", [])
+    procedural = [pattern for pattern in candidates if _is_procedural_pattern(pattern)]
+    return procedural[:limit]
+
+
+def _procedural_workflow_phrase(pattern: Any) -> str:
+    description = str(getattr(pattern, "description", "") or "").strip()
+    prefix = "stable learned workflow for "
+    if description.lower().startswith(prefix):
+        focus = description[len(prefix):].strip()
+        if focus:
+            return f"a stable learned workflow for {focus}"
+    if description:
+        lowered = description[0].lower() + description[1:]
+        return f"a {lowered}"
+    return "a stable learned workflow that has repeatedly succeeded"
 
 
 # ── Drive-level narrative phrases ───────────────────────────────────
@@ -75,6 +108,7 @@ _ASPIRATION_TEMPLATES: Dict[str, str] = {
     "personal autonomy": "someone true to their own path",
     "excellence and mastery": "someone who masters what they pursue",
     "purposeful contribution": "someone whose work has meaning",
+    "reliable execution": "someone who follows through using what works",
     "steady perseverance": "someone who stays steady through difficulty",
     "warmth and empathy": "someone who brings warmth to every interaction",
     "deep connection": "someone who connects deeply with others",
@@ -163,7 +197,7 @@ class NarrativeConstructor:
 
         # 6. Current themes
         themes = self._identify_themes(
-            drive_state, self_model, mood, cfg,
+            drive_state, self_model, pattern_field, mood, cfg,
         )
 
         # 7. Ongoing struggles
@@ -263,6 +297,13 @@ class NarrativeConstructor:
                 parts.append("I feel good about where I am")
             elif regard <= -0.4:
                 parts.append("I'm going through a difficult period")
+
+        procedural = _procedural_patterns(pattern_field, limit=1)
+        if procedural and not any(
+            "stable learned workflow" in part.lower()
+            for part in parts
+        ):
+            parts.append(f"I've developed {_procedural_workflow_phrase(procedural[0])}")
 
         # From patterns (fallback or supplement)
         if pattern_field is not None and (not parts or len(parts) < 2):
@@ -400,6 +441,10 @@ class NarrativeConstructor:
                     f"to who I am than I thought"
                 )
 
+        procedural = _procedural_patterns(pattern_field, limit=1)
+        if procedural and getattr(procedural[0], "activation_count", 0) > 2:
+            return f"I'm learning to trust {_procedural_workflow_phrase(procedural[0])}"
+
         # Look for pattern strengthening
         if pattern_field is not None:
             dominant = []
@@ -479,6 +524,7 @@ class NarrativeConstructor:
         self,
         drive_state: Any,
         self_model: Any,
+        pattern_field: Any,
         mood: Any,
         cfg: NarrativeConfig,
     ) -> List[str]:
@@ -508,6 +554,11 @@ class NarrativeConstructor:
                 themes.append(
                     f"Exploring what {_human_name(d.pattern_name)} means for me"
                 )
+
+        if pattern_field is not None:
+            procedural = _procedural_patterns(pattern_field, limit=1)
+            if procedural:
+                themes.append("Leaning on proven workflows when pursuing goals")
 
         # Mood-based themes
         if mood is not None:

@@ -19,6 +19,7 @@ def build_chat_service(
     semantic: Optional[Any] = None,
     attention: Optional[Any] = None,
     executive: Optional[Any] = None,
+    procedural: Optional[Any] = None,
 ) -> ChatService:
     """Create a ChatService with injected subsystems or runtime fallbacks."""
     return get_runtime().build_chat_service(
@@ -28,4 +29,5 @@ def build_chat_service(
         semantic=semantic,
         attention=attention,
         executive=executive,
+        procedural=procedural,
     )

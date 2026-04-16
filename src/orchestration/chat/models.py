@@ -69,6 +69,7 @@ class ChatMetrics:
     stm_hits: int = 0
     ltm_hits: int = 0
     episodic_hits: int = 0
+    procedural_hits: int = 0
     attention_boost: float = 0.0
     fatigue_delta: float = 0.0
     consolidation_time_ms: float = 0.0

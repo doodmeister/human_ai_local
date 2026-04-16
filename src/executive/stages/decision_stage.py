@@ -12,7 +12,12 @@ class ExecutiveDecisionStage:
         self._decision_engine = decision_engine
         self._metrics = metrics
 
-    def make_goal_decision(self, goal: Goal) -> DecisionResult:
+    def make_goal_decision(
+        self,
+        goal: Goal,
+        *,
+        procedural_matches: list[dict[str, Any]] | None = None,
+    ) -> DecisionResult:
         options = [
             DecisionOption(
                 name="direct_approach",
@@ -31,11 +36,23 @@ class ExecutiveDecisionStage:
             ),
         ]
 
+        context = {"goal_id": goal.id, "goal_priority": goal.priority.value}
+        if procedural_matches:
+            context["procedural_match_count"] = len(procedural_matches)
+            context["procedural_match_titles"] = [
+                str(proc.get("description", "") or "")
+                for proc in procedural_matches[:3]
+                if str(proc.get("description", "") or "").strip()
+            ]
+            context["procedural_top_strength"] = max(
+                float(proc.get("strength", 0.0) or 0.0) for proc in procedural_matches
+            )
+
         result = self._decision_engine.make_decision(
             options=options,
             criteria=self._decision_engine.criterion_templates.get("task_selection", []),
             strategy=self._config.decision_strategy,
-            context={"goal_id": goal.id, "goal_priority": goal.priority.value},
+            context=context,
         )
         self._metrics.inc("executive_decisions_made_total")
         return result

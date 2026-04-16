@@ -97,6 +97,7 @@ class ChatTurnPipeline:
             salience=salience,
             valence=valence,
             global_turn_counter=service._turn_counter,
+            procedural_memory=getattr(service.context_builder, "procedural", None),
         )
 
         user_turn = TurnRecord(
@@ -387,6 +388,7 @@ class ChatTurnPipeline:
                 hits += float(getattr(built.metrics, "stm_hits", 0) or 0)
                 hits += float(getattr(built.metrics, "ltm_hits", 0) or 0)
                 hits += float(getattr(built.metrics, "episodic_hits", 0) or 0)
+                hits += float(getattr(built.metrics, "procedural_hits", 0) or 0)
             except Exception:
                 hits = 0.0
             denom = 1.0
@@ -676,6 +678,7 @@ class ChatTurnPipeline:
                 "stm_hits": built.metrics.stm_hits,
                 "ltm_hits": built.metrics.ltm_hits,
                 "episodic_hits": built.metrics.episodic_hits,
+                "procedural_hits": built.metrics.procedural_hits,
                 "fallback_used": built.metrics.fallback_used,
                 "consolidation_time_ms": built.metrics.consolidation_time_ms,
                 "consolidated_user_turn": built.metrics.consolidated_user_turn,

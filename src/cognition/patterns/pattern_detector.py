@@ -8,6 +8,7 @@ patterns that emerge from experience:
 3. **Felt-sense patterns** — emotional texture tendencies.
 4. **Relational patterns** — dynamics across significant relationships.
 5. **Conflict patterns** — recurring internal tensions.
+6. **Procedural patterns** — learned routines promoted from repeated success.
 
 Each detected pattern is tagged with a Big Five facet mapping
 (description layer only — the pattern is the truth, Big Five is an
@@ -24,7 +25,10 @@ Design principles
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .pattern_config import PatternConfig
@@ -255,6 +259,7 @@ class PatternDetector:
         felt_sense_history: Any = None,
         relational_field: Any = None,
         conflicts: Optional[List[Any]] = None,
+        procedural_memory: Any = None,
     ) -> PatternField:
         """Run heuristic pattern detection on accumulated data.
 
@@ -272,6 +277,8 @@ class PatternDetector:
             Current relational field.
         conflicts : list[InternalConflict], optional
             Current internal conflicts.
+        procedural_memory : ProceduralMemory, optional
+            Procedural memory store used to surface recurrent learned routines.
 
         Returns
         -------
@@ -302,13 +309,17 @@ class PatternDetector:
         if conflicts:
             self._detect_conflict_patterns(pattern_field, conflicts, cfg)
 
-        # 6. Weaken inactive patterns
+        # 6. Procedural patterns
+        if procedural_memory is not None:
+            self._detect_procedural_patterns(pattern_field, procedural_memory, cfg)
+
+        # 7. Weaken inactive patterns
         pattern_field.weaken_inactive(
             threshold_hours=cfg.inactivity_threshold_hours,
             decay=cfg.inactivity_decay,
         )
 
-        # 7. Prune very weak patterns
+        # 8. Prune very weak patterns
         pattern_field.prune_weak(cfg.prune_threshold)
 
         return pattern_field
@@ -515,6 +526,118 @@ class PatternDetector:
                     cfg,
                 )
                 pf.add_or_strengthen(pattern, cfg.strengthen_boost)
+
+    # ── Procedural patterns ─────────────────────────────────────────
+
+    def _detect_procedural_patterns(
+        self,
+        pf: PatternField,
+        procedural_memory: Any,
+        cfg: PatternConfig,
+    ) -> None:
+        """Detect stable routines promoted from repeated successful plans."""
+        load_all = getattr(procedural_memory, "all_procedures", None)
+        if not callable(load_all):
+            return
+
+        try:
+            procedures = load_all() or []
+        except Exception:
+            logger.debug("Procedural pattern scan skipped", exc_info=True)
+            return
+
+        for procedure in procedures:
+            if not self._is_active_promoted_procedure(procedure, cfg):
+                continue
+            pattern = self._make_procedural_pattern(procedure, cfg)
+            pf.add_or_strengthen(pattern, cfg.strengthen_boost)
+
+    def _is_active_promoted_procedure(
+        self,
+        procedure: Dict[str, Any],
+        cfg: PatternConfig,
+    ) -> bool:
+        steps = [str(step).strip() for step in procedure.get("steps", []) or [] if str(step).strip()]
+        if not steps:
+            return False
+
+        tags = {str(tag).strip().lower() for tag in procedure.get("tags", []) or [] if str(tag).strip()}
+        if not ({"pattern-promoted", "recurrent-success"} & tags):
+            return False
+
+        hours_since_activity = self._procedure_hours_since_activity(procedure)
+        if hours_since_activity is None:
+            return False
+
+        return hours_since_activity <= cfg.procedural_activation_window_hours
+
+    def _procedure_hours_since_activity(self, procedure: Dict[str, Any]) -> Optional[float]:
+        for field_name in ("last_used", "created_at"):
+            raw_value = procedure.get(field_name)
+            if not raw_value:
+                continue
+            try:
+                observed = datetime.fromisoformat(str(raw_value))
+            except ValueError:
+                continue
+            if observed.tzinfo is not None:
+                observed = observed.astimezone().replace(tzinfo=None)
+            return max(0.0, (datetime.now() - observed).total_seconds() / 3600.0)
+        return None
+
+    def _make_procedural_pattern(
+        self,
+        procedure: Dict[str, Any],
+        cfg: PatternConfig,
+    ) -> EmergentPattern:
+        steps = [str(step).strip() for step in procedure.get("steps", []) or [] if str(step).strip()]
+        description = str(procedure.get("description", "") or "").strip()
+        if description.lower().startswith("successful workflow for "):
+            suffix = description[len("Successful workflow for "):].strip()
+            description = f"Stable learned workflow for {suffix}"
+        elif description:
+            description = f"Stable reliance on learned routine: {description}"
+        else:
+            description = "Stable reliance on a previously successful routine"
+
+        first_step = steps[0] if steps else "the known sequence"
+        tendencies = [
+            "Reuses proven action sequences",
+            f"Often starts with: {first_step}",
+        ]
+        if len(steps) > 1:
+            tendencies.append(f"Usually continues with: {steps[1]}")
+
+        return EmergentPattern(
+            name=self._procedural_pattern_name(steps),
+            description=description,
+            strength=self._procedural_pattern_strength(procedure, cfg),
+            category="procedural_pattern",
+            context_triggers=["goal_execution", "repeated_success", "learned_workflow"],
+            behavioral_tendencies=tendencies,
+            big_five_facet="conscientiousness",
+            big_five_loading=0.25,
+        )
+
+    def _procedural_pattern_name(self, steps: List[str]) -> str:
+        normalized = " -> ".join(self._normalize_step_text(step) for step in steps if step)
+        digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:10]
+        return f"learned_routine_{digest}"
+
+    @staticmethod
+    def _normalize_step_text(step: str) -> str:
+        cleaned = re.sub(r"[^a-z0-9]+", " ", step.lower()).strip()
+        return " ".join(cleaned.split())
+
+    def _procedural_pattern_strength(
+        self,
+        procedure: Dict[str, Any],
+        cfg: PatternConfig,
+    ) -> float:
+        usage_count = max(0, int(procedure.get("usage_count", 0) or 0))
+        procedure_strength = max(0.0, float(procedure.get("strength", 0.0) or 0.0))
+        strength = cfg.procedural_pattern_min_strength + min(0.2, usage_count * 0.03 + procedure_strength * 0.25)
+        return min(0.6, max(cfg.initial_strength, strength))
 
     # ── Context summary for LLM injection ────────────────────────────
 

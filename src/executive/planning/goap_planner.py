@@ -148,6 +148,7 @@ class GOAPPlanner:
         goal_state: WorldState,
         max_iterations: int = 1000,
         plan_context: Optional[dict] = None,
+        preferred_action_names: Optional[list[str]] = None,
     ) -> Optional[Plan]:
         """
         Find optimal action sequence from initial to goal state.
@@ -157,15 +158,37 @@ class GOAPPlanner:
             goal_state: Desired world state (only specified keys must match)
             max_iterations: Maximum search iterations (prevents infinite loops)
             plan_context: Optional planning context (for constraint checking)
+            preferred_action_names: Optional ordered procedural action hints
 
         Returns:
             Plan object with action sequence, or None if no plan found
         """
         start_time = time.perf_counter()
         self._nodes_expanded = 0
+        preferred_actions = [
+            str(name).strip() for name in (preferred_action_names or []) if str(name).strip()
+        ]
+        resolved_preferred_actions = [
+            action.name for action in self._resolve_preferred_actions(preferred_actions)
+        ]
         
         # Track planning attempt
         self._metrics.inc("goap_planning_attempts_total")
+
+        if plan_context is not None and preferred_actions:
+            plan_context["preferred_action_names"] = list(preferred_actions)
+            plan_context["resolved_preferred_actions"] = list(resolved_preferred_actions)
+
+        if resolved_preferred_actions:
+            preferred_plan = self._plan_from_preferred_actions(
+                initial_state=initial_state,
+                goal_state=goal_state,
+                preferred_action_names=resolved_preferred_actions,
+                start_time=start_time,
+                plan_context=plan_context,
+            )
+            if preferred_plan is not None:
+                return preferred_plan
 
         # Check if already at goal
         if initial_state.satisfies(goal_state):
@@ -233,11 +256,17 @@ class GOAPPlanner:
                     f"nodes={plan.nodes_expanded}, "
                     f"time={plan.planning_time_ms:.1f}ms"
                 )
+                if plan_context is not None:
+                    if resolved_preferred_actions:
+                        plan_context.setdefault("planning_source", "procedural_guided_search")
+                    else:
+                        plan_context.setdefault("planning_source", "goap_search")
                 return plan
 
             # Expand neighbors (applicable actions)
-            applicable_actions = self.action_library.get_applicable_actions(
-                current.state
+            applicable_actions = self._ordered_applicable_actions(
+                self.action_library.get_applicable_actions(current.state),
+                resolved_preferred_actions,
             )
 
             for action in applicable_actions:
@@ -290,6 +319,98 @@ class GOAPPlanner:
             f"expanded {self._nodes_expanded} nodes, "
             f"time={planning_time_ms:.1f}ms"
         )
+        if plan_context is not None:
+            plan_context.setdefault("planning_source", "goap_search_failed")
+        return None
+
+    def _ordered_applicable_actions(
+        self,
+        actions: list[Action],
+        preferred_action_names: list[str],
+    ) -> list[Action]:
+        if not preferred_action_names:
+            return actions
+
+        preference_rank = {name: index for index, name in enumerate(preferred_action_names)}
+        return sorted(
+            actions,
+            key=lambda action: (
+                preference_rank.get(action.name, len(preference_rank)),
+                action.cost,
+                action.name,
+            ),
+        )
+
+    def _resolve_preferred_actions(self, preferred_action_names: list[str]) -> list[Action]:
+        resolved: list[Action] = []
+        for name in preferred_action_names:
+            action = self.action_library.resolve_action(name)
+            if action is None:
+                break
+            resolved.append(action)
+        return resolved
+
+    def _plan_from_preferred_actions(
+        self,
+        *,
+        initial_state: WorldState,
+        goal_state: WorldState,
+        preferred_action_names: list[str],
+        start_time: float,
+        plan_context: Optional[dict],
+    ) -> Optional[Plan]:
+        resolved_actions = self._resolve_preferred_actions(preferred_action_names)
+        if not resolved_actions:
+            if plan_context is not None:
+                plan_context["procedural_replay_attempted"] = False
+                plan_context["resolved_preferred_actions"] = []
+            return None
+
+        if plan_context is not None:
+            plan_context["procedural_replay_attempted"] = True
+            plan_context["resolved_preferred_actions"] = [action.name for action in resolved_actions]
+
+        current_state = initial_state
+        steps: list[PlanStep] = []
+        total_cost = 0.0
+
+        for index, action in enumerate(resolved_actions, start=1):
+            if not action.is_applicable(current_state):
+                return None
+
+            next_state = action.apply(current_state)
+            step_cost = action.get_cost(current_state, next_state)
+            steps.append(
+                PlanStep(
+                    action=action,
+                    state_before=current_state,
+                    state_after=next_state,
+                    cost=step_cost,
+                    step_number=index,
+                )
+            )
+            total_cost += step_cost
+            current_state = next_state
+
+            if current_state.satisfies(goal_state):
+                planning_time_ms = (time.perf_counter() - start_time) * 1000
+                self._metrics.inc("goap_procedural_plans_used_total")
+                self._metrics.inc("goap_plans_found_total")
+                self._metrics.observe("goap_plan_length", len(steps))
+                self._metrics.observe("goap_plan_cost", total_cost)
+                self._metrics.observe("goap_nodes_expanded", 0)
+                self._metrics.observe_hist("goap_planning_latency_ms", planning_time_ms)
+                if plan_context is not None:
+                    plan_context["planning_source"] = "procedural_replay"
+                return Plan(
+                    steps=steps,
+                    initial_state=initial_state,
+                    goal_state=goal_state,
+                    total_cost=total_cost,
+                    nodes_expanded=0,
+                    planning_time_ms=planning_time_ms,
+                )
+
         return None
 
     def _reconstruct_plan(

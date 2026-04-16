@@ -123,6 +123,11 @@ class IntegrationConfig:
     auto_replan_on_failure: bool = True
     max_replan_attempts: int = 3
 
+    # Procedural consolidation settings
+    procedural_promotion_min_successes: int = 2
+    procedural_promotion_min_outcome_score: float = 0.75
+    procedural_promotion_min_plan_adherence: float = 0.0
+
     # Side effects (advisor-only defaults)
     create_reminders_from_schedule: bool = False
 
@@ -155,7 +160,7 @@ class ExecutiveSystem:
         health = system.get_system_health()
     """
     
-    def __init__(self, config: Optional[IntegrationConfig] = None):
+    def __init__(self, config: Optional[IntegrationConfig] = None, procedural: Optional[Any] = None):
         """
         Initialize executive system with all components.
         
@@ -164,6 +169,9 @@ class ExecutiveSystem:
         """
         self.config = config or IntegrationConfig()
         self.metrics = get_metrics_registry()
+        self._memory_system = None
+        self._procedural = procedural
+        self._procedural_unavailable = False
         
         # Initialize components
         logger.info("Initializing ExecutiveSystem components...")
@@ -280,6 +288,253 @@ class ExecutiveSystem:
             GoalPriority.CRITICAL: 10,
         }
         return mapping.get(priority, 5)
+
+    def _get_procedural_memory(self) -> Any | None:
+        if self._procedural is not None:
+            return self._procedural
+        if self._procedural_unavailable:
+            return None
+
+        try:
+            from src.memory import MemorySystem
+
+            self._memory_system = self._memory_system or MemorySystem()
+            self._procedural = self._memory_system.procedural
+            return self._procedural
+        except Exception as exc:
+            logger.debug("Procedural memory unavailable for ExecutiveSystem: %s", exc)
+            self._procedural_unavailable = True
+            return None
+
+    def _goal_procedural_queries(self, goal: Goal) -> List[str]:
+        queries: List[str] = []
+        for candidate in [goal.title, goal.description, *(goal.success_criteria[:2] if goal.success_criteria else [])]:
+            normalized = " ".join(str(candidate or "").split()).strip()
+            if normalized and normalized not in queries:
+                queries.append(normalized)
+        return queries[:4]
+
+    def _retrieve_goal_procedures(self, goal: Goal, *, max_results: int = 3) -> List[Dict[str, Any]]:
+        procedural = self._get_procedural_memory()
+        if procedural is None:
+            return []
+
+        results_by_id: Dict[str, Dict[str, Any]] = {}
+        for query in self._goal_procedural_queries(goal):
+            try:
+                matches = procedural.search(query, max_results=max(max_results * 3, 10))
+            except Exception:
+                continue
+            for proc in matches or []:
+                proc_id = str(proc.get("id", "") or "")
+                if proc_id and proc_id not in results_by_id:
+                    results_by_id[proc_id] = dict(proc)
+
+        return sorted(
+            results_by_id.values(),
+            key=lambda proc: (
+                -float(proc.get("strength", 0.0) or 0.0),
+                -float(proc.get("usage_count", 0) or 0.0),
+                str(proc.get("description", "") or ""),
+            ),
+        )[:max_results]
+
+    def _serialize_procedure_match(self, procedure: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": str(procedure.get("id", "") or ""),
+            "description": str(procedure.get("description", "") or ""),
+            "strength": float(procedure.get("strength", 0.0) or 0.0),
+            "usage_count": int(procedure.get("usage_count", 0) or 0),
+            "tags": [str(tag) for tag in procedure.get("tags", []) or []],
+        }
+
+    def _annotate_decision_result_with_procedures(
+        self,
+        decision_result: Any,
+        procedures: List[Dict[str, Any]],
+    ) -> None:
+        if not procedures:
+            return
+
+        summaries = [self._serialize_procedure_match(proc) for proc in procedures]
+        labels = ", ".join(
+            summary["description"] for summary in summaries[:2] if str(summary.get("description") or "").strip()
+        )
+
+        if hasattr(decision_result, "metadata") and isinstance(getattr(decision_result, "metadata", None), dict):
+            decision_result.metadata["procedural_matches"] = summaries
+            rationale = str(getattr(decision_result, "rationale", "") or "").strip()
+            if labels and "Known procedures considered:" not in rationale:
+                decision_result.rationale = (
+                    f"{rationale}\nKnown procedures considered: {labels}".strip()
+                    if rationale
+                    else f"Known procedures considered: {labels}"
+                )
+            return
+
+        if isinstance(decision_result, dict):
+            metadata = decision_result.setdefault("metadata", {})
+            if isinstance(metadata, dict):
+                metadata["procedural_matches"] = summaries
+
+    def _extract_plan_step_names(self, plan: Any) -> List[str]:
+        if plan is None:
+            return []
+
+        if hasattr(plan, "get_action_sequence"):
+            try:
+                sequence = plan.get_action_sequence()
+            except Exception:
+                sequence = []
+            return [str(step).strip() for step in sequence if str(step).strip()]
+
+        extracted: List[str] = []
+        for step in getattr(plan, "steps", []) or []:
+            if isinstance(step, dict):
+                candidate = step.get("name") or step.get("action") or step.get("description")
+            else:
+                action = getattr(step, "action", None)
+                candidate = getattr(action, "name", None) if action is not None else None
+                candidate = candidate or getattr(step, "name", None) or getattr(step, "description", None)
+            normalized = str(candidate or "").strip()
+            if normalized:
+                extracted.append(normalized)
+        return extracted
+
+    def _decision_approach_tag(self, decision_result: Any) -> str | None:
+        if hasattr(decision_result, "recommended_option"):
+            option = getattr(decision_result, "recommended_option", None)
+            name = getattr(option, "name", None)
+            normalized = str(name or "").strip()
+            return normalized or None
+
+        if isinstance(decision_result, dict):
+            selected = decision_result.get("selected_option") or decision_result.get("recommended_option")
+            normalized = str(selected or "").strip()
+            return normalized or None
+
+        return None
+
+    def _update_outcome_procedural_metadata(self, outcome: "OutcomeRecord", updates: Dict[str, Any]) -> None:
+        if not updates:
+            return
+        try:
+            self.outcome_tracker.update_outcome_metadata(outcome.record_id, updates)
+        except Exception:
+            return
+
+    def _reinforce_or_compile_procedure(self, context: ExecutionContext, outcome: "OutcomeRecord") -> None:
+        procedural = self._get_procedural_memory()
+        if procedural is None:
+            return
+
+        reinforced_ids: List[str] = []
+        for proc_id in context.metadata.get("procedural_match_ids", []) or []:
+            normalized = str(proc_id or "").strip()
+            if not normalized:
+                continue
+            try:
+                if procedural.use(normalized):
+                    reinforced_ids.append(normalized)
+            except Exception:
+                continue
+
+        if reinforced_ids:
+            context.metadata["procedural_reinforced_ids"] = reinforced_ids
+            for _ in reinforced_ids:
+                self.metrics.inc("executive_procedural_reinforcements_total")
+            self._update_outcome_procedural_metadata(
+                outcome,
+                {
+                    "procedural_reinforced_ids": reinforced_ids,
+                    "procedural_promotion_status": "reused_match",
+                },
+            )
+            return
+
+        steps = self._extract_plan_step_names(context.plan)
+        if not steps:
+            return
+
+        signature = str(outcome.metadata.get("action_sequence_signature") or "").strip()
+        if not signature:
+            return
+
+        stats = self.outcome_tracker.get_action_sequence_stats(
+            signature,
+            min_outcome_score=self.config.procedural_promotion_min_outcome_score,
+            min_plan_adherence=self.config.procedural_promotion_min_plan_adherence,
+        )
+        qualified_success_count = int(stats.get("qualified_success_count", 0) or 0)
+        context.metadata["procedural_qualified_success_count"] = qualified_success_count
+        context.metadata["procedural_promotion_threshold"] = self.config.procedural_promotion_min_successes
+
+        existing_procedure_id = str(stats.get("latest_procedure_id") or "").strip()
+        if existing_procedure_id:
+            try:
+                if procedural.use(existing_procedure_id):
+                    context.metadata["procedural_reinforced_ids"] = [existing_procedure_id]
+                    context.metadata["procedural_promotion_status"] = "reused_existing"
+                    self.metrics.inc("executive_procedural_reinforcements_total")
+                    self._update_outcome_procedural_metadata(
+                        outcome,
+                        {
+                            "procedural_reinforced_ids": [existing_procedure_id],
+                            "procedural_promotion_status": "reused_existing",
+                        },
+                    )
+                    return
+            except Exception:
+                pass
+
+        if qualified_success_count < self.config.procedural_promotion_min_successes:
+            context.metadata["procedural_promotion_status"] = "pending"
+            context.metadata["procedural_promotion_pending"] = qualified_success_count
+            self._update_outcome_procedural_metadata(
+                outcome,
+                {
+                    "procedural_promotion_status": "pending",
+                    "procedural_promotion_pending": qualified_success_count,
+                },
+            )
+            return
+
+        tags = ["executive", "goal", "successful-plan"]
+        approach = self._decision_approach_tag(context.decision_result)
+        if approach:
+            tags.append(approach)
+        tags.extend(["pattern-promoted", "recurrent-success"])
+
+        associations = [context.goal_id, *list(stats.get("goal_ids", []) or [])]
+        deduped_associations: List[str] = []
+        for association in associations:
+            normalized = str(association or "").strip()
+            if normalized and normalized not in deduped_associations:
+                deduped_associations.append(normalized)
+
+        try:
+            compiled_id = procedural.store(
+                description=f"Successful workflow for {context.goal_title}",
+                steps=steps,
+                tags=tags,
+                memory_type="ltm",
+                source="executive",
+                associations=deduped_associations,
+            )
+        except Exception:
+            return
+
+        context.metadata["compiled_procedure_id"] = compiled_id
+        context.metadata["procedural_promotion_status"] = "promoted"
+        self.metrics.inc("executive_procedural_compilations_total")
+        self.metrics.inc("executive_procedural_promotions_total")
+        self._update_outcome_procedural_metadata(
+            outcome,
+            {
+                "compiled_procedure_id": compiled_id,
+                "procedural_promotion_status": "promoted",
+            },
+        )
     
     def execute_goal(self, goal_id: str, initial_state: Optional[WorldState] = None) -> ExecutionContext:
         """Backward-compatible alias for :meth:`plan_goal`.
@@ -331,8 +586,18 @@ class ExecutiveSystem:
             # Stage 1: Decision Making
             logger.info("Stage 1: Decision making...")
             decision_start = datetime.now()
-            
-            decision_result = self._make_goal_decision(goal)
+
+            procedural_matches = self._retrieve_goal_procedures(goal)
+            context.metadata["procedural_match_ids"] = [
+                str(proc.get("id", "") or "") for proc in procedural_matches if str(proc.get("id", "") or "").strip()
+            ]
+            if procedural_matches:
+                context.metadata["procedural_matches"] = [
+                    self._serialize_procedure_match(proc) for proc in procedural_matches
+                ]
+
+            decision_result = self._make_goal_decision(goal, procedural_matches=procedural_matches)
+            self._annotate_decision_result_with_procedures(decision_result, procedural_matches)
             context.decision_result = decision_result
             context.decision_time_ms = (datetime.now() - decision_start).total_seconds() * 1000
             
@@ -340,11 +605,20 @@ class ExecutiveSystem:
             logger.info("Stage 2: GOAP planning...")
             planning_start = datetime.now()
             
-            plan = self._create_goal_plan(goal, decision_result, initial_state)
+            planning_metadata: Dict[str, Any] = {}
+            plan = self._create_goal_plan(
+                goal,
+                decision_result,
+                initial_state,
+                procedural_matches=procedural_matches,
+                planning_metadata=planning_metadata,
+            )
             if not plan:
                 context.status = ExecutionStatus.FAILED
                 context.failure_reason = "Planning failed - no valid plan found"
                 return context
+
+            context.metadata.update(planning_metadata)
             
             context.plan = plan
             context.total_actions = len(plan.steps)
@@ -400,7 +674,11 @@ class ExecutiveSystem:
             self.metrics.inc("executive_goal_failures_total")
             return context
     
-    def _make_goal_decision(self, goal: Goal) -> DecisionResult:
+    def _make_goal_decision(
+        self,
+        goal: Goal,
+        procedural_matches: Optional[List[Dict[str, Any]]] = None,
+    ) -> DecisionResult:
         """
         Make decision on how to approach goal.
         
@@ -413,10 +691,17 @@ class ExecutiveSystem:
         Returns:
             Decision result
         """
-        return self.decision_stage.make_goal_decision(goal)
+        return self.decision_stage.make_goal_decision(goal, procedural_matches=procedural_matches)
     
-    def _create_goal_plan(self, goal: Goal, decision: DecisionResult,
-                         initial_state: Optional[WorldState] = None) -> Optional[Plan]:
+    def _create_goal_plan(
+        self,
+        goal: Goal,
+        decision: DecisionResult,
+        initial_state: Optional[WorldState] = None,
+        *,
+        procedural_matches: Optional[List[Dict[str, Any]]] = None,
+        planning_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Plan]:
         """
         Create GOAP plan to achieve goal.
         
@@ -428,7 +713,13 @@ class ExecutiveSystem:
         Returns:
             Plan or None if planning failed
         """
-        return self.planning_stage.create_goal_plan(goal, decision, initial_state)
+        return self.planning_stage.create_goal_plan(
+            goal,
+            decision,
+            initial_state,
+            procedural_matches=procedural_matches,
+            planning_metadata=planning_metadata,
+        )
     
     def _goal_to_world_state(self, goal: Goal) -> WorldState:
         """
@@ -551,6 +842,9 @@ class ExecutiveSystem:
             outcome_score=outcome_score,
             deviations=deviations,
         )
+
+        if success:
+            self._reinforce_or_compile_procedure(context, outcome)
         
         logger.info(
             f"Completed goal '{context.goal_title}': "

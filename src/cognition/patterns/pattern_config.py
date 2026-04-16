@@ -35,6 +35,10 @@ class PatternConfig:
         Felt quality magnitude above which relational patterns trigger.
     conflict_tension_threshold : float
         Conflict tension above which conflict patterns form.
+    procedural_activation_window_hours : float
+        Hours during which promoted procedural routines count as active.
+    procedural_pattern_min_strength : float
+        Minimum starting strength for procedural routine patterns.
     initial_strength : float
         Starting strength for newly detected patterns.
     """
@@ -51,4 +55,6 @@ class PatternConfig:
     felt_intensity_threshold: float = 0.5
     relational_quality_threshold: float = 0.3
     conflict_tension_threshold: float = 0.4
+    procedural_activation_window_hours: float = 72.0
+    procedural_pattern_min_strength: float = 0.18
     initial_strength: float = 0.1

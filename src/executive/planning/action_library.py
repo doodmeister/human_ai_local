@@ -5,9 +5,14 @@ Defines actions with preconditions, effects, and costs.
 Actions are the building blocks of plans.
 """
 
+import re
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from .world_state import WorldState
+
+
+def _normalize_action_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
 @dataclass
@@ -147,6 +152,33 @@ class ActionLibrary:
     def get_action(self, name: str) -> Optional[Action]:
         """Get action by name"""
         return self.actions.get(name)
+
+    def resolve_action(self, reference: str) -> Optional[Action]:
+        """Resolve an action by exact name or normalized name/description match."""
+        normalized = _normalize_action_text(reference)
+        if not normalized:
+            return None
+
+        exact = self.get_action(reference)
+        if exact is not None:
+            return exact
+
+        candidates = list(self.actions.values())
+        for action in candidates:
+            if normalized == _normalize_action_text(action.name):
+                return action
+            if action.description and normalized == _normalize_action_text(action.description):
+                return action
+
+        for action in candidates:
+            action_name = _normalize_action_text(action.name)
+            action_description = _normalize_action_text(action.description)
+            if normalized in action_name or action_name in normalized:
+                return action
+            if action_description and (normalized in action_description or action_description in normalized):
+                return action
+
+        return None
     
     def get_applicable_actions(self, state: WorldState) -> List[Action]:
         """

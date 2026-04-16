@@ -48,6 +48,7 @@ class ContextBuilder:
         attention: Any = None,
         executive: Any = None,
         prospective: Any = None,
+        procedural: Any = None,
         autobiographical_store: Any = None,
     ):
         # Start with global defaults, then overlay any provided config
@@ -65,6 +66,7 @@ class ContextBuilder:
         self.attention = attention
         self.executive = executive
         self.prospective = prospective
+        self.procedural = procedural
         self._autobiographical_store = autobiographical_store
         self._retrieval_planner = RetrievalPlanner()
         self._memory_reranker = MemoryReranker()
@@ -139,6 +141,12 @@ class ContextBuilder:
                 items,
                 retrieval_plan=retrieval_plan,
                 relationship_memory=relationship_memory,
+                trace=trace,
+            )
+            fallback_used |= self._stage_with_fallback(
+                name="procedural_skills",
+                retrieval=lambda: self._retrieve_procedural(query, retrieval_plan),
+                sink=items,
                 trace=trace,
             )
 
@@ -288,10 +296,13 @@ class ContextBuilder:
         metrics.stm_hits = sum(1 for c in items if c.source_system == "stm")
         metrics.ltm_hits = sum(1 for c in items if c.source_system == "ltm")
         metrics.episodic_hits = sum(1 for c in items if c.source_system == "episodic")
+        metrics.procedural_hits = sum(1 for c in items if c.source_system == "procedural")
         metrics.fallback_used = fallback_used
         metrics.turn_latency_ms = (time.time() - start) * 1000.0
         metrics.retrieval_time_ms = sum(
-            s.latency_ms for s in trace.pipeline_stages if "semantic" in s.name or "anchors" in s.name
+            s.latency_ms
+            for s in trace.pipeline_stages
+            if "semantic" in s.name or "anchors" in s.name or "procedural" in s.name
         )
 
         if fallback_used:
@@ -430,6 +441,179 @@ class ContextBuilder:
         except Exception as e:  # pragma: no cover
             metrics_registry.inc("episodic_anchors_errors_total")
             return self._fallback_word_overlap(query, source="episodic_fallback", note=str(e))
+
+    def _retrieve_procedural(
+        self,
+        query: Optional[str],
+        retrieval_plan: Optional[RetrievalPlan] = None,
+    ) -> List[ContextItem]:
+        if not self.procedural:
+            self._last_stage_stats = {"kept": 0, "filtered": 0, "threshold": None, "queries": []}
+            return []
+
+        queries = self._procedural_queries(query)
+        if not queries:
+            self._last_stage_stats = {"kept": 0, "filtered": 0, "threshold": None, "queries": []}
+            return []
+
+        strength_threshold = float(self.cfg.get("procedural_strength_min", 0.2))
+        limit = int(self.cfg.get("procedural_max_context_items", 3) or 3)
+        raw_limit = max(limit * 4, 12)
+        candidates: Dict[str, Dict[str, Any]] = {}
+        filtered = 0
+        fallback_queries: List[str] = []
+
+        for search_query in queries:
+            try:
+                raw_results = self.procedural.search(search_query, max_results=raw_limit)
+            except Exception:
+                raw_results = []
+
+            if not raw_results:
+                raw_results = self._procedural_fallback_overlap(search_query)
+                if raw_results:
+                    fallback_queries.append(search_query)
+
+            for proc in raw_results or []:
+                proc_id = str(proc.get("id", "") or "")
+                if not proc_id:
+                    continue
+                strength = float(proc.get("strength", 0.0) or 0.0)
+                usage_count = float(proc.get("usage_count", 0) or 0.0)
+                overlap = float(proc.get("_overlap", 0.0) or 0.0)
+                if strength < strength_threshold and usage_count <= 0 and overlap <= 0.0:
+                    filtered += 1
+                    continue
+
+                existing = candidates.get(proc_id)
+                if existing is None:
+                    candidates[proc_id] = dict(proc)
+                    continue
+
+                existing_overlap = float(existing.get("_overlap", 0.0) or 0.0)
+                existing_strength = float(existing.get("strength", 0.0) or 0.0)
+                if overlap > existing_overlap or strength > existing_strength:
+                    candidates[proc_id] = dict(proc)
+
+        ranked = sorted(
+            candidates.values(),
+            key=lambda proc: (
+                -float(proc.get("_overlap", 0.0) or 0.0),
+                -float(proc.get("strength", 0.0) or 0.0),
+                -float(proc.get("usage_count", 0) or 0.0),
+                str(proc.get("description", "") or ""),
+            ),
+        )
+
+        items: List[ContextItem] = []
+        for idx, proc in enumerate(ranked[:limit]):
+            strength = float(proc.get("strength", 0.0) or 0.0)
+            usage_count = float(proc.get("usage_count", 0) or 0.0)
+            overlap = float(proc.get("_overlap", 0.0) or 0.0)
+            similarity = overlap if proc.get("_fallback") else max(overlap, 0.6)
+            items.append(
+                ContextItem(
+                    source_id=str(proc.get("id", idx)),
+                    source_system="procedural",
+                    content=self._format_procedure_context(proc),
+                    rank=100 + idx,
+                    reason="procedural_fallback_overlap" if proc.get("_fallback") else "procedural_match",
+                    scores={
+                        "activation": strength,
+                        "similarity": similarity,
+                        "importance": min(1.0, strength + 0.1),
+                        "salience": min(1.0, usage_count / 5.0),
+                    },
+                    metadata={"raw": proc},
+                )
+            )
+
+        self._last_stage_stats = {
+            "kept": len(items),
+            "filtered": filtered,
+            "threshold": strength_threshold,
+            "queries": queries,
+            "fallback_queries": fallback_queries,
+            "intent": retrieval_plan.intent if retrieval_plan is not None else None,
+        }
+        return items
+
+    def _procedural_queries(self, query: Optional[str]) -> List[str]:
+        queries: List[str] = []
+        for candidate in [query, *self._goal_queries()]:
+            normalized = " ".join(str(candidate or "").split()).strip()
+            if normalized and normalized not in queries:
+                queries.append(normalized)
+        return queries[:4]
+
+    def _goal_queries(self) -> List[str]:
+        queries: List[str] = []
+        for goal in self._get_active_goals()[:3]:
+            for candidate in [
+                getattr(goal, "title", ""),
+                getattr(goal, "description", ""),
+                *(list(getattr(goal, "success_criteria", []) or [])[:2]),
+            ]:
+                normalized = " ".join(str(candidate or "").split()).strip()
+                if normalized and normalized not in queries:
+                    queries.append(normalized)
+        return queries
+
+    def _procedural_fallback_overlap(self, query: str) -> List[Dict[str, Any]]:
+        if not self.procedural or not hasattr(self.procedural, "all_procedures"):
+            return []
+
+        query_tokens = self._autobiographical_query_tokens(query)
+        if not query_tokens:
+            return []
+
+        matches: List[Dict[str, Any]] = []
+        for proc in self.procedural.all_procedures() or []:
+            proc_text = " ".join(
+                [
+                    str(proc.get("description", "") or ""),
+                    *(str(step) for step in proc.get("steps", []) or []),
+                    *(str(tag) for tag in proc.get("tags", []) or []),
+                ]
+            )
+            proc_tokens = self._autobiographical_query_tokens(proc_text)
+            if not proc_tokens:
+                continue
+            overlap = len(query_tokens & proc_tokens) / max(1, len(query_tokens))
+            if overlap <= 0.0:
+                continue
+            enriched = dict(proc)
+            enriched["_overlap"] = overlap
+            enriched["_fallback"] = True
+            matches.append(enriched)
+
+        return sorted(
+            matches,
+            key=lambda proc: (
+                -float(proc.get("_overlap", 0.0) or 0.0),
+                -float(proc.get("strength", 0.0) or 0.0),
+                -float(proc.get("usage_count", 0) or 0.0),
+            ),
+        )
+
+    def _format_procedure_context(self, procedure: Dict[str, Any]) -> str:
+        description = str(procedure.get("description", "") or "").strip()
+        steps = [str(step).strip() for step in procedure.get("steps", []) or [] if str(step).strip()]
+        tags = [str(tag).strip() for tag in procedure.get("tags", []) or [] if str(tag).strip()]
+        strength = float(procedure.get("strength", 0.0) or 0.0)
+        usage_count = int(procedure.get("usage_count", 0) or 0)
+
+        lines = [f"KNOWN PROCEDURE: {description}"]
+        if steps:
+            lines.append("Steps:")
+            for index, step in enumerate(steps[:5], start=1):
+                lines.append(f"{index}. {step}")
+            if len(steps) > 5:
+                lines.append(f"... and {len(steps) - 5} more steps")
+        if tags:
+            lines.append("Tags: " + ", ".join(tags[:4]))
+        lines.append(f"Strength: {strength:.2f} | Usage: {usage_count}")
+        return "\n".join(lines)
 
     def _timed_search(self, memory_obj: Any, query: str, label: str, max_results: Optional[int] = None):
         result_container = {}
@@ -862,6 +1046,41 @@ class ContextBuilder:
 
     # --- Attention & Executive Injectors (placeholders) ---
 
+    def _get_active_goals(self) -> List[Any]:
+        if not self.executive:
+            return []
+
+        goal_manager = getattr(self.executive, "goal_manager", None)
+        if goal_manager is None:
+            return []
+
+        try:
+            if hasattr(goal_manager, "get_active_goals"):
+                return list(goal_manager.get_active_goals())
+            if hasattr(goal_manager, "goals"):
+                active_goals: List[Any] = []
+                for goal in goal_manager.goals.values():
+                    status = getattr(goal, "status", None)
+                    status_value = str(getattr(status, "value", status) or "").strip().lower()
+                    if status_value in {"pending", "in_progress", "active", "created"}:
+                        active_goals.append(goal)
+                return active_goals
+        except Exception:
+            return []
+
+        return []
+
+    def _goal_priority_ratio(self, goal: Any) -> float:
+        priority = getattr(goal, "priority", 0.5)
+        raw_value = getattr(priority, "value", priority)
+        try:
+            numeric = float(raw_value)
+        except Exception:
+            return 0.5
+        if numeric > 1.0:
+            numeric = numeric / 5.0
+        return max(0.0, min(1.0, numeric))
+
     def _inject_attention_focus(self) -> List[ContextItem]:
         if not self.attention:
             return []
@@ -923,45 +1142,36 @@ class ContextBuilder:
         
         # Inject active goals if goal_manager available
         try:
-            goal_manager = getattr(self.executive, "goal_manager", None)
-            if goal_manager is not None:
-                active_goals = []
-                # Try to get active goals
-                if hasattr(goal_manager, "get_active_goals"):
-                    active_goals = goal_manager.get_active_goals()
-                elif hasattr(goal_manager, "goals"):
-                    all_goals = goal_manager.goals
-                    active_goals = [g for g in all_goals.values() if g.status in ("pending", "in_progress", "active")]
-                
-                if active_goals:
-                    # Create a concise summary of active goals for LLM context
-                    goal_summaries = []
-                    for goal in active_goals[:5]:  # Limit to top 5 goals
-                        title = getattr(goal, "title", getattr(goal, "description", str(goal)))
-                        priority = getattr(goal, "priority", 0.5)
-                        status = getattr(goal, "status", "pending")
-                        deadline = getattr(goal, "deadline", None)
-                        
-                        summary = f"- {title} (priority: {priority:.0%}, status: {status})"
-                        if deadline:
-                            summary += f" [deadline: {deadline}]"
-                        goal_summaries.append(summary)
-                    
-                    goals_content = "USER'S ACTIVE GOALS:\n" + "\n".join(goal_summaries)
-                    if len(active_goals) > 5:
-                        goals_content += f"\n... and {len(active_goals) - 5} more goals"
-                    
-                    items.append(
-                        ContextItem(
-                            source_id="active_goals",
-                            source_system="executive",
-                            content=goals_content,
-                            rank=RANK_BASE_EXECUTIVE - 1,  # Slightly higher priority than mode
-                            reason="active_goals_context",
-                            scores={"relevance": 0.9, "goal_count": len(active_goals)},
-                            metadata={"goal_count": len(active_goals)},
-                        )
+            active_goals = self._get_active_goals()
+            if active_goals:
+                goal_summaries = []
+                for goal in active_goals[:5]:
+                    title = getattr(goal, "title", getattr(goal, "description", str(goal)))
+                    priority = self._goal_priority_ratio(goal)
+                    status = getattr(goal, "status", "pending")
+                    status_label = getattr(status, "value", status)
+                    deadline = getattr(goal, "deadline", None)
+
+                    summary = f"- {title} (priority: {priority:.0%}, status: {status_label})"
+                    if deadline:
+                        summary += f" [deadline: {deadline}]"
+                    goal_summaries.append(summary)
+
+                goals_content = "USER'S ACTIVE GOALS:\n" + "\n".join(goal_summaries)
+                if len(active_goals) > 5:
+                    goals_content += f"\n... and {len(active_goals) - 5} more goals"
+
+                items.append(
+                    ContextItem(
+                        source_id="active_goals",
+                        source_system="executive",
+                        content=goals_content,
+                        rank=RANK_BASE_EXECUTIVE - 1,
+                        reason="active_goals_context",
+                        scores={"relevance": 0.9, "goal_count": len(active_goals)},
+                        metadata={"goal_count": len(active_goals)},
                     )
+                )
         except Exception:
             # Don't fail if goal injection doesn't work
             pass

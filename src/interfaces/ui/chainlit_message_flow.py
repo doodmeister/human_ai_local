@@ -19,8 +19,8 @@ KNOWN_CHAINLIT_COMMANDS = frozenset(
     }
 )
 
-SEARCHABLE_MEMORY_SYSTEMS = frozenset({"stm", "ltm", "episodic", "semantic"})
-LIST_ONLY_MEMORY_SYSTEMS = frozenset({"prospective", "procedural"})
+SEARCHABLE_MEMORY_SYSTEMS = frozenset({"stm", "ltm", "episodic", "semantic", "procedural"})
+LIST_ONLY_MEMORY_SYSTEMS = frozenset({"prospective"})
 ALL_MEMORY_SYSTEMS = frozenset(SEARCHABLE_MEMORY_SYSTEMS | LIST_ONLY_MEMORY_SYSTEMS)
 
 DREAM_SUGGESTION_INTERVAL_TURNS = 15
@@ -458,6 +458,9 @@ def _build_metrics_artifact_lines(
         ltm_hits = metrics.get("ltm_hits")
         if ltm_hits is not None:
             parts.append(f"LTM={ltm_hits}")
+        procedural_hits = metrics.get("procedural_hits")
+        if procedural_hits is not None:
+            parts.append(f"PROC={procedural_hits}")
         salience = _safe_float(metrics.get("user_salience"))
         if salience is not None:
             parts.append(f"salience={salience:.2f}")
