@@ -214,7 +214,17 @@ class StubCognitiveLayers:
         self._policy = policy
         self.calls: list[dict[str, object]] = []
 
-    def process_turn(self, *, session, tick, message: str, salience: float, valence: float, global_turn_counter: int) -> None:
+    def process_turn(
+        self,
+        *,
+        session,
+        tick,
+        message: str,
+        salience: float,
+        valence: float,
+        global_turn_counter: int,
+        procedural_memory: Any = None,
+    ) -> None:
         self.calls.append(
             {
                 "session": session,
@@ -222,6 +232,7 @@ class StubCognitiveLayers:
                 "salience": salience,
                 "valence": valence,
                 "global_turn_counter": global_turn_counter,
+                "procedural_memory": procedural_memory,
             }
         )
         tick.state["response_policy"] = self._policy
@@ -248,8 +259,18 @@ class RuntimeDerivedPolicyLayers:
         store = RelationshipMemoryStore(storage_path=self._relationship_storage_path)
         return store.get(str(getattr(session, "session_id", "") or ""))
 
-    def process_turn(self, *, session, tick, message: str, salience: float, valence: float, global_turn_counter: int) -> None:
-        del message, salience, valence, global_turn_counter
+    def process_turn(
+        self,
+        *,
+        session,
+        tick,
+        message: str,
+        salience: float,
+        valence: float,
+        global_turn_counter: int,
+        procedural_memory: Any = None,
+    ) -> None:
+        del message, salience, valence, global_turn_counter, procedural_memory
         relationship_snapshot = self._relationship_snapshot(session)
         if relationship_snapshot is not None:
             setattr(session, "_relationship_memory_snapshot", relationship_snapshot)
