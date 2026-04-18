@@ -542,7 +542,14 @@ def _format_memory_lines(title: str, memories: List[Dict[str, Any]], *, include_
     """Format memory search and browse results for Chainlit messages."""
     lines = [f"**{title}** ({len(memories)} items):\n"]
     for i, mem in enumerate(memories[:20], 1):
-        text = mem.get("content") or mem.get("detailed_content") or mem.get("summary") or str(mem)
+        # Semantic facts use subject/predicate/object rather than a content field.
+        if not mem.get("content") and mem.get("subject") and mem.get("predicate"):
+            subj = mem.get("subject", "")
+            pred = mem.get("predicate", "")
+            obj = mem.get("object", "")
+            text = f"{subj} {pred} {obj}".strip()
+        else:
+            text = mem.get("content") or mem.get("detailed_content") or mem.get("summary") or str(mem)
         text = str(text)[:200]
         prefix = ""
         if include_source:
