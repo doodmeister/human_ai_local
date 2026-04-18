@@ -1,0 +1,540 @@
+/*
+ * George Chat — Apple-inspired design system
+ * Source: docs/ui_design_system.md
+ *
+ * Principles:
+ *   - Pure black (#000000) backgrounds with single Apple Blue (#0071e3) accent
+ *   - SF Pro font stack with negative letter-spacing at all sizes
+ *   - Tight headline line-heights (1.07-1.14); body at 1.47
+ *   - Pill-shaped action buttons (border-radius: 980px)
+ *   - Translucent glass header (rgba(0,0,0,0.80) + backdrop blur)
+ *   - One diffused card shadow; no textures or gradients
+ */
+
+/* ================================================================
+   CSS custom properties
+   ================================================================ */
+:root {
+  --font-display: "SF Pro Display", "SF Pro Icons", -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-text:    "SF Pro Text",    "SF Pro Icons", -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono:    "SF Mono", "Fira Code", Menlo, Monaco, "Courier New", monospace;
+
+  /* Accent — the ONLY chromatic color */
+  --apple-blue:       #0071e3;
+  --apple-blue-dark:  #0066cc;
+  --apple-blue-light: #2997ff;
+
+  /* Surfaces */
+  --surface-0: #000000;    /* page canvas */
+  --surface-1: #1d1d1f;    /* near-black — primary surfaces */
+  --surface-2: #272729;    /* dark surface — cards */
+  --surface-3: #28282a;    /* elevated cards */
+  --surface-4: #2a2a2d;    /* highest elevation */
+
+  /* Text */
+  --text-primary:   #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.56);
+  --text-tertiary:  rgba(255, 255, 255, 0.32);
+
+  /* Single card shadow */
+  --shadow-card: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px;
+}
+
+/* ================================================================
+   Base typography
+   ================================================================ */
+body,
+#root {
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  line-height: 1.47 !important;
+  letter-spacing: -0.374px !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ================================================================
+   Headings inside chat messages
+   ================================================================ */
+.prose h1,
+[class*="markdown"] h1 {
+  font-family: var(--font-display) !important;
+  font-size: 2.50rem !important;   /* 40px */
+  font-weight: 600 !important;
+  line-height: 1.10 !important;
+  letter-spacing: normal !important;
+  margin-bottom: 0.5em;
+}
+
+.prose h2,
+[class*="markdown"] h2 {
+  font-family: var(--font-display) !important;
+  font-size: 1.75rem !important;   /* 28px */
+  font-weight: 400 !important;
+  line-height: 1.14 !important;
+  letter-spacing: 0.196px !important;
+  margin-bottom: 0.4em;
+}
+
+.prose h3,
+[class*="markdown"] h3 {
+  font-family: var(--font-display) !important;
+  font-size: 1.31rem !important;   /* 21px */
+  font-weight: 600 !important;
+  line-height: 1.19 !important;
+  letter-spacing: 0.231px !important;
+  margin-bottom: 0.3em;
+}
+
+/* Body paragraphs */
+.prose p,
+[class*="markdown"] p {
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  font-weight: 400 !important;
+  line-height: 1.47 !important;
+  letter-spacing: -0.374px !important;
+  margin-bottom: 0.75em;
+}
+
+/* Caption / secondary text (14px) */
+.prose small,
+[class*="markdown"] small,
+[class*="caption"] {
+  font-size: 14px !important;
+  line-height: 1.29 !important;
+  letter-spacing: -0.224px !important;
+  color: var(--text-secondary) !important;
+}
+
+/* ================================================================
+   Links
+   ================================================================ */
+a,
+.prose a,
+[class*="markdown"] a {
+  color: var(--apple-blue-light) !important;
+  text-decoration: none !important;
+}
+
+a:hover,
+.prose a:hover,
+[class*="markdown"] a:hover {
+  text-decoration: underline !important;
+}
+
+/* ================================================================
+   Keyboard focus rings (accessibility)
+   ================================================================ */
+*:focus-visible {
+  outline: 2px solid var(--apple-blue) !important;
+  outline-offset: 2px !important;
+}
+
+/* ================================================================
+   Header — translucent glass bar (Apple nav style)
+   ================================================================ */
+header,
+[class*="Header"],
+[id*="header"] {
+  backdrop-filter: saturate(180%) blur(20px) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px) !important;
+  background: rgba(0, 0, 0, 0.80) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+/* App name in header */
+header [class*="Title"],
+header h1,
+header [class*="AppName"] {
+  font-family: var(--font-display) !important;
+  font-size: 17px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.374px !important;
+  line-height: 1.47 !important;
+  color: var(--text-primary) !important;
+}
+
+/* ================================================================
+   Message containers
+   ================================================================ */
+
+/* User message — near-black bubble */
+[class*="UserMessage"],
+[class*="user_message"] {
+  background: var(--surface-2) !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  letter-spacing: -0.374px !important;
+}
+
+/* Assistant message — no bubble, clean open canvas */
+[class*="AssistantMessage"],
+[class*="assistant_message"] {
+  background: transparent !important;
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  letter-spacing: -0.374px !important;
+}
+
+/* Author / role label */
+[class*="MessageAuthor"],
+[class*="author-name"] {
+  font-family: var(--font-text) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.12px !important;
+  color: var(--text-tertiary) !important;
+  text-transform: uppercase !important;
+}
+
+/* ================================================================
+   Step / tool-call cards
+   ================================================================ */
+[class*="StepContainer"],
+[class*="step-container"],
+.MuiAccordion-root {
+  background: var(--surface-3) !important;
+  border-radius: 8px !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin-bottom: 6px !important;
+}
+
+.MuiAccordionSummary-root {
+  font-family: var(--font-text) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.224px !important;
+  color: var(--text-secondary) !important;
+  min-height: 40px !important;
+}
+
+.MuiAccordionDetails-root {
+  padding: 8px 16px 12px !important;
+  font-family: var(--font-text) !important;
+  font-size: 14px !important;
+  letter-spacing: -0.224px !important;
+  color: var(--text-secondary) !important;
+}
+
+/* ================================================================
+   Action buttons — pill shape (Apple "Learn more" / "Shop" style)
+   ================================================================ */
+[class*="ActionButton"],
+[class*="action-button"],
+[id*="action"] button {
+  border-radius: 980px !important;
+  font-family: var(--font-text) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.224px !important;
+  padding: 6px 16px !important;
+  border: 1px solid var(--apple-blue-light) !important;
+  color: var(--apple-blue-light) !important;
+  background: transparent !important;
+  transition: background 0.15s ease, color 0.15s ease !important;
+  box-shadow: none !important;
+}
+
+[class*="ActionButton"]:hover,
+[class*="action-button"]:hover {
+  background: rgba(41, 151, 255, 0.10) !important;
+}
+
+[class*="ActionButton"]:active,
+[class*="action-button"]:active {
+  background: rgba(41, 151, 255, 0.18) !important;
+}
+
+/* ================================================================
+   Chat input area
+   ================================================================ */
+.MuiInputBase-root,
+[class*="InputBase"],
+[class*="ChatInput"] .MuiOutlinedInput-root {
+  border-radius: 11px !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  letter-spacing: -0.374px !important;
+  line-height: 1.47 !important;
+  transition: border-color 0.15s ease, background 0.15s ease !important;
+}
+
+.MuiInputBase-root:focus-within,
+[class*="ChatInput"] .MuiOutlinedInput-root:focus-within {
+  border-color: var(--apple-blue) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Remove default MUI fieldset border in favour of our custom border */
+.MuiOutlinedInput-notchedOutline {
+  border: none !important;
+}
+
+/* Send / submit button */
+button[type="submit"],
+[class*="SendButton"],
+[class*="send-button"] {
+  color: var(--apple-blue) !important;
+  transition: color 0.15s ease !important;
+}
+
+button[type="submit"]:disabled,
+[class*="SendButton"]:disabled {
+  color: var(--text-tertiary) !important;
+}
+
+/* Command / slash-command bar pills */
+[class*="CommandButton"],
+[class*="command-button"] {
+  border-radius: 980px !important;
+  font-family: var(--font-text) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.12px !important;
+  background: var(--surface-2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-secondary) !important;
+  padding: 4px 12px !important;
+  transition: background 0.15s ease !important;
+}
+
+[class*="CommandButton"]:hover,
+[class*="command-button"]:hover {
+  background: var(--surface-3) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ================================================================
+   MUI Paper / surface overrides
+   ================================================================ */
+.MuiPaper-root {
+  background: var(--surface-2) !important;
+  border-radius: 8px !important;
+  border: none !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+.MuiDivider-root {
+  border-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+/* ================================================================
+   MUI Buttons (settings panel, dialog buttons)
+   ================================================================ */
+
+/* Contained / filled primary */
+.MuiButton-containedPrimary {
+  background: var(--apple-blue) !important;
+  color: #ffffff !important;
+  border-radius: 8px !important;
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.374px !important;
+  padding: 8px 15px !important;
+  box-shadow: none !important;
+  border: 1px solid transparent !important;
+  text-transform: none !important;
+}
+
+.MuiButton-containedPrimary:hover {
+  background: #0077ed !important;
+  box-shadow: none !important;
+}
+
+/* Text / ghost button */
+.MuiButton-text,
+.MuiButton-outlined {
+  border-radius: 8px !important;
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.374px !important;
+  text-transform: none !important;
+  color: var(--apple-blue-light) !important;
+}
+
+.MuiButton-outlined {
+  border-color: var(--apple-blue-light) !important;
+  border-radius: 980px !important;
+  padding: 6px 16px !important;
+}
+
+/* ================================================================
+   MUI Select / dropdowns (settings panel)
+   ================================================================ */
+.MuiSelect-root,
+.MuiSelect-select {
+  font-family: var(--font-text) !important;
+  font-size: 17px !important;
+  letter-spacing: -0.374px !important;
+}
+
+.MuiMenuItem-root {
+  font-family: var(--font-text) !important;
+  font-size: 14px !important;
+  letter-spacing: -0.224px !important;
+}
+
+.MuiMenuItem-root:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.MuiMenuItem-root.Mui-selected {
+  background: rgba(0, 113, 227, 0.15) !important;
+}
+
+/* ================================================================
+   Chips / tags
+   ================================================================ */
+.MuiChip-root {
+  border-radius: 6px !important;
+  font-family: var(--font-text) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.12px !important;
+  background: var(--surface-3) !important;
+  color: var(--text-secondary) !important;
+  border: none !important;
+}
+
+/* ================================================================
+   Starter messages (conversation starters grid)
+   ================================================================ */
+[class*="Starter"],
+[class*="starter-button"],
+[class*="WelcomeScreen"] button {
+  background: var(--surface-2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  font-family: var(--font-text) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.224px !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-card) !important;
+  transition: background 0.15s ease, border-color 0.15s ease !important;
+  text-align: left !important;
+  text-transform: none !important;
+}
+
+[class*="Starter"]:hover,
+[class*="starter-button"]:hover,
+[class*="WelcomeScreen"] button:hover {
+  background: var(--surface-3) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+/* Starter label (bold) */
+[class*="Starter"] strong,
+[class*="starter-button"] strong {
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  letter-spacing: -0.224px !important;
+}
+
+/* ================================================================
+   Code blocks
+   ================================================================ */
+pre {
+  background: var(--surface-2) !important;
+  border-radius: 8px !important;
+  padding: 14px 16px !important;
+  overflow-x: auto !important;
+  font-family: var(--font-mono) !important;
+  font-size: 13px !important;
+  letter-spacing: 0 !important;
+  line-height: 1.5 !important;
+  border: none !important;
+}
+
+code {
+  font-family: var(--font-mono) !important;
+  font-size: 13px !important;
+  letter-spacing: 0 !important;
+}
+
+/* Inline code */
+:not(pre) > code {
+  background: rgba(255, 255, 255, 0.09) !important;
+  border-radius: 5px !important;
+  padding: 2px 5px !important;
+  font-size: 13px !important;
+}
+
+/* ================================================================
+   Scrollbar — thin, minimal
+   ================================================================ */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* ================================================================
+   Text selection highlight
+   ================================================================ */
+::selection {
+  background: rgba(0, 113, 227, 0.28);
+  color: #ffffff;
+}
+
+/* ================================================================
+   Toast / snackbar notifications
+   ================================================================ */
+.MuiSnackbar-root .MuiPaper-root {
+  background: var(--surface-4) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  font-family: var(--font-text) !important;
+  font-size: 14px !important;
+  letter-spacing: -0.224px !important;
+}
+
+/* ================================================================
+   Tooltip
+   ================================================================ */
+.MuiTooltip-tooltip {
+  background: var(--surface-4) !important;
+  font-family: var(--font-text) !important;
+  font-size: 12px !important;
+  letter-spacing: -0.12px !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+}
+
+/* ================================================================
+   Avatar / icon circle
+   ================================================================ */
+.MuiAvatar-root {
+  background: var(--surface-3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ================================================================
+   Sidebar / chat thread list (if shown)
+   ================================================================ */
+[class*="ThreadList"],
+[class*="Sidebar"],
+aside {
+  background: var(--surface-1) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
+}

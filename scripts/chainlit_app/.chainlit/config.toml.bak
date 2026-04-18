@@ -19,10 +19,9 @@ hide_cot = false
 cot_label = "George thinking"
 
 [UI.theme]
-font_family = "SF Pro Text, SF Pro Display, SF Pro Icons, -apple-system, Helvetica Neue, Helvetica, Arial, sans-serif"
-primary = "#0071e3"
-background = "#000000"
-paper = "#1d1d1f"
+primary = "#3b82f6"
+background = "#0f172a"
+paper = "#1e293b"
 
 [meta]
 generated_by = "human_ai_local scaffold"

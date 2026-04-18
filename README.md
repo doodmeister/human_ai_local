@@ -365,6 +365,7 @@ Active docs:
 - `docs/memory_personality_issue_backlog.md` - Remaining follow-up work
 - `docs/goap_architecture.md` and `docs/goap_quick_reference.md` - Planning reference
 - `docs/UI_DEVELOPER_API_QUICKSTART.md` - Frontend/API integration notes
+- `docs/ui_design_system.md` - Apple-inspired design system: color palette, typography, components, layout, and responsive rules
 - `docs/README.md` - Documentation index
 
 Historical summaries remain under `docs/archive/`.

@@ -194,8 +194,18 @@ def search_memory(system: str, req: SearchMemoryRequest, request: Request):
     if system == "stm":
         if not isinstance(req.query, str):
             raise HTTPException(status_code=422, detail="STM search query must be a string.")
-        results = memsys.search(req.query, max_results=req.max_results)
-        return {"results": results}
+        raw = memsys.search(req.query, max_results=req.max_results)
+        # STM search returns List[Tuple[MemoryItem, float]]; normalize to dicts.
+        normalized = []
+        for entry in raw:
+            if isinstance(entry, tuple) and len(entry) == 2:
+                item, score = entry
+                d = _serialize_memory_record(item)
+                d["relevance"] = float(score)
+                normalized.append(d)
+            else:
+                normalized.append(_serialize_memory_record(entry))
+        return {"results": normalized}
 
     # LTM search is more complex
     if system == "ltm":

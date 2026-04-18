@@ -26,6 +26,7 @@ For the fastest current picture of the repo, start with the root runtime docs an
 - `goap_quick_reference.md`: GOAP API and usage cheat sheet
 - `stm_decay_adaptive_activation.md`: current STM decay modes and activation-weight behavior
 - `../scripts/generate_memory_scorecard.py`: deterministic memory and behavior scorecard generator; pass `--fail-on-gate` to use it as a review gate
+- `ui_design_system.md`: Apple-inspired UI design system — color palette, typography scale, component styles, layout principles, and agent prompt guide for UI work
 
 ## Current Runtime Docs
 
