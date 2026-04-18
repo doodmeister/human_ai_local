@@ -27,7 +27,7 @@ The canonical runtime entrypoints are:
 
 ## Recent Changes
 
-The past week landed several major runtime changes:
+Recent work spans the metacognition runtime, executive layer, and the Chainlit conversational UI:
 
 - A full `src/orchestration/metacognition/` subsystem with typed models, interfaces, controller, goal manager, policy engine, executor, critic, scheduler, event bus, presenters, scorecard, and filesystem-backed cycle tracing
 - Background cognition support with persisted scheduled tasks, idle reflection, contradiction-audit scheduling, persisted reflection episodes, and persisted self-model snapshots
@@ -35,7 +35,15 @@ The past week landed several major runtime changes:
 - Attention refactoring in `src/cognition/attention/` to separate lifecycle, state, models, and exceptions from the main mechanism implementation
 - Memory lineage cleanup that standardizes `source_memory_ids` while remaining backward-compatible with older `source_event_ids` payloads
 - Executive and learning improvements around decision history, feature handling, outcome-tracking fidelity, and validation-ready ML decision features
-- Chainlit and Streamlit client updates, plus refreshed UI/API quickstart documentation
+- **Phase 4 — Chainlit conversational UI redesign** (`phase4.md`):
+  - Backend-first `on_message` routing: all normal chat goes through `/agent/chat`; no duplicate intent classifier in the UI
+  - Structured response fields (`intent`, `intent_sections`, `intent_results`, `detected_goal`, `proactive_reminders`, `metrics`, `context_items`, `captured_memories`) drive actions and progressive disclosure
+  - Unified `/memory <query>` fan-out search across STM, LTM, episodic, and semantic; explicit system browsing and prospective/procedural list modes preserved
+  - Progressive artifact disclosure: metrics, context, and captured memories surface only when notable; full detail available with `Include_Trace` enabled
+  - Narrative `/metacog` default with a `--raw` flag for the diagnostic dump
+  - Proactive suggestions (dream, reflect, reminders) derived from backend signals with per-command cooldowns
+  - `Salience_Mode` selector replaces the raw salience slider; `adaptive` defers to the backend default
+  - UI helpers extracted to `src/interfaces/ui/chainlit_message_flow.py` for testability
 
 For the phased metacognition plan and completion status, see `cognition.md`.
 
@@ -206,6 +214,7 @@ GET    /circuit-breakers                   # Circuit breaker states
 ```text
 POST   /memory/{system}/store              # Store memory in STM/LTM/Episodic
 GET    /memory/{system}/retrieve/{id}      # Retrieve by ID
+GET    /memory/{system}/list               # List items in a memory system
 POST   /memory/{system}/search             # Search by query
 GET    /status                             # Memory system status
 
@@ -347,6 +356,7 @@ Active docs:
 
 - `cognition.md` - Metacognition architecture, phases, and rollout status
 - `phase3.md` - Runtime refactor plan and architecture notes
+- `phase4.md` - Chainlit conversational UI redesign plan and completion status
 - `docs/metacog_features.md` - Chat-layer metacognitive snapshot behavior
 - `docs/executive_telemetry.md` - Executive event and metrics wiring
 - `docs/memory_personality_architecture.md` - Memory/personality design
@@ -372,10 +382,12 @@ human_ai_local/
 │   ├── memory/                      # STM, LTM, episodic, autobiographical, procedural, prospective
 │   ├── executive/                   # Goals, decisions, planning, scheduling, learning
 │   ├── interfaces/api/              # FastAPI routers
+│   ├── interfaces/ui/               # Chainlit UI helpers and command-flow logic
 │   └── core/                        # Config and resilience
 ├── tests/                           # Maintained pytest suite
 ├── archived_tests/                  # Manual-only legacy coverage
-├── scripts/                         # Utilities, smoke tests, UI entry modules
+├── scripts/chainlit_app/            # Chainlit entry module, george_api HTTP client
+├── scripts/                         # Utilities, smoke tests, legacy UI entry modules
 ├── docs/                            # Active documentation and archive
 └── data/                            # Persistent stores, traces, outcomes, models
 ```
@@ -390,7 +402,7 @@ Production-ready core areas:
 - Executive orchestration including decision, planning, scheduling, and learning
 - Chat interface with adaptive retrieval, consolidation controls, and performance diagnostics
 - Metacognition runtime through persistence, observability, and background cognition phases
-- Chainlit-backed interactive UI and canonical FastAPI runtime
+- Chainlit conversation-first UI with unified memory search, progressive disclosure, proactive suggestions, and narrative diagnostics
 
 Still evolving:
 

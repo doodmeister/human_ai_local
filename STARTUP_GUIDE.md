@@ -147,9 +147,51 @@ Use these endpoints after the API is up:
 ## Services Overview
 
 - Backend: canonical FastAPI runtime created from `python main.py api`
-- Chainlit: current interactive chat UI
+- Chainlit: current interactive chat UI (conversation-first, backend-driven)
 - Streamlit: legacy UI path
 - CLI: direct terminal interaction path via `python main.py chat`
+
+---
+
+## Chainlit UI Features
+
+The Chainlit UI at `http://localhost:8501` is conversation-first. Normal messages go directly to `/agent/chat` and the backend handles intent classification, memory retrieval, reminders, and goal detection. Slash commands are explicit shortcuts.
+
+### Available Commands
+
+Open with the `/` icon in the message bar or type the command directly:
+
+| Command | Description |
+|---------|-------------|
+| `/memory <query>` | Search across STM, LTM, episodic, and semantic memory |
+| `/memory <system> [query]` | Browse a specific system: `stm`, `ltm`, `episodic`, `semantic`, `prospective`, `procedural` |
+| `/reminders` | List active reminders with complete/snooze/delete actions |
+| `/remind <minutes> <text>` | Create a reminder |
+| `/goals` | List active goals with execute actions |
+| `/goal <title>` | Create a goal |
+| `/dream` | Run a dream consolidation cycle |
+| `/reflect` | Run a manual reflection report |
+| `/learning` | Show learning dashboard metrics |
+| `/metacog` | Narrative self-report of internal state |
+| `/metacog --raw` | Detailed diagnostic dashboard dump |
+
+### Settings Panel
+
+Click the gear icon to access:
+
+- **LLM Provider / Model** — switch between OpenAI and Ollama and select a model
+- **Memory capture sensitivity** — `adaptive` defers to the backend default; `capture_more` or `capture_less` override the salience threshold
+- **Default Snooze** — minutes used when the Snooze button is clicked on a reminder
+- **Include memory retrieval / attention signals** — enable or disable those retrieval layers per turn
+- **Include trace details** — exposes per-turn latency, intent confidence, context items, and capture details in the UI
+
+### Proactive Suggestions
+
+The UI surfaces non-blocking suggestions automatically when backend signals warrant it:
+
+- A `/dream` suggestion when STM utilization reaches 85% or after a heavy session
+- A `/reflect` suggestion when unresolved contradictions, due background tasks, or a high follow-up rate are detected
+- Reminder nudges when upcoming reminders are present
 
 ## Related Docs
 
@@ -157,3 +199,4 @@ Use these endpoints after the API is up:
 - `docs/UI_DEVELOPER_API_QUICKSTART.md` for frontend integration details
 - `cognition.md` for the metacognition rollout and architecture
 - `phase3.md` for runtime refactor status
+- `phase4.md` for Chainlit UI redesign plan and completion status
